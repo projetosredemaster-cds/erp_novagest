@@ -1,0 +1,30 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+/*
+  Variáveis de cor do tema do Ranking (e do app em geral).
+  Usadas via valores arbitrários do Tailwind, ex: bg-[var(--panel)]
+  Isso mantém a paleta centralizada num único lugar, mesmo usando Tailwind puro.
+*/
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-alt: #1e222b;
+  --border: #2a2f3a;
+  --gold: #e3b341;
+  --silver: #b8c0cc;
+  --rest: #5c8a7a;
+  --text: #eef1f5;
+  --muted: #8891a0;
+  --teal: #4fd1c5;
+  --danger: #e0645a;
+  --danger-bg: rgba(224, 101, 90, 0.12);
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: 'Barlow Condensed', sans-serif;
+}
