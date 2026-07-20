@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import {
   fetchRedes, fetchCategorias, fetchEntradas, salvarEntrada,
   criarRede, atualizarRede, removerRede, criarLoja, removerLoja,
+  enviarRelatorioPorEmail,
 } from './rankingApi';
 import { useAuth } from '../../app/AuthContext.jsx';
 
@@ -45,6 +46,7 @@ export default function RankingPage() {
   const [currentView, setCurrentView] = useState('report');
   const [reportText, setReportText] = useState('');
   const [copyShown, setCopyShown] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [flashMsg, setFlashMsg] = useState(null);
   const flashTimer = useRef(null);
   const copyTimer = useRef(null);
@@ -185,6 +187,16 @@ export default function RankingPage() {
   }
 
   function handleGenReport() { setReportText(buildFullReport()); }
+
+  function handleSendEmail() {
+    const texto = reportText || buildFullReport();
+    if (!reportText) setReportText(texto);
+    setSendingEmail(true);
+    enviarRelatorioPorEmail({ texto, assunto: `Relatório ${formatDatePt(currentDate)}` })
+      .then(() => flash('Relatório enviado por e-mail'))
+      .catch(err => flash(err.message || 'Erro ao enviar relatório por e-mail', 'error'))
+      .finally(() => setSendingEmail(false));
+  }
 
   // gera uma aba por categoria (config.categorias), com todas as redes empilhadas
   // na mesma tabela (Rede | Posição | Loja | Valor) e uma linha de total por rede —
@@ -329,6 +341,7 @@ export default function RankingPage() {
                   currentCatId={currentCatId} setCurrentCatId={setCurrentCatId} addCategoria={addCategoria}
                   currentDate={currentDate} handleGenReport={handleGenReport} handleCopyReport={handleCopyReport}
                   reportText={reportText} copyShown={copyShown} handleExportExcel={handleExportExcel}
+                  handleSendEmail={handleSendEmail} sendingEmail={sendingEmail}
                 />
               )}
           </>
@@ -350,7 +363,7 @@ export default function RankingPage() {
   );
 }
 
-function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId, addCategoria, currentDate, handleGenReport, handleCopyReport, reportText, copyShown, handleExportExcel }) {
+function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId, addCategoria, currentDate, handleGenReport, handleCopyReport, reportText, copyShown, handleExportExcel, handleSendEmail, sendingEmail }) {
   return (
     <div>
       <div className="flex gap-1.5 mb-5 flex-wrap items-center">
@@ -425,6 +438,9 @@ function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId
           <button className={btn} onClick={handleGenReport}>Gerar relatório do dia</button>
           <button className={btnGhost} onClick={handleExportExcel}>Baixar Excel</button>
           <button className={btnGhost} onClick={handleCopyReport}>Copiar</button>
+          <button className={btnGhost} onClick={handleSendEmail} disabled={sendingEmail}>
+            {sendingEmail ? 'Enviando...' : 'Enviar por e-mail'}
+          </button>
           <span className={`text-[13px] text-[var(--teal)] transition-opacity duration-200 ${copyShown ? 'opacity-100' : 'opacity-0'}`}>Copiado ✓</span>
         </div>
         <textarea

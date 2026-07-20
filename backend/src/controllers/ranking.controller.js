@@ -341,6 +341,39 @@ async function excluirLoja(req, res) {
   }
 }
 
+/**
+ * POST /api/ranking/relatorio/email
+ * Body: { texto: string, assunto?: string }
+ * Envia o texto do relatório (já montado no frontend) por e-mail via Brevo.
+ */
+async function enviarRelatorioEmail(req, res) {
+  const body = req.body || {};
+  const { texto, assunto } = body;
+
+  if (!isNonEmptyString(texto)) {
+    return res.status(400).json({
+      error: 'Campo "texto" é obrigatório e não pode ser vazio.',
+    });
+  }
+
+  try {
+    await rankingService.enviarRelatorioEmail({
+      texto,
+      assunto: isNonEmptyString(assunto) ? assunto : 'Relatório de vendas',
+    });
+    return res.status(200).json({ enviado: true });
+  } catch (err) {
+    if (err.brevoError) {
+      console.error('[ranking.controller] Erro retornado pelo Brevo ao enviar relatório:', err.brevoStatus, err.brevoBody);
+      return res.status(502).json({
+        error: 'Erro ao enviar e-mail via Brevo: ' + (err.message || 'erro desconhecido.'),
+      });
+    }
+    console.error('[ranking.controller] Erro ao enviar relatório por e-mail:', err);
+    return res.status(500).json({ error: 'Erro interno ao enviar relatório por e-mail.' });
+  }
+}
+
 module.exports = {
   listarEntradas,
   criarOuAtualizarEntrada,
@@ -352,4 +385,5 @@ module.exports = {
   criarLoja,
   atualizarLoja,
   excluirLoja,
+  enviarRelatorioEmail,
 };

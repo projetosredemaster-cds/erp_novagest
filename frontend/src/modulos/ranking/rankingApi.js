@@ -66,3 +66,10 @@ export function atualizarLoja(id, { nome, emoji, ativo }) {
 export function removerLoja(id) {
   return request(`/api/ranking/lojas/${id}`, { method: 'DELETE' });
 }
+
+export function enviarRelatorioPorEmail({ texto, assunto }) {
+  return request('/api/ranking/relatorio/email', {
+    method: 'POST',
+    body: JSON.stringify({ texto, assunto }),
+  });
+}

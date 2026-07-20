@@ -1,4 +1,5 @@
 const rankingModel = require('../models/ranking.model');
+const brevoEmailService = require('./brevoEmail.service');
 
 /**
  * Camada de regra de negócio do módulo Ranking.
@@ -127,6 +128,15 @@ async function excluirLoja(id) {
   return rankingModel.deleteLojaIfNoEntradas(id);
 }
 
+/**
+ * Envia o texto do relatório diário (já montado pelo frontend) por e-mail,
+ * via Brevo. Repassa o erro tal como veio de brevoEmail.service (incluindo o
+ * flag `brevoError`, usado pelo controller para diferenciar 502 de 500).
+ */
+async function enviarRelatorioEmail({ assunto, texto }) {
+  return brevoEmailService.enviarRelatorioEmail({ assunto, texto });
+}
+
 module.exports = {
   getEntradas,
   salvarEntrada,
@@ -138,4 +148,5 @@ module.exports = {
   criarLoja,
   atualizarLoja,
   excluirLoja,
+  enviarRelatorioEmail,
 };

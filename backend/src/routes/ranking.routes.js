@@ -33,4 +33,7 @@ router.delete('/lojas/:id', rankingController.excluirLoja);
 // GET  /api/ranking/categorias
 router.get('/categorias', rankingController.listarCategorias);
 
+// POST /api/ranking/relatorio/email  (envia o texto do relatório do dia por e-mail via Brevo)
+router.post('/relatorio/email', rankingController.enviarRelatorioEmail);
+
 module.exports = router;
