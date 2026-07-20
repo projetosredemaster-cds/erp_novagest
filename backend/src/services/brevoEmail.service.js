@@ -7,6 +7,20 @@
 
 const BREVO_SMTP_EMAIL_URL = 'https://api.brevo.com/v3/smtp/email';
 
+// o relatório é gerado no frontend com marcação estilo WhatsApp (*negrito*, \n
+// pra quebra de linha) — aqui convertemos pro HTML mínimo que o corpo do e-mail
+// precisa, escapando antes qualquer caractere de HTML já presente no texto
+// (ex: nome de rede/loja cadastrado pelo usuário) para não quebrar o e-mail.
+function formatarTextoParaHtml(texto) {
+  const escapado = String(texto)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return escapado
+    .replace(/\*(.+?)\*/g, '<b>$1</b>')
+    .replace(/\n/g, '<br>');
+}
+
 async function enviarRelatorioEmail({ assunto, texto }) {
   const apiKey = process.env.BREVO_API_KEY;
   const remetente = process.env.EMAIL_REMETENTE;
@@ -29,11 +43,8 @@ async function enviarRelatorioEmail({ assunto, texto }) {
     sender: { email: remetente, name: remetenteNome },
     to,
     subject: assunto,
-    textContent: texto,
+    htmlContent: formatarTextoParaHtml(texto),
   };
-
-  // TODO(debug temporário — remover depois que o problema do remetente for confirmado resolvido)
-  console.log('[brevoEmail.service] DEBUG sender enviado ao Brevo:', JSON.stringify(payload.sender));
 
   const response = await fetch(BREVO_SMTP_EMAIL_URL, {
     method: 'POST',

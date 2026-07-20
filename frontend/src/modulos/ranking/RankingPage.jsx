@@ -81,13 +81,14 @@ export default function RankingPage() {
     runLoadConfig();
   }, []);
 
-  const cat = useMemo(() => config.categorias.find(c => c.id === currentCatId) || config.categorias[0], [config, currentCatId]);
-
-  useEffect(() => {
-    if (!currentCatId && config.categorias.length) {
-      setCurrentCatId(config.categorias.find(c => c.principal)?.id || config.categorias[0].id);
-    }
-  }, [config, currentCatId]);
+  // enquanto o usuário não escolheu uma aba (currentCatId ainda null, ou aponta
+  // pra uma categoria que não existe mais), cai na principal — valor totalmente
+  // derivado, sem precisar de um efeito só para inicializar/corrigir currentCatId.
+  const cat = useMemo(() => (
+    config.categorias.find(c => c.id === currentCatId)
+    || config.categorias.find(c => c.principal)
+    || config.categorias[0]
+  ), [config, currentCatId]);
 
   // a tela de configuração é restrita a admins; a única forma de currentView
   // virar 'config' é o clique no botão abaixo, que só é renderizado quando
