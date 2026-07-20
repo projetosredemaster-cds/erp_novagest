@@ -1,5 +1,6 @@
 // style-system: Tailwind
 import { useEffect, useMemo, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
 import {
   fetchRedes, fetchCategorias, fetchEntradas, salvarEntrada,
   criarRede, atualizarRede, removerRede, criarLoja, removerLoja,
@@ -19,6 +20,11 @@ function formatDatePt(iso) {
   return d + '/' + m;
 }
 function dataKey(date, catId) { return date + '|' + catId; }
+// nomes de aba do Excel: máx. 31 caracteres, sem / \ ? * [ ] :
+function sanitizeSheetName(nome) {
+  const cleaned = String(nome).replace(/[/\\?*[\]:]/g, '').trim();
+  return (cleaned || 'Categoria').slice(0, 31);
+}
 function rankLoja(values, lojas) {
   const withVal = lojas.map(l => ({ ...l, valor: Number(values[l.id]) || 0 }));
   withVal.sort((a, b) => b.valor - a.valor);
@@ -180,6 +186,43 @@ export default function RankingPage() {
 
   function handleGenReport() { setReportText(buildFullReport()); }
 
+  // gera uma aba por categoria (config.categorias), com todas as redes empilhadas
+  // na mesma tabela (Rede | Posição | Loja | Valor) e uma linha de total por rede —
+  // mesmo total já exibido no total-pill do card daquela rede na tela.
+  function buildWorkbook() {
+    const wb = XLSX.utils.book_new();
+    const usedNames = new Set();
+    config.categorias.forEach(c => {
+      const vals = entries[dataKey(currentDate, c.id)] || {};
+      const rows = [['Rede', 'Posição', 'Loja', 'Valor']];
+      config.redes.forEach(rede => {
+        const ranked = rankLoja(vals, rede.lojas);
+        ranked.forEach(l => rows.push([rede.nome, l.pos + 1, l.nome, l.valor]));
+        const total = ranked.reduce((s, l) => s + l.valor, 0);
+        rows.push([rede.nome, '', `Total ${rede.nome}`, total]);
+      });
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      // coluna D (Valor) como número em formato de moeda BRL, pulando o cabeçalho
+      for (let r = 1; r < rows.length; r++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c: 3 })];
+        if (cell) cell.z = '"R$" #,##0.00';
+      }
+      let sheetName = sanitizeSheetName(c.nome);
+      if (usedNames.has(sheetName)) {
+        let i = 2;
+        while (usedNames.has(`${sheetName.slice(0, 28)} ${i}`)) i++;
+        sheetName = `${sheetName.slice(0, 28)} ${i}`;
+      }
+      usedNames.add(sheetName);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    });
+    return wb;
+  }
+
+  function handleExportExcel() {
+    XLSX.writeFile(buildWorkbook(), `ranking-${currentDate}.xlsx`);
+  }
+
   function handleCopyReport(e) {
     const ta = e.target.closest('div').parentElement.querySelector('#reportOut');
     ta.select();
@@ -285,7 +328,7 @@ export default function RankingPage() {
                   config={config} cat={cat} values={values} setValue={setValue} onBlurSave={onBlurSave}
                   currentCatId={currentCatId} setCurrentCatId={setCurrentCatId} addCategoria={addCategoria}
                   currentDate={currentDate} handleGenReport={handleGenReport} handleCopyReport={handleCopyReport}
-                  reportText={reportText} copyShown={copyShown}
+                  reportText={reportText} copyShown={copyShown} handleExportExcel={handleExportExcel}
                 />
               )}
           </>
@@ -307,7 +350,7 @@ export default function RankingPage() {
   );
 }
 
-function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId, addCategoria, currentDate, handleGenReport, handleCopyReport, reportText, copyShown }) {
+function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId, addCategoria, currentDate, handleGenReport, handleCopyReport, reportText, copyShown, handleExportExcel }) {
   return (
     <div>
       <div className="flex gap-1.5 mb-5 flex-wrap items-center">
@@ -380,6 +423,7 @@ function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId
         </div>
         <div className="flex gap-2.5 my-3.5 items-center">
           <button className={btn} onClick={handleGenReport}>Gerar relatório do dia</button>
+          <button className={btnGhost} onClick={handleExportExcel}>Baixar Excel</button>
           <button className={btnGhost} onClick={handleCopyReport}>Copiar</button>
           <span className={`text-[13px] text-[var(--teal)] transition-opacity duration-200 ${copyShown ? 'opacity-100' : 'opacity-0'}`}>Copiado ✓</span>
         </div>
