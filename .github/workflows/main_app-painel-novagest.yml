@@ -49,12 +49,12 @@ jobs:
         with:
           name: node-app
       
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E48A3DDD7E1D4B0A85727DFEB2D447CC }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_80FEECF80B0B4E5B9FC98E801C13F66A }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_116F2F8726D748DA95EF119234DC228C }}
+      # - name: Login to Azure
+      #   uses: azure/login@v2
+      #   with:
+      #     client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E48A3DDD7E1D4B0A85727DFEB2D447CC }}
+      #     tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_80FEECF80B0B4E5B9FC98E801C13F66A }}
+      #     subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_116F2F8726D748DA95EF119234DC228C }}
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
@@ -62,5 +62,6 @@ jobs:
         with:
           app-name: 'app-painel-novagest'
           slot-name: 'Production'
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
           package: .
           
