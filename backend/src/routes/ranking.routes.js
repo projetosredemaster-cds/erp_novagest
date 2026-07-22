@@ -1,5 +1,6 @@
 const express = require('express');
 const rankingController = require('../controllers/ranking.controller');
+const adminMiddleware = require('../middlewares/adminMiddleware');
 
 const router = express.Router();
 
@@ -35,5 +36,14 @@ router.get('/categorias', rankingController.listarCategorias);
 
 // POST /api/ranking/relatorio/email  (envia o texto do relatório do dia por e-mail via Brevo)
 router.post('/relatorio/email', rankingController.enviarRelatorioEmail);
+
+// GET  /api/ranking/responsaveis  (qualquer usuário autenticado)
+router.get('/responsaveis', rankingController.listarResponsaveis);
+
+// POST /api/ranking/responsaveis  (restrito a admin)
+router.post('/responsaveis', adminMiddleware, rankingController.criarResponsavel);
+
+// DELETE /api/ranking/responsaveis/:id  (restrito a admin; bloqueia com 409 se houver redes vinculadas)
+router.delete('/responsaveis/:id', adminMiddleware, rankingController.excluirResponsavel);
 
 module.exports = router;

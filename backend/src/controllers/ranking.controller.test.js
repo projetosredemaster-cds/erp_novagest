@@ -75,7 +75,7 @@ describe('GET /api/ranking/redes', () => {
 
   it('200 — retorna as redes com o campo "visivel" no shape, autenticado', async () => {
     rankingModel.listRedesComLojas.mockResolvedValue([
-      { id: 1, nome: 'Rede A', responsavel: 'Fulano', visivel: true, criado_em: '2024-01-01T00:00:00.000Z', lojas: [] },
+      { id: 1, nome: 'Rede A', responsavel: { id: 3, nome: 'Fulano' }, visivel: true, criado_em: '2024-01-01T00:00:00.000Z', lojas: [] },
       { id: 2, nome: 'Rede B', responsavel: null, visivel: false, criado_em: '2024-01-02T00:00:00.000Z', lojas: [] },
     ]);
 
@@ -86,7 +86,9 @@ describe('GET /api/ranking/redes', () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(2);
     expect(res.body[0]).toHaveProperty('visivel', true);
+    expect(res.body[0].responsavel).toEqual({ id: 3, nome: 'Fulano' });
     expect(res.body[1]).toHaveProperty('visivel', false);
+    expect(res.body[1].responsavel).toBeNull();
   });
 
   it('500 quando o model lança erro (ex: coluna/dependência de banco indisponível)', async () => {
@@ -103,10 +105,10 @@ describe('GET /api/ranking/redes', () => {
 
 describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
   it('aceita visivel:false e repassa ao model junto com o restante do fluxo', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: 'R', visivel: true });
+    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: null, visivel: true });
     rankingModel.updateRede.mockResolvedValue(undefined);
     rankingModel.getRedeComLojasById.mockResolvedValue({
-      id: 5, nome: 'Rede X', responsavel: 'R', visivel: false, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
+      id: 5, nome: 'Rede X', responsavel: null, visivel: false, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
     });
 
     const res = await request(app)
@@ -116,16 +118,16 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.visivel).toBe(false);
-    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: undefined, responsavel: undefined, visivel: false });
+    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: undefined, responsavelId: undefined, visivel: false });
     // nome não foi enviado, então a checagem de duplicidade não deve rodar
     expect(rankingModel.existeRedeComNome).not.toHaveBeenCalled();
   });
 
   it('aceita visivel:true e repassa ao model', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: 'R', visivel: false });
+    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: null, visivel: false });
     rankingModel.updateRede.mockResolvedValue(undefined);
     rankingModel.getRedeComLojasById.mockResolvedValue({
-      id: 5, nome: 'Rede X', responsavel: 'R', visivel: true, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
+      id: 5, nome: 'Rede X', responsavel: null, visivel: true, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
     });
 
     const res = await request(app)
@@ -135,7 +137,7 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.visivel).toBe(true);
-    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: undefined, responsavel: undefined, visivel: true });
+    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: undefined, responsavelId: undefined, visivel: true });
   });
 
   it.each([
@@ -155,7 +157,7 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
     });
   });
 
-  it('400 — corpo vazio (nenhum de nome/responsavel/visivel), mensagem atualizada', async () => {
+  it('400 — corpo vazio (nenhum de nome/responsavelId/visivel), mensagem atualizada', async () => {
     const res = await request(app)
       .put('/api/ranking/redes/5')
       .set('Authorization', `Bearer ${tokenFor()}`)
@@ -163,7 +165,7 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
 
     expect(res.status).toBe(400);
     expect(res.body).toEqual({
-      error: 'Informe ao menos um campo ("nome", "responsavel" ou "visivel") para atualizar.',
+      error: 'Informe ao menos um campo ("nome", "responsavelId" ou "visivel") para atualizar.',
     });
   });
 
@@ -195,10 +197,10 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
   // rede. Este teste documenta o comportamento ATUAL (não o desejado) —
   // ver veredito final.
   it('[ACHADO DE QA] usuário autenticado NÃO-admin também consegue alterar "visivel" (sem 403)', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: 'R', visivel: true });
+    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: null, visivel: true });
     rankingModel.updateRede.mockResolvedValue(undefined);
     rankingModel.getRedeComLojasById.mockResolvedValue({
-      id: 5, nome: 'Rede X', responsavel: 'R', visivel: false, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
+      id: 5, nome: 'Rede X', responsavel: null, visivel: false, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
     });
 
     const res = await request(app)
@@ -211,13 +213,13 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
     expect(res.status).toBe(200);
   });
 
-  // --- regressão: nome/responsavel continuam funcionando como antes ---
+  // --- regressão: nome continua funcionando como antes ---
   it('regressão: continua aceitando atualizar somente "nome"', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Antigo', responsavel: 'R', visivel: true });
+    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Antigo', responsavel: null, visivel: true });
     rankingModel.existeRedeComNome.mockResolvedValue(false);
     rankingModel.updateRede.mockResolvedValue(undefined);
     rankingModel.getRedeComLojasById.mockResolvedValue({
-      id: 5, nome: 'Novo Nome', responsavel: 'R', visivel: true, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
+      id: 5, nome: 'Novo Nome', responsavel: null, visivel: true, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
     });
 
     const res = await request(app)
@@ -228,11 +230,11 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
     expect(res.status).toBe(200);
     expect(res.body.nome).toBe('Novo Nome');
     expect(rankingModel.existeRedeComNome).toHaveBeenCalledWith('Novo Nome', 5);
-    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: 'Novo Nome', responsavel: undefined, visivel: undefined });
+    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: 'Novo Nome', responsavelId: undefined, visivel: undefined });
   });
 
   it('regressão: 409 quando o novo nome já existe em outra rede', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Antigo', responsavel: 'R', visivel: true });
+    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Antigo', responsavel: null, visivel: true });
     rankingModel.existeRedeComNome.mockResolvedValue(true);
 
     const res = await request(app)
@@ -252,5 +254,225 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
 
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: 'Campo "nome", quando enviado, não pode ser vazio.' });
+  });
+});
+
+describe('PUT /api/ranking/redes/:id — campo "responsavelId"', () => {
+  it('aceita responsavelId numérico e repassa ao model, retornando responsavel como objeto', async () => {
+    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: null, visivel: true });
+    rankingModel.existeResponsavel.mockResolvedValue(true);
+    rankingModel.updateRede.mockResolvedValue(undefined);
+    rankingModel.getRedeComLojasById.mockResolvedValue({
+      id: 5, nome: 'Rede X', responsavel: { id: 4, nome: 'Ciclana da Silva' }, visivel: true,
+      criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
+    });
+
+    const res = await request(app)
+      .put('/api/ranking/redes/5')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ responsavelId: 4 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.responsavel).toEqual({ id: 4, nome: 'Ciclana da Silva' });
+    expect(rankingModel.existeResponsavel).toHaveBeenCalledWith(4);
+    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: undefined, responsavelId: 4, visivel: undefined });
+  });
+
+  it('aceita responsavelId: null para remover a atribuição (não checa existência)', async () => {
+    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: { id: 4, nome: 'Ciclana' }, visivel: true });
+    rankingModel.updateRede.mockResolvedValue(undefined);
+    rankingModel.getRedeComLojasById.mockResolvedValue({
+      id: 5, nome: 'Rede X', responsavel: null, visivel: true, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
+    });
+
+    const res = await request(app)
+      .put('/api/ranking/redes/5')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ responsavelId: null });
+
+    expect(res.status).toBe(200);
+    expect(res.body.responsavel).toBeNull();
+    expect(rankingModel.existeResponsavel).not.toHaveBeenCalled();
+    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: undefined, responsavelId: null, visivel: undefined });
+  });
+
+  it.each([
+    ['string não numérica', 'abc'],
+    ['zero', 0],
+    ['negativo', -1],
+    ['decimal', 1.5],
+  ])('400 quando responsavelId é %s (não é inteiro positivo nem null)', async (_label, valorInvalido) => {
+    const res = await request(app)
+      .put('/api/ranking/redes/5')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ responsavelId: valorInvalido });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "responsavelId", quando enviado, deve ser um número inteiro positivo ou null.',
+    });
+  });
+
+  it('400 quando responsavelId é inteiro positivo mas não existe em Responsaveis', async () => {
+    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: null, visivel: true });
+    rankingModel.existeResponsavel.mockResolvedValue(false);
+
+    const res = await request(app)
+      .put('/api/ranking/redes/5')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ responsavelId: 999 });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Responsável informado não existe.' });
+    expect(rankingModel.updateRede).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/ranking/responsaveis', () => {
+  it('retorna 401 sem header Authorization', async () => {
+    const res = await request(app).get('/api/ranking/responsaveis');
+    expect(res.status).toBe(401);
+  });
+
+  it('200 — lista responsáveis para qualquer usuário autenticado (não exige admin)', async () => {
+    rankingModel.listResponsaveis.mockResolvedValue([
+      { id: 3, nome: 'Fulano de Tal', criado_em: '2026-07-20T12:00:00.000Z' },
+      { id: 4, nome: 'Ciclana da Silva', criado_em: '2026-07-20T12:00:00.000Z' },
+    ]);
+
+    const res = await request(app)
+      .get('/api/ranking/responsaveis')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: false })}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+    expect(res.body[0]).toEqual({ id: 3, nome: 'Fulano de Tal', criado_em: '2026-07-20T12:00:00.000Z' });
+  });
+
+  it('500 quando o model lança erro', async () => {
+    rankingModel.listResponsaveis.mockRejectedValue(new Error('falha simulada'));
+
+    const res = await request(app)
+      .get('/api/ranking/responsaveis')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao listar responsáveis.' });
+  });
+});
+
+describe('POST /api/ranking/responsaveis', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).post('/api/ranking/responsaveis').send({ nome: 'Beltrano' });
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário autenticado não é admin', async () => {
+    const res = await request(app)
+      .post('/api/ranking/responsaveis')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: false })}`)
+      .send({ nome: 'Beltrano' });
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'Acesso restrito a administradores.' });
+    expect(rankingModel.insertResponsavel).not.toHaveBeenCalled();
+  });
+
+  it('400 quando nome está ausente/vazio', async () => {
+    const res = await request(app)
+      .post('/api/ranking/responsaveis')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`)
+      .send({ nome: '   ' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Campo "nome" é obrigatório e não pode ser vazio.' });
+  });
+
+  it('409 quando já existe um responsável com esse nome', async () => {
+    rankingModel.existeResponsavelComNome.mockResolvedValue(true);
+
+    const res = await request(app)
+      .post('/api/ranking/responsaveis')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`)
+      .send({ nome: 'Beltrano' });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'Já existe um responsável com esse nome.' });
+  });
+
+  it('201 — cria responsável quando o usuário é admin e o nome é válido', async () => {
+    rankingModel.existeResponsavelComNome.mockResolvedValue(false);
+    rankingModel.insertResponsavel.mockResolvedValue({
+      id: 5, nome: 'Beltrano', criado_em: '2026-07-22T10:00:00.000Z',
+    });
+
+    const res = await request(app)
+      .post('/api/ranking/responsaveis')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`)
+      .send({ nome: 'Beltrano' });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ id: 5, nome: 'Beltrano', criado_em: '2026-07-22T10:00:00.000Z' });
+  });
+});
+
+describe('DELETE /api/ranking/responsaveis/:id', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).delete('/api/ranking/responsaveis/5');
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário autenticado não é admin', async () => {
+    const res = await request(app)
+      .delete('/api/ranking/responsaveis/5')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: false })}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'Acesso restrito a administradores.' });
+    expect(rankingModel.deleteResponsavelIfNoRedes).not.toHaveBeenCalled();
+  });
+
+  it('400 quando :id não é inteiro positivo', async () => {
+    const res = await request(app)
+      .delete('/api/ranking/responsaveis/abc')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Parâmetro "id" deve ser um número inteiro positivo.' });
+  });
+
+  it('404 quando o responsável não existe', async () => {
+    rankingModel.deleteResponsavelIfNoRedes.mockResolvedValue('not_found');
+
+    const res = await request(app)
+      .delete('/api/ranking/responsaveis/999')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Responsável não encontrado.' });
+  });
+
+  it('409 quando há redes vinculadas ao responsável', async () => {
+    rankingModel.deleteResponsavelIfNoRedes.mockResolvedValue('has_redes');
+
+    const res = await request(app)
+      .delete('/api/ranking/responsaveis/5')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: 'Não é possível excluir este responsável pois há redes vinculadas a ele. Remova a atribuição primeiro.',
+    });
+  });
+
+  it('204 — exclui com sucesso quando o usuário é admin e não há redes vinculadas', async () => {
+    rankingModel.deleteResponsavelIfNoRedes.mockResolvedValue('deleted');
+
+    const res = await request(app)
+      .delete('/api/ranking/responsaveis/5')
+      .set('Authorization', `Bearer ${tokenFor({ isAdmin: true })}`);
+
+    expect(res.status).toBe(204);
+    expect(res.body).toEqual({});
   });
 });

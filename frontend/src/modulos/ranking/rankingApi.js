@@ -31,17 +31,17 @@ export function salvarEntrada({ data, categoriaId, lojaId, valor }) {
   });
 }
 
-export function criarRede({ nome, responsavel }) {
+export function criarRede({ nome }) {
   return request('/api/ranking/redes', {
     method: 'POST',
-    body: JSON.stringify({ nome, responsavel }),
+    body: JSON.stringify({ nome }),
   });
 }
 
-export function atualizarRede(id, { nome, responsavel, visivel }) {
+export function atualizarRede(id, { nome, responsavelId, visivel }) {
   return request(`/api/ranking/redes/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ nome, responsavel, visivel }),
+    body: JSON.stringify({ nome, responsavelId, visivel }),
   });
 }
 
@@ -72,4 +72,19 @@ export function enviarRelatorioPorEmail({ texto, assunto }) {
     method: 'POST',
     body: JSON.stringify({ texto, assunto }),
   });
+}
+
+export function fetchResponsaveis() {
+  return request('/api/ranking/responsaveis');
+}
+
+export function criarResponsavel({ nome }) {
+  return request('/api/ranking/responsaveis', {
+    method: 'POST',
+    body: JSON.stringify({ nome }),
+  });
+}
+
+export function removerResponsavel(id) {
+  return request(`/api/ranking/responsaveis/${id}`, { method: 'DELETE' });
 }

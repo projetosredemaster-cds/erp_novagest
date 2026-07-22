@@ -7,11 +7,13 @@ const { sql, getPool } = require('../config/db');
  * As tabelas Redes/Lojas/Categorias/Entradas já existem no banco, mas os
  * nomes exatos de colunas não foram informados. Os nomes abaixo são um
  * PALPITE razoável e PRECISAM ser conferidos/ajustados contra o schema real:
- *   - Redes      (id, nome, responsavel, criado_em)
+ *   - Redes      (id, nome, responsavel [coluna antiga, não lida por código
+ *                 novo], responsavel_id -> FK Responsaveis, visivel, criado_em)
  *   - Lojas      (id, rede_id -> FK Redes, nome, emoji, ativo, criado_em)
  *   - Categorias (id, nome, principal, criado_em)
  *   - Entradas   (id, data_ref, categoria_id -> FK Categorias, loja_id -> FK Lojas,
  *                 valor, atualizado_em; UNIQUE em data_ref+categoria_id+loja_id)
+ *   - Responsaveis (id, nome, criado_em) — ver migrations/003_add_responsaveis.sql
  * Se os nomes reais de alguma coluna forem diferentes, ajuste as queries
  * deste arquivo — o restante da aplicação (service/controller) não precisa
  * saber de detalhes de schema.
@@ -92,13 +94,44 @@ async function upsertEntrada({ data, categoriaId, lojaId, valor }) {
   }
 }
 
+/**
+ * Consulta base de Redes com LEFT JOIN em Responsaveis (via responsavel_id),
+ * usada por `listRedesComLojas`, `getRedeComLojasById` e `findRedeById`. Não
+ * lê mais a coluna antiga `Redes.responsavel` (texto livre) — só
+ * `responsavel_id`, mapeado para o objeto `{ id, nome }`/`null` por
+ * `mapRedeRow`.
+ */
+const SELECT_REDE_COM_RESPONSAVEL = `
+  SELECT
+    r.id,
+    r.nome,
+    r.responsavel_id,
+    resp.nome AS responsavel_nome,
+    r.visivel,
+    r.criado_em
+  FROM Redes r
+  LEFT JOIN Responsaveis resp ON resp.id = r.responsavel_id
+`;
+
+/**
+ * Converte uma linha crua do SELECT acima (com `responsavel_id` +
+ * `responsavel_nome` separados) no shape de resposta da API, com
+ * `responsavel` como objeto `{ id, nome }` ou `null`.
+ */
+function mapRedeRow(row) {
+  const { responsavel_id: responsavelId, responsavel_nome: responsavelNome, ...resto } = row;
+  return {
+    ...resto,
+    responsavel: responsavelId != null ? { id: responsavelId, nome: responsavelNome } : null,
+  };
+}
+
 async function listRedesComLojas() {
   const pool = await getPool();
 
   const redesResult = await pool.request().query(`
-    SELECT id, nome, responsavel, visivel, criado_em
-    FROM Redes
-    ORDER BY nome
+    ${SELECT_REDE_COM_RESPONSAVEL}
+    ORDER BY r.nome
   `);
 
   const lojasResult = await pool.request().query(`
@@ -116,7 +149,7 @@ async function listRedesComLojas() {
   }
 
   return redesResult.recordset.map((rede) => ({
-    ...rede,
+    ...mapRedeRow(rede),
     lojas: lojasPorRede.get(rede.id) || [],
   }));
 }
@@ -142,9 +175,8 @@ async function getRedeComLojasById(id) {
     .request()
     .input('id', sql.Int, id)
     .query(`
-      SELECT id, nome, responsavel, visivel, criado_em
-      FROM Redes
-      WHERE id = @id
+      ${SELECT_REDE_COM_RESPONSAVEL}
+      WHERE r.id = @id
     `);
 
   const rede = redeResult.recordset[0];
@@ -162,7 +194,7 @@ async function getRedeComLojasById(id) {
       ORDER BY nome
     `);
 
-  return { ...rede, lojas: lojasResult.recordset };
+  return { ...mapRedeRow(rede), lojas: lojasResult.recordset };
 }
 
 /**
@@ -188,20 +220,21 @@ async function existeRedeComNome(nome, excludeId = null) {
 
 /**
  * Insere uma nova rede e retorna o registro criado (sem `lojas`, quem
- * monta o shape completo é o service).
+ * monta o shape completo é o service). Toda rede nova é criada com
+ * `responsavel_id = NULL` — este endpoint não aceita mais atribuir um
+ * responsável na criação (ver `PUT /redes/:id`, seção 6 do contrato).
  */
-async function insertRede({ nome, responsavel }) {
+async function insertRede({ nome }) {
   const pool = await getPool();
   const result = await pool
     .request()
     .input('nome', sql.NVarChar, nome)
-    .input('responsavel', sql.NVarChar, responsavel ?? null)
     .query(`
-      INSERT INTO Redes (nome, responsavel, criado_em)
-      OUTPUT inserted.id, inserted.nome, inserted.responsavel, inserted.visivel, inserted.criado_em
-      VALUES (@nome, @responsavel, SYSUTCDATETIME())
+      INSERT INTO Redes (nome, responsavel_id, criado_em)
+      OUTPUT inserted.id, inserted.nome, inserted.visivel, inserted.criado_em
+      VALUES (@nome, NULL, SYSUTCDATETIME())
     `);
-  return result.recordset[0];
+  return { ...result.recordset[0], responsavel: null };
 }
 
 /**
@@ -212,29 +245,48 @@ async function findRedeById(id) {
   const result = await pool
     .request()
     .input('id', sql.Int, id)
-    .query('SELECT id, nome, responsavel, visivel, criado_em FROM Redes WHERE id = @id');
-  return result.recordset[0];
+    .query(`
+      ${SELECT_REDE_COM_RESPONSAVEL}
+      WHERE r.id = @id
+    `);
+  const rede = result.recordset[0];
+  return rede ? mapRedeRow(rede) : undefined;
+}
+
+/**
+ * Verifica se existe um responsável com o `id` informado.
+ */
+async function existeResponsavel(id) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.Int, id)
+    .query('SELECT 1 AS ok FROM Responsaveis WHERE id = @id');
+  return result.recordset.length > 0;
 }
 
 /**
  * Atualização parcial de uma rede: campos ausentes (undefined) permanecem
- * com o valor atual no banco via COALESCE.
+ * com o valor atual no banco via COALESCE. `responsavelId` é a exceção
+ * "parcial com null explícito": quando presente (mesmo `null`), sobrescreve
+ * `responsavel_id` (permitindo desatribuir o responsável); só a AUSÊNCIA do
+ * campo no corpo preserva o valor atual.
  */
-async function updateRede(id, { nome, responsavel, visivel }) {
+async function updateRede(id, { nome, responsavelId, visivel }) {
   const pool = await getPool();
   await pool
     .request()
     .input('id', sql.Int, id)
     .input('nome', sql.NVarChar, nome ?? null)
-    .input('responsavel', sql.NVarChar, responsavel !== undefined ? responsavel : null)
-    .input('responsavelInformado', sql.Bit, responsavel !== undefined ? 1 : 0)
+    .input('responsavelId', sql.Int, responsavelId !== undefined ? responsavelId : null)
+    .input('responsavelIdInformado', sql.Bit, responsavelId !== undefined ? 1 : 0)
     .input('visivel', sql.Bit, visivel !== undefined ? visivel : null)
     .input('visivelInformado', sql.Bit, visivel !== undefined ? 1 : 0)
     .query(`
       UPDATE Redes
       SET
         nome = COALESCE(@nome, nome),
-        responsavel = CASE WHEN @responsavelInformado = 1 THEN @responsavel ELSE responsavel END,
+        responsavel_id = CASE WHEN @responsavelIdInformado = 1 THEN @responsavelId ELSE responsavel_id END,
         visivel = CASE WHEN @visivelInformado = 1 THEN @visivel ELSE visivel END
       WHERE id = @id
     `);
@@ -413,6 +465,100 @@ async function deleteLojaIfNoEntradas(id) {
   }
 }
 
+/**
+ * Lista todos os responsáveis cadastrados.
+ */
+async function listResponsaveis() {
+  const pool = await getPool();
+  const result = await pool.request().query(`
+    SELECT id, nome, criado_em
+    FROM Responsaveis
+    ORDER BY nome
+  `);
+  return result.recordset;
+}
+
+/**
+ * Verifica se já existe um responsável com o mesmo `nome` (case-insensitive,
+ * ignorando espaços extras no início/fim). Mesmo padrão de
+ * `existeRedeComNome`/`existeLojaComNomeNaRede`.
+ */
+async function existeResponsavelComNome(nome) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('nome', sql.NVarChar, nome)
+    .query(`
+      SELECT COUNT(*) AS total
+      FROM Responsaveis
+      WHERE LOWER(LTRIM(RTRIM(nome))) = LOWER(LTRIM(RTRIM(@nome)))
+    `);
+  return result.recordset[0].total > 0;
+}
+
+/**
+ * Insere um novo responsável e retorna o registro criado.
+ */
+async function insertResponsavel({ nome }) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('nome', sql.NVarChar, nome)
+    .query(`
+      INSERT INTO Responsaveis (nome, criado_em)
+      OUTPUT inserted.id, inserted.nome, inserted.criado_em
+      VALUES (@nome, SYSUTCDATETIME())
+    `);
+  return result.recordset[0];
+}
+
+/**
+ * Verifica existência + bloqueio de vínculo (redes) e exclui o responsável,
+ * tudo dentro de uma transação, para evitar condição de corrida entre o
+ * SELECT de checagem e o DELETE. Mesmo padrão de
+ * `deleteRedeIfNoLojas`/`deleteLojaIfNoEntradas`.
+ * Retorna 'not_found' | 'has_redes' | 'deleted'.
+ */
+async function deleteResponsavelIfNoRedes(id) {
+  const pool = await getPool();
+  const transaction = new sql.Transaction(pool);
+
+  await transaction.begin();
+  try {
+    const responsavelRequest = new sql.Request(transaction);
+    responsavelRequest.input('id', sql.Int, id);
+    const responsavelResult = await responsavelRequest.query(
+      'SELECT id FROM Responsaveis WHERE id = @id'
+    );
+
+    if (!responsavelResult.recordset[0]) {
+      await transaction.rollback();
+      return 'not_found';
+    }
+
+    const countRequest = new sql.Request(transaction);
+    countRequest.input('responsavelId', sql.Int, id);
+    const countResult = await countRequest.query(
+      'SELECT COUNT(*) AS total FROM Redes WHERE responsavel_id = @responsavelId'
+    );
+
+    if (countResult.recordset[0].total > 0) {
+      await transaction.rollback();
+      return 'has_redes';
+    }
+
+    const deleteRequest = new sql.Request(transaction);
+    deleteRequest.input('id', sql.Int, id);
+    await deleteRequest.query('DELETE FROM Responsaveis WHERE id = @id');
+
+    await transaction.commit();
+    return 'deleted';
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
+}
+
 module.exports = {
   listEntradas,
   upsertEntrada,
@@ -429,4 +575,9 @@ module.exports = {
   updateLoja,
   existeLojaComNomeNaRede,
   deleteLojaIfNoEntradas,
+  existeResponsavel,
+  listResponsaveis,
+  existeResponsavelComNome,
+  insertResponsavel,
+  deleteResponsavelIfNoRedes,
 };

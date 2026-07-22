@@ -3,8 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   fetchRedes, fetchCategorias, fetchEntradas, salvarEntrada,
-  criarRede, atualizarRede, removerRede, criarLoja, removerLoja,
+  criarRede, atualizarRede, removerRede, criarLoja, removerLoja, atualizarLoja,
   enviarRelatorioPorEmail,
+  fetchResponsaveis, criarResponsavel, removerResponsavel,
 } from './rankingApi';
 import { useAuth } from '../../app/AuthContext.jsx';
 
@@ -21,6 +22,22 @@ function formatDatePt(iso) {
   return d + '/' + m;
 }
 function dataKey(date, catId) { return date + '|' + catId; }
+// ordem fixa de exibição no relatório gerado (buildFullReport) — não afeta a ordem
+// das abas na tela nem config.categorias em si. Comparação é insensível a acento/caixa
+// para tolerar pequenas divergências de digitação no cadastro da categoria.
+const ORDEM_RELATORIO = ['Receita Bruta', 'Correção', 'Acessórios'];
+function normalizeNomeCategoria(nome) {
+  return String(nome || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim()
+    .toLowerCase();
+}
+const ORDEM_RELATORIO_NORMALIZADA = ORDEM_RELATORIO.map(normalizeNomeCategoria);
+function prioridadeCategoria(nome) {
+  const idx = ORDEM_RELATORIO_NORMALIZADA.indexOf(normalizeNomeCategoria(nome));
+  return idx === -1 ? Infinity : idx;
+}
 // nomes de aba do Excel: máx. 31 caracteres, sem / \ ? * [ ] :
 function sanitizeSheetName(nome) {
   const cleaned = String(nome).replace(/[/\\?*[\]:]/g, '').trim();
@@ -169,14 +186,24 @@ export default function RankingPage() {
   function buildFullReport() {
     const redesVisiveis = config.redes.filter(r => r.visivel !== false);
     const parts = [];
-    for (const c of config.categorias) {
+    // cópia ordenada (não muta config.categorias): Receita Bruta, Correção, Acessórios
+    // primeiro, nessa ordem, seguidas de qualquer categoria extra na ordem de criação —
+    // essa ordem afeta só o texto do relatório, não as abas da UI.
+    const categoriasOrdenadas = config.categorias
+      .map((c, index) => ({ c, index }))
+      .sort((a, b) => {
+        const diff = prioridadeCategoria(a.c.nome) - prioridadeCategoria(b.c.nome);
+        return diff !== 0 ? diff : a.index - b.index;
+      })
+      .map(({ c }) => c);
+    for (const c of categoriasOrdenadas) {
       const vals = entries[dataKey(currentDate, c.id)] || {};
-      const hasAny = redesVisiveis.some(r => r.lojas.some(l => vals[l.id] !== undefined && vals[l.id] !== ''));
+      const hasAny = redesVisiveis.some(r => r.lojas.some(l => l.ativo !== false && vals[l.id] !== undefined && vals[l.id] !== ''));
       if (!hasAny) continue;
       const titulo = `*RELATÓRIO ${c.nome.toUpperCase()} — ${formatDatePt(currentDate)}*`;
       const lines = [titulo, ''];
       redesVisiveis.forEach(rede => {
-        const lojasPreenchidas = rede.lojas.filter(l => vals[l.id] !== undefined && vals[l.id] !== '');
+        const lojasPreenchidas = rede.lojas.filter(l => l.ativo !== false && vals[l.id] !== undefined && vals[l.id] !== '');
         if (!lojasPreenchidas.length) return;
         const ranked = rankLoja(vals, lojasPreenchidas);
         const total = ranked.reduce((s, l) => s + l.valor, 0);
@@ -248,21 +275,6 @@ export default function RankingPage() {
     copyTimer.current = setTimeout(() => setCopyShown(false), 1500);
   }
 
-  // atualização imediata local (feedback ao digitar) — persistência real acontece no onBlur (onBlurSaveRede)
-  function updateRedeField(redeId, field, val) {
-    setConfig(prev => ({ ...prev, redes: prev.redes.map(r => r.id === redeId ? { ...r, [field]: val } : r) }));
-  }
-
-  function onBlurSaveRede(redeId, field) {
-    const rede = config.redes.find(r => r.id === redeId);
-    if (!rede) return;
-    atualizarRede(redeId, { [field]: rede[field] })
-      .then(redeAtualizada => {
-        setConfig(prev => ({ ...prev, redes: prev.redes.map(r => r.id === redeId ? redeAtualizada : r) }));
-      })
-      .catch(err => flash(err.message || 'Erro ao salvar rede', 'error'));
-  }
-
   // ocultar/mostrar rede no grid principal e no relatório — segue a mesma filosofia
   // de onBlurSaveRede: nunca otimista, só troca o estado local depois que a API confirma.
   function toggleRedeVisivel(redeId, novoValor) {
@@ -271,6 +283,34 @@ export default function RankingPage() {
         setConfig(prev => ({ ...prev, redes: prev.redes.map(r => r.id === redeId ? redeAtualizada : r) }));
       })
       .catch(err => flash(err.message || 'Erro ao atualizar visibilidade da rede', 'error'));
+  }
+
+  // atribui/desatribui o responsável de uma rede via <select> (ConfigView) —
+  // mesma filosofia não-otimista de toggleRedeVisivel: só atualiza o estado
+  // local depois que a API confirma. `responsavelId` já vem convertido para
+  // number ou null por quem chama (a opção "Nenhum" do <select> vira null).
+  function updateRedeResponsavel(redeId, responsavelId) {
+    atualizarRede(redeId, { responsavelId })
+      .then(redeAtualizada => {
+        setConfig(prev => ({ ...prev, redes: prev.redes.map(r => r.id === redeId ? redeAtualizada : r) }));
+      })
+      .catch(err => flash(err.message || 'Erro ao atualizar responsável da rede', 'error'));
+  }
+
+  // ocultar/mostrar loja individualmente no grid principal e no relatório — mesma
+  // filosofia não-otimista de toggleRedeVisivel: só troca o estado local depois
+  // que a API confirma, substituindo a loja pelo objeto real retornado pela API.
+  function toggleLojaAtivo(redeId, lojaId, novoValor) {
+    atualizarLoja(lojaId, { ativo: novoValor })
+      .then(lojaAtualizada => {
+        setConfig(prev => ({
+          ...prev,
+          redes: prev.redes.map(r => r.id === redeId
+            ? { ...r, lojas: r.lojas.map(l => l.id === lojaId ? lojaAtualizada : l) }
+            : r),
+        }));
+      })
+      .catch(err => flash(err.message || 'Erro ao atualizar visibilidade da loja', 'error'));
   }
 
   function removeRede(redeId) {
@@ -299,9 +339,9 @@ export default function RankingPage() {
       .catch(err => flash(err.message || 'Erro ao criar loja', 'error'));
   }
 
-  function addRede(nome, resp) {
+  function addRede(nome) {
     if (!nome.trim()) return;
-    criarRede({ nome: nome.trim(), responsavel: resp.trim() })
+    criarRede({ nome: nome.trim() })
       .then(redeCriada => {
         setConfig(prev => ({ ...prev, redes: [...prev.redes, redeCriada] }));
       })
@@ -348,7 +388,7 @@ export default function RankingPage() {
               </div>
             )}
             {currentView === 'config'
-              ? <ConfigView config={config} updateRedeField={updateRedeField} onBlurSaveRede={onBlurSaveRede} removeRede={removeRede} removeLoja={removeLoja} addLoja={addLoja} addRede={addRede} removeCategoria={removeCategoria} isAdmin={isAdmin} toggleRedeVisivel={toggleRedeVisivel} />
+              ? <ConfigView config={config} removeRede={removeRede} removeLoja={removeLoja} addLoja={addLoja} addRede={addRede} removeCategoria={removeCategoria} isAdmin={isAdmin} toggleRedeVisivel={toggleRedeVisivel} updateRedeResponsavel={updateRedeResponsavel} toggleLojaAtivo={toggleLojaAtivo} />
               : (
                 <ReportView
                   config={config} cat={cat} values={values} setValue={setValue} onBlurSave={onBlurSave}
@@ -407,12 +447,13 @@ function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-[18px]">
         {redesVisiveis.map(rede => {
-          const ranked = rankLoja(values, rede.lojas);
+          const lojasAtivas = rede.lojas.filter(l => l.ativo !== false);
+          const ranked = rankLoja(values, lojasAtivas);
           const total = ranked.reduce((s, l) => s + l.valor, 0);
           return (
             <div className={card} key={rede.id}>
               <div className="flex justify-between items-baseline mb-3.5">
-                <h2 className="font-display text-[22px] font-bold m-0">{rede.nome}</h2>
+                <h2 className="font-display text-[22px] font-bold m-0">{`Rede ${rede.responsavel?.nome ?? 'sem responsável'}`}</h2>
                 <div className="flex items-center gap-2">
                   <div className="text-xl font-bold text-[var(--teal)] bg-[var(--teal)]/10 px-3.5 py-1 rounded-lg">{toBRL(total)}</div>
                   {isAdmin ? (
@@ -479,12 +520,47 @@ function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId
   );
 }
 
-function ConfigView({ config, updateRedeField, onBlurSaveRede, removeRede, removeLoja, addLoja, addRede, removeCategoria, isAdmin, toggleRedeVisivel }) {
+function ConfigView({ config, removeRede, removeLoja, addLoja, addRede, removeCategoria, isAdmin, toggleRedeVisivel, updateRedeResponsavel, toggleLojaAtivo }) {
   const [newRedeNome, setNewRedeNome] = useState('');
-  const [newRedeResp, setNewRedeResp] = useState('');
   const [lojaDrafts, setLojaDrafts] = useState({});
   const draftFor = (redeId) => lojaDrafts[redeId] || { emoji: '', nome: '' };
   const setDraft = (redeId, field, val) => setLojaDrafts(prev => ({ ...prev, [redeId]: { ...draftFor(redeId), [field]: val } }));
+
+  // ---------- responsáveis: lista carregada uma vez ao entrar na ConfigView ----------
+  const [responsaveis, setResponsaveis] = useState([]);
+  const [loadingResponsaveis, setLoadingResponsaveis] = useState(true);
+  const [responsaveisError, setResponsaveisError] = useState(null);
+  const [novoResponsavelNome, setNovoResponsavelNome] = useState('');
+  const [responsavelFormError, setResponsavelFormError] = useState(null);
+
+  useEffect(() => {
+    fetchResponsaveis()
+      .then(lista => setResponsaveis(lista || []))
+      .catch(err => setResponsaveisError(err.message || 'Erro ao carregar responsáveis.'))
+      .finally(() => setLoadingResponsaveis(false));
+  }, []);
+
+  function handleAddResponsavel() {
+    const nome = novoResponsavelNome.trim();
+    if (!nome) {
+      setResponsavelFormError('Informe um nome para o responsável.');
+      return;
+    }
+    setResponsavelFormError(null);
+    criarResponsavel({ nome })
+      .then(responsavelCriado => {
+        setResponsaveis(prev => [...prev, responsavelCriado]);
+        setNovoResponsavelNome('');
+      })
+      .catch(err => setResponsavelFormError(err.message || 'Erro ao criar responsável'));
+  }
+
+  function handleRemoveResponsavel(id) {
+    setResponsavelFormError(null);
+    removerResponsavel(id)
+      .then(() => setResponsaveis(prev => prev.filter(r => r.id !== id)))
+      .catch(err => setResponsavelFormError(err.message || 'Erro ao remover responsável'));
+  }
 
   return (
     <div>
@@ -493,16 +569,26 @@ function ConfigView({ config, updateRedeField, onBlurSaveRede, removeRede, remov
         {config.redes.map(rede => (
           <div key={rede.id} className="border border-[var(--border)] rounded-xl px-4 py-3.5 mb-3 bg-[var(--panel-alt)]">
             <div className="flex gap-2.5 items-center mb-2.5">
-              <input
-                value={rede.nome} onChange={e => updateRedeField(rede.id, 'nome', e.target.value)}
-                onBlur={() => onBlurSaveRede(rede.id, 'nome')}
-                className="font-display bg-transparent border-none border-b border-[var(--border)] text-[var(--text)] text-[19px] font-bold px-1 py-0.5 flex-1 focus:outline-none focus:border-[var(--teal)]"
-              />
-              <input
-                value={rede.responsavel || ''} placeholder="Responsável" onChange={e => updateRedeField(rede.id, 'responsavel', e.target.value)}
-                onBlur={() => onBlurSaveRede(rede.id, 'responsavel')}
-                className="text-[12.5px] font-medium text-[var(--muted)] flex-none w-40 text-right bg-transparent border-none border-b border-[var(--border)] focus:outline-none focus:border-[var(--teal)]"
-              />
+              <span className="font-display text-[var(--text)] text-[19px] font-bold px-1 py-0.5 flex-1">
+                {`Rede ${rede.responsavel?.nome ?? 'sem responsável'}`}
+              </span>
+              {isAdmin ? (
+                <select
+                  aria-label={`Responsável por ${rede.nome}`}
+                  value={rede.responsavel?.id ?? ''}
+                  onChange={e => updateRedeResponsavel(rede.id, e.target.value === '' ? null : Number(e.target.value))}
+                  className="text-[12.5px] font-medium text-[var(--muted)] flex-none w-40 bg-transparent border border-[var(--border)] rounded-lg px-2 py-1 focus:outline-none focus:border-[var(--teal)]"
+                >
+                  <option value="">Nenhum</option>
+                  {responsaveis.map(r => (
+                    <option key={r.id} value={r.id}>{r.nome}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-[12.5px] font-medium text-[var(--muted)] flex-none w-40 text-right">
+                  {rede.responsavel?.nome ?? 'Nenhum'}
+                </span>
+              )}
               {rede.visivel === false ? <span className="text-[12px] text-[var(--muted)] font-semibold">(oculta do relatório)</span> : null}
               {isAdmin ? (
                 <button
@@ -518,8 +604,21 @@ function ConfigView({ config, updateRedeField, onBlurSaveRede, removeRede, remov
             <div className="flex flex-wrap">
               {rede.lojas.length
                 ? rede.lojas.map(l => (
-                  <span key={l.id} className="inline-flex items-center gap-1.5 bg-[#12151b] border border-[var(--border)] rounded-full pl-3 pr-1.5 py-1 mr-1 mb-1 text-[13px]">
+                  <span
+                    key={l.id}
+                    className={`inline-flex items-center gap-1.5 bg-[#12151b] border border-[var(--border)] rounded-full pl-3 pr-1.5 py-1 mr-1 mb-1 text-[13px] ${l.ativo === false ? 'opacity-50' : ''}`}
+                  >
                     {l.emoji || ''} {l.nome}
+                    {l.ativo === false ? <span className="text-[11px] text-[var(--muted)] font-semibold">(oculta)</span> : null}
+                    {isAdmin ? (
+                      <button
+                        onClick={() => toggleLojaAtivo(rede.id, l.id, l.ativo === false ? true : false)}
+                        aria-label={`${l.ativo === false ? 'Mostrar' : 'Ocultar'} loja ${l.nome}`}
+                        className="bg-transparent border border-[var(--border)] text-[var(--text)] rounded-full px-2 py-0.5 text-[11px] font-bold cursor-pointer hover:brightness-110"
+                      >
+                        {l.ativo === false ? 'Mostrar' : 'Ocultar'}
+                      </button>
+                    ) : null}
                     <button onClick={() => removeLoja(rede.id, l.id)} className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-full w-[18px] h-[18px] text-[11px] cursor-pointer leading-none">✕</button>
                   </span>
                 ))
@@ -549,9 +648,7 @@ function ConfigView({ config, updateRedeField, onBlurSaveRede, removeRede, remov
         <div className="flex gap-2 mt-1">
           <input placeholder="Nome da rede (ex: Rede Fulano)" value={newRedeNome} onChange={e => setNewRedeNome(e.target.value)}
             className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm" />
-          <input placeholder="Responsável" value={newRedeResp} onChange={e => setNewRedeResp(e.target.value)}
-            className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm" />
-          <button className={btn} onClick={() => { addRede(newRedeNome, newRedeResp); setNewRedeNome(''); setNewRedeResp(''); }}>Adicionar rede</button>
+          <button className={btn} onClick={() => { addRede(newRedeNome); setNewRedeNome(''); }}>Adicionar rede</button>
         </div>
       </div>
 
@@ -566,6 +663,44 @@ function ConfigView({ config, updateRedeField, onBlurSaveRede, removeRede, remov
           </div>
         ))}
       </div>
+
+      {isAdmin ? (
+        <div className="mt-[22px]">
+          <h3 className="font-display text-[19px] mb-3 font-bold">Responsáveis</h3>
+          {loadingResponsaveis ? (
+            <div className="text-[var(--muted)] text-sm">Carregando responsáveis...</div>
+          ) : responsaveisError ? (
+            <div className="text-[var(--danger)] text-[13px] mb-2">{responsaveisError}</div>
+          ) : (
+            <div className="flex flex-wrap mb-2">
+              {responsaveis.length
+                ? responsaveis.map(r => (
+                  <span key={r.id} className="inline-flex items-center gap-1.5 bg-[#12151b] border border-[var(--border)] rounded-full pl-3 pr-1.5 py-1 mr-1 mb-1 text-[13px]">
+                    {r.nome}
+                    <button
+                      onClick={() => handleRemoveResponsavel(r.id)}
+                      aria-label={`Remover responsável ${r.nome}`}
+                      className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-full w-[18px] h-[18px] text-[11px] cursor-pointer leading-none"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))
+                : <span className="text-[var(--muted)] text-[13px]">Nenhum responsável cadastrado ainda</span>
+              }
+            </div>
+          )}
+          <div className="flex gap-2 items-center flex-wrap">
+            <input
+              placeholder="Nome do responsável" value={novoResponsavelNome}
+              onChange={e => setNovoResponsavelNome(e.target.value)}
+              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
+            />
+            <button className={btn} onClick={handleAddResponsavel}>Adicionar responsável</button>
+            {responsavelFormError ? <span className="text-[var(--danger)] text-[13px]">{responsavelFormError}</span> : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

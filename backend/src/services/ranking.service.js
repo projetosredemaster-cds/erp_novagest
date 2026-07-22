@@ -25,27 +25,30 @@ async function getCategorias() {
 
 /**
  * Cria uma nova rede e retorna o objeto completo (com `lojas: []`, já que
- * uma rede recém-criada nunca tem lojas ainda).
+ * uma rede recém-criada nunca tem lojas ainda). Toda rede nova é criada sem
+ * responsável atribuído (`responsavel: null`) — este endpoint não aceita
+ * mais o campo `responsavel`/`responsavelId` na criação.
  * Retorna 'nome_duplicado' se já existir uma rede com o mesmo nome
  * (case-insensitive, ignorando espaços extras).
  */
-async function criarRede({ nome, responsavel }) {
+async function criarRede({ nome }) {
   const duplicado = await rankingModel.existeRedeComNome(nome);
   if (duplicado) {
     return 'nome_duplicado';
   }
 
-  const redeCriada = await rankingModel.insertRede({ nome, responsavel });
+  const redeCriada = await rankingModel.insertRede({ nome });
   return { ...redeCriada, lojas: [] };
 }
 
 /**
  * Atualiza parcialmente uma rede existente e retorna o objeto completo
- * (com `lojas[]`), `null` se a rede não existir, ou 'nome_duplicado' se o
+ * (com `lojas[]`), `null` se a rede não existir, 'nome_duplicado' se o
  * novo nome já pertencer a outra rede (case-insensitive, ignorando espaços
- * extras).
+ * extras), ou 'responsavel_inexistente' se `responsavelId` for informado
+ * (não nulo) mas não corresponder a nenhum `Responsaveis.id` existente.
  */
-async function atualizarRede(id, { nome, responsavel, visivel }) {
+async function atualizarRede(id, { nome, responsavelId, visivel }) {
   const existente = await rankingModel.findRedeById(id);
   if (!existente) {
     return null;
@@ -58,7 +61,14 @@ async function atualizarRede(id, { nome, responsavel, visivel }) {
     }
   }
 
-  await rankingModel.updateRede(id, { nome, responsavel, visivel });
+  if (responsavelId !== undefined && responsavelId !== null) {
+    const existe = await rankingModel.existeResponsavel(responsavelId);
+    if (!existe) {
+      return 'responsavel_inexistente';
+    }
+  }
+
+  await rankingModel.updateRede(id, { nome, responsavelId, visivel });
   return rankingModel.getRedeComLojasById(id);
 }
 
@@ -137,6 +147,35 @@ async function enviarRelatorioEmail({ assunto, texto }) {
   return brevoEmailService.enviarRelatorioEmail({ assunto, texto });
 }
 
+/**
+ * Lista todos os responsáveis cadastrados.
+ */
+async function getResponsaveis() {
+  return rankingModel.listResponsaveis();
+}
+
+/**
+ * Cria um novo responsável. Retorna 'nome_duplicado' se já existir um
+ * responsável com o mesmo nome (case-insensitive, ignorando espaços extras).
+ */
+async function criarResponsavel({ nome }) {
+  const duplicado = await rankingModel.existeResponsavelComNome(nome);
+  if (duplicado) {
+    return 'nome_duplicado';
+  }
+
+  return rankingModel.insertResponsavel({ nome });
+}
+
+/**
+ * Exclui um responsável, bloqueando com conflito se houver qualquer rede
+ * vinculada (`Redes.responsavel_id`).
+ * Retorna 'not_found' | 'has_redes' | 'deleted'.
+ */
+async function excluirResponsavel(id) {
+  return rankingModel.deleteResponsavelIfNoRedes(id);
+}
+
 module.exports = {
   getEntradas,
   salvarEntrada,
@@ -149,4 +188,7 @@ module.exports = {
   atualizarLoja,
   excluirLoja,
   enviarRelatorioEmail,
+  getResponsaveis,
+  criarResponsavel,
+  excluirResponsavel,
 };

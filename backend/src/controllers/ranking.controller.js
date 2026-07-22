@@ -116,11 +116,13 @@ function isNonEmptyString(value) {
 
 /**
  * POST /api/ranking/redes
- * Body: { nome: string, responsavel?: string }
+ * Body: { nome: string }
+ * Não aceita mais `responsavel`/`responsavelId` — toda rede é criada sem
+ * responsável atribuído; a atribuição é feita depois via PUT /redes/:id.
  */
 async function criarRede(req, res) {
   const body = req.body || {};
-  const { nome, responsavel } = body;
+  const { nome } = body;
 
   if (!isNonEmptyString(nome)) {
     return res.status(400).json({
@@ -129,7 +131,7 @@ async function criarRede(req, res) {
   }
 
   try {
-    const resultado = await rankingService.criarRede({ nome, responsavel });
+    const resultado = await rankingService.criarRede({ nome });
 
     if (resultado === 'nome_duplicado') {
       return res.status(409).json({ error: 'Já existe uma rede com esse nome.' });
@@ -144,7 +146,12 @@ async function criarRede(req, res) {
 
 /**
  * PUT /api/ranking/redes/:id
- * Body parcial: { nome?: string, responsavel?: string, visivel?: boolean }
+ * Body parcial: { nome?: string, responsavelId?: number|null, visivel?: boolean }
+ * `responsavelId` substitui o antigo campo texto livre `responsavel`: number
+ * (inteiro positivo, referenciando um `Responsaveis.id` existente) para
+ * atribuir, ou `null` explícito para desatribuir. Ausência do campo no corpo
+ * preserva o valor atual (mesmo princípio de atualização parcial de
+ * `nome`/`visivel`).
  */
 async function atualizarRede(req, res) {
   const idNum = Number(req.params.id);
@@ -155,11 +162,11 @@ async function atualizarRede(req, res) {
   }
 
   const body = req.body || {};
-  const { nome, responsavel, visivel } = body;
+  const { nome, responsavelId, visivel } = body;
 
-  if (nome === undefined && responsavel === undefined && visivel === undefined) {
+  if (nome === undefined && responsavelId === undefined && visivel === undefined) {
     return res.status(400).json({
-      error: 'Informe ao menos um campo ("nome", "responsavel" ou "visivel") para atualizar.',
+      error: 'Informe ao menos um campo ("nome", "responsavelId" ou "visivel") para atualizar.',
     });
   }
 
@@ -169,6 +176,17 @@ async function atualizarRede(req, res) {
     });
   }
 
+  let responsavelIdValue = responsavelId;
+  if (responsavelId !== undefined && responsavelId !== null) {
+    const responsavelIdNum = Number(responsavelId);
+    if (!isPositiveInteger(responsavelIdNum)) {
+      return res.status(400).json({
+        error: 'Campo "responsavelId", quando enviado, deve ser um número inteiro positivo ou null.',
+      });
+    }
+    responsavelIdValue = responsavelIdNum;
+  }
+
   if (visivel !== undefined && typeof visivel !== 'boolean') {
     return res.status(400).json({
       error: 'Campo "visivel", quando enviado, deve ser "true" ou "false".',
@@ -176,7 +194,11 @@ async function atualizarRede(req, res) {
   }
 
   try {
-    const resultado = await rankingService.atualizarRede(idNum, { nome, responsavel, visivel });
+    const resultado = await rankingService.atualizarRede(idNum, {
+      nome,
+      responsavelId: responsavelIdValue,
+      visivel,
+    });
 
     if (resultado === null) {
       return res.status(404).json({ error: 'Rede não encontrada.' });
@@ -184,6 +206,10 @@ async function atualizarRede(req, res) {
 
     if (resultado === 'nome_duplicado') {
       return res.status(409).json({ error: 'Já existe uma rede com esse nome.' });
+    }
+
+    if (resultado === 'responsavel_inexistente') {
+      return res.status(400).json({ error: 'Responsável informado não existe.' });
     }
 
     return res.status(200).json(resultado);
@@ -380,6 +406,81 @@ async function enviarRelatorioEmail(req, res) {
   }
 }
 
+/**
+ * GET /api/ranking/responsaveis
+ */
+async function listarResponsaveis(req, res) {
+  try {
+    const responsaveis = await rankingService.getResponsaveis();
+    return res.json(responsaveis);
+  } catch (err) {
+    console.error('[ranking.controller] Erro ao listar responsáveis:', err);
+    return res.status(500).json({ error: 'Erro interno ao listar responsáveis.' });
+  }
+}
+
+/**
+ * POST /api/ranking/responsaveis
+ * Body: { nome: string }
+ * Restrito a admin (adminMiddleware aplicado na rota).
+ */
+async function criarResponsavel(req, res) {
+  const body = req.body || {};
+  const { nome } = body;
+
+  if (!isNonEmptyString(nome)) {
+    return res.status(400).json({
+      error: 'Campo "nome" é obrigatório e não pode ser vazio.',
+    });
+  }
+
+  try {
+    const resultado = await rankingService.criarResponsavel({ nome });
+
+    if (resultado === 'nome_duplicado') {
+      return res.status(409).json({ error: 'Já existe um responsável com esse nome.' });
+    }
+
+    return res.status(201).json(resultado);
+  } catch (err) {
+    console.error('[ranking.controller] Erro ao criar responsável:', err);
+    return res.status(500).json({ error: 'Erro interno ao criar responsável.' });
+  }
+}
+
+/**
+ * DELETE /api/ranking/responsaveis/:id
+ * Restrito a admin (adminMiddleware aplicado na rota).
+ */
+async function excluirResponsavel(req, res) {
+  const idNum = Number(req.params.id);
+  if (!isPositiveInteger(idNum)) {
+    return res.status(400).json({
+      error: 'Parâmetro "id" deve ser um número inteiro positivo.',
+    });
+  }
+
+  try {
+    const resultado = await rankingService.excluirResponsavel(idNum);
+
+    if (resultado === 'not_found') {
+      return res.status(404).json({ error: 'Responsável não encontrado.' });
+    }
+
+    if (resultado === 'has_redes') {
+      return res.status(409).json({
+        error:
+          'Não é possível excluir este responsável pois há redes vinculadas a ele. Remova a atribuição primeiro.',
+      });
+    }
+
+    return res.status(204).send();
+  } catch (err) {
+    console.error('[ranking.controller] Erro ao excluir responsável:', err);
+    return res.status(500).json({ error: 'Erro interno ao excluir responsável.' });
+  }
+}
+
 module.exports = {
   listarEntradas,
   criarOuAtualizarEntrada,
@@ -392,4 +493,7 @@ module.exports = {
   atualizarLoja,
   excluirLoja,
   enviarRelatorioEmail,
+  listarResponsaveis,
+  criarResponsavel,
+  excluirResponsavel,
 };
