@@ -144,7 +144,7 @@ async function criarRede(req, res) {
 
 /**
  * PUT /api/ranking/redes/:id
- * Body parcial: { nome?: string, responsavel?: string }
+ * Body parcial: { nome?: string, responsavel?: string, visivel?: boolean }
  */
 async function atualizarRede(req, res) {
   const idNum = Number(req.params.id);
@@ -155,11 +155,11 @@ async function atualizarRede(req, res) {
   }
 
   const body = req.body || {};
-  const { nome, responsavel } = body;
+  const { nome, responsavel, visivel } = body;
 
-  if (nome === undefined && responsavel === undefined) {
+  if (nome === undefined && responsavel === undefined && visivel === undefined) {
     return res.status(400).json({
-      error: 'Informe ao menos um campo ("nome" ou "responsavel") para atualizar.',
+      error: 'Informe ao menos um campo ("nome", "responsavel" ou "visivel") para atualizar.',
     });
   }
 
@@ -169,8 +169,14 @@ async function atualizarRede(req, res) {
     });
   }
 
+  if (visivel !== undefined && typeof visivel !== 'boolean') {
+    return res.status(400).json({
+      error: 'Campo "visivel", quando enviado, deve ser "true" ou "false".',
+    });
+  }
+
   try {
-    const resultado = await rankingService.atualizarRede(idNum, { nome, responsavel });
+    const resultado = await rankingService.atualizarRede(idNum, { nome, responsavel, visivel });
 
     if (resultado === null) {
       return res.status(404).json({ error: 'Rede não encontrada.' });

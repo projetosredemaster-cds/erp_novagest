@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test:db": "node src/scripts/testConnection.js"
+    "test:db": "node src/scripts/testConnection.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -20,6 +21,8 @@
     "mssql": "^11.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4"
+    "nodemon": "^3.1.4",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.10"
   }
 }

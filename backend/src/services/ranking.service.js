@@ -45,7 +45,7 @@ async function criarRede({ nome, responsavel }) {
  * novo nome já pertencer a outra rede (case-insensitive, ignorando espaços
  * extras).
  */
-async function atualizarRede(id, { nome, responsavel }) {
+async function atualizarRede(id, { nome, responsavel, visivel }) {
   const existente = await rankingModel.findRedeById(id);
   if (!existente) {
     return null;
@@ -58,7 +58,7 @@ async function atualizarRede(id, { nome, responsavel }) {
     }
   }
 
-  await rankingModel.updateRede(id, { nome, responsavel });
+  await rankingModel.updateRede(id, { nome, responsavel, visivel });
   return rankingModel.getRedeComLojasById(id);
 }
 

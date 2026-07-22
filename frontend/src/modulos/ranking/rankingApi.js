@@ -38,10 +38,10 @@ export function criarRede({ nome, responsavel }) {
   });
 }
 
-export function atualizarRede(id, { nome, responsavel }) {
+export function atualizarRede(id, { nome, responsavel, visivel }) {
   return request(`/api/ranking/redes/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ nome, responsavel }),
+    body: JSON.stringify({ nome, responsavel, visivel }),
   });
 }
 

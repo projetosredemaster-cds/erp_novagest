@@ -96,7 +96,7 @@ async function listRedesComLojas() {
   const pool = await getPool();
 
   const redesResult = await pool.request().query(`
-    SELECT id, nome, responsavel, criado_em
+    SELECT id, nome, responsavel, visivel, criado_em
     FROM Redes
     ORDER BY nome
   `);
@@ -142,7 +142,7 @@ async function getRedeComLojasById(id) {
     .request()
     .input('id', sql.Int, id)
     .query(`
-      SELECT id, nome, responsavel, criado_em
+      SELECT id, nome, responsavel, visivel, criado_em
       FROM Redes
       WHERE id = @id
     `);
@@ -198,7 +198,7 @@ async function insertRede({ nome, responsavel }) {
     .input('responsavel', sql.NVarChar, responsavel ?? null)
     .query(`
       INSERT INTO Redes (nome, responsavel, criado_em)
-      OUTPUT inserted.id, inserted.nome, inserted.responsavel, inserted.criado_em
+      OUTPUT inserted.id, inserted.nome, inserted.responsavel, inserted.visivel, inserted.criado_em
       VALUES (@nome, @responsavel, SYSUTCDATETIME())
     `);
   return result.recordset[0];
@@ -212,7 +212,7 @@ async function findRedeById(id) {
   const result = await pool
     .request()
     .input('id', sql.Int, id)
-    .query('SELECT id, nome, responsavel, criado_em FROM Redes WHERE id = @id');
+    .query('SELECT id, nome, responsavel, visivel, criado_em FROM Redes WHERE id = @id');
   return result.recordset[0];
 }
 
@@ -220,7 +220,7 @@ async function findRedeById(id) {
  * Atualização parcial de uma rede: campos ausentes (undefined) permanecem
  * com o valor atual no banco via COALESCE.
  */
-async function updateRede(id, { nome, responsavel }) {
+async function updateRede(id, { nome, responsavel, visivel }) {
   const pool = await getPool();
   await pool
     .request()
@@ -228,11 +228,14 @@ async function updateRede(id, { nome, responsavel }) {
     .input('nome', sql.NVarChar, nome ?? null)
     .input('responsavel', sql.NVarChar, responsavel !== undefined ? responsavel : null)
     .input('responsavelInformado', sql.Bit, responsavel !== undefined ? 1 : 0)
+    .input('visivel', sql.Bit, visivel !== undefined ? visivel : null)
+    .input('visivelInformado', sql.Bit, visivel !== undefined ? 1 : 0)
     .query(`
       UPDATE Redes
       SET
         nome = COALESCE(@nome, nome),
-        responsavel = CASE WHEN @responsavelInformado = 1 THEN @responsavel ELSE responsavel END
+        responsavel = CASE WHEN @responsavelInformado = 1 THEN @responsavel ELSE responsavel END,
+        visivel = CASE WHEN @visivelInformado = 1 THEN @visivel ELSE visivel END
       WHERE id = @id
     `);
 }

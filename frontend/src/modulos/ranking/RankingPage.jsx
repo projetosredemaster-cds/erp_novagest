@@ -167,15 +167,18 @@ export default function RankingPage() {
   }
 
   function buildFullReport() {
+    const redesVisiveis = config.redes.filter(r => r.visivel !== false);
     const parts = [];
     for (const c of config.categorias) {
       const vals = entries[dataKey(currentDate, c.id)] || {};
-      const hasAny = config.redes.some(r => r.lojas.some(l => vals[l.id] !== undefined && vals[l.id] !== ''));
+      const hasAny = redesVisiveis.some(r => r.lojas.some(l => vals[l.id] !== undefined && vals[l.id] !== ''));
       if (!hasAny) continue;
-      const titulo = c.principal ? `*RELATÓRIO ${formatDatePt(currentDate)}*` : `*RELATÓRIO ${c.nome.toUpperCase()} ${formatDatePt(currentDate)}*`;
+      const titulo = `*RELATÓRIO ${c.nome.toUpperCase()} — ${formatDatePt(currentDate)}*`;
       const lines = [titulo, ''];
-      config.redes.forEach(rede => {
-        const ranked = rankLoja(vals, rede.lojas);
+      redesVisiveis.forEach(rede => {
+        const lojasPreenchidas = rede.lojas.filter(l => vals[l.id] !== undefined && vals[l.id] !== '');
+        if (!lojasPreenchidas.length) return;
+        const ranked = rankLoja(vals, lojasPreenchidas);
         const total = ranked.reduce((s, l) => s + l.valor, 0);
         lines.push(`*${rede.nome}*   ${toBRL(total)}`);
         lines.push('');
@@ -260,6 +263,16 @@ export default function RankingPage() {
       .catch(err => flash(err.message || 'Erro ao salvar rede', 'error'));
   }
 
+  // ocultar/mostrar rede no grid principal e no relatório — segue a mesma filosofia
+  // de onBlurSaveRede: nunca otimista, só troca o estado local depois que a API confirma.
+  function toggleRedeVisivel(redeId, novoValor) {
+    atualizarRede(redeId, { visivel: novoValor })
+      .then(redeAtualizada => {
+        setConfig(prev => ({ ...prev, redes: prev.redes.map(r => r.id === redeId ? redeAtualizada : r) }));
+      })
+      .catch(err => flash(err.message || 'Erro ao atualizar visibilidade da rede', 'error'));
+  }
+
   function removeRede(redeId) {
     if (!confirm('Remover esta rede e todas as lojas dela?')) return;
     removerRede(redeId)
@@ -335,7 +348,7 @@ export default function RankingPage() {
               </div>
             )}
             {currentView === 'config'
-              ? <ConfigView config={config} updateRedeField={updateRedeField} onBlurSaveRede={onBlurSaveRede} removeRede={removeRede} removeLoja={removeLoja} addLoja={addLoja} addRede={addRede} removeCategoria={removeCategoria} />
+              ? <ConfigView config={config} updateRedeField={updateRedeField} onBlurSaveRede={onBlurSaveRede} removeRede={removeRede} removeLoja={removeLoja} addLoja={addLoja} addRede={addRede} removeCategoria={removeCategoria} isAdmin={isAdmin} toggleRedeVisivel={toggleRedeVisivel} />
               : (
                 <ReportView
                   config={config} cat={cat} values={values} setValue={setValue} onBlurSave={onBlurSave}
@@ -343,6 +356,7 @@ export default function RankingPage() {
                   currentDate={currentDate} handleGenReport={handleGenReport} handleCopyReport={handleCopyReport}
                   reportText={reportText} copyShown={copyShown} handleExportExcel={handleExportExcel}
                   handleSendEmail={handleSendEmail} sendingEmail={sendingEmail}
+                  isAdmin={isAdmin} toggleRedeVisivel={toggleRedeVisivel}
                 />
               )}
           </>
@@ -364,7 +378,8 @@ export default function RankingPage() {
   );
 }
 
-function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId, addCategoria, currentDate, handleGenReport, handleCopyReport, reportText, copyShown, handleExportExcel, handleSendEmail, sendingEmail }) {
+function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId, addCategoria, currentDate, handleGenReport, handleCopyReport, reportText, copyShown, handleExportExcel, handleSendEmail, sendingEmail, isAdmin, toggleRedeVisivel }) {
+  const redesVisiveis = config.redes.filter(r => r.visivel !== false);
   return (
     <div>
       <div className="flex gap-1.5 mb-5 flex-wrap items-center">
@@ -391,14 +406,24 @@ function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-[18px]">
-        {config.redes.map(rede => {
+        {redesVisiveis.map(rede => {
           const ranked = rankLoja(values, rede.lojas);
           const total = ranked.reduce((s, l) => s + l.valor, 0);
           return (
             <div className={card} key={rede.id}>
               <div className="flex justify-between items-baseline mb-3.5">
                 <h2 className="font-display text-[22px] font-bold m-0">{rede.nome}</h2>
-                <div className="text-xl font-bold text-[var(--teal)] bg-[var(--teal)]/10 px-3.5 py-1 rounded-lg">{toBRL(total)}</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-xl font-bold text-[var(--teal)] bg-[var(--teal)]/10 px-3.5 py-1 rounded-lg">{toBRL(total)}</div>
+                  {isAdmin ? (
+                    <button
+                      className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3 py-1.5 text-[12px] font-bold cursor-pointer hover:brightness-110"
+                      onClick={() => toggleRedeVisivel(rede.id, false)}
+                    >
+                      Ocultar
+                    </button>
+                  ) : null}
+                </div>
               </div>
               {ranked.length
                 ? ranked.map(l => (
@@ -419,7 +444,7 @@ function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId
                     <input
                       type="number" step="0.01" value={values[l.id] ?? ''} placeholder="0,00"
                       onChange={e => setValue(l.id, e.target.value)} onBlur={() => onBlurSave(l.id)}
-                      className="font-display w-[130px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-base text-right font-semibold focus:outline-none focus:border-[var(--teal)]"
+                      className="font-display w-[130px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-base text-right font-semibold focus:outline-none focus:border-[var(--teal)] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]"
                     />
                   </div>
                 ))
@@ -454,7 +479,7 @@ function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId
   );
 }
 
-function ConfigView({ config, updateRedeField, onBlurSaveRede, removeRede, removeLoja, addLoja, addRede, removeCategoria }) {
+function ConfigView({ config, updateRedeField, onBlurSaveRede, removeRede, removeLoja, addLoja, addRede, removeCategoria, isAdmin, toggleRedeVisivel }) {
   const [newRedeNome, setNewRedeNome] = useState('');
   const [newRedeResp, setNewRedeResp] = useState('');
   const [lojaDrafts, setLojaDrafts] = useState({});
@@ -478,7 +503,16 @@ function ConfigView({ config, updateRedeField, onBlurSaveRede, removeRede, remov
                 onBlur={() => onBlurSaveRede(rede.id, 'responsavel')}
                 className="text-[12.5px] font-medium text-[var(--muted)] flex-none w-40 text-right bg-transparent border-none border-b border-[var(--border)] focus:outline-none focus:border-[var(--teal)]"
               />
-              <button className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer ml-auto hover:brightness-110" onClick={() => removeRede(rede.id)}>Remover rede</button>
+              {rede.visivel === false ? <span className="text-[12px] text-[var(--muted)] font-semibold">(oculta do relatório)</span> : null}
+              {isAdmin ? (
+                <button
+                  className={btnGhost + ' ml-auto'}
+                  onClick={() => toggleRedeVisivel(rede.id, rede.visivel === false ? true : false)}
+                >
+                  {rede.visivel === false ? 'Mostrar' : 'Ocultar'}
+                </button>
+              ) : null}
+              <button className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110" onClick={() => removeRede(rede.id)}>Remover rede</button>
             </div>
 
             <div className="flex flex-wrap">
