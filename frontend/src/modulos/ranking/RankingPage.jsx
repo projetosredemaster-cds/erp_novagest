@@ -17,11 +17,59 @@ function toBRL(n) {
   n = Number(n) || 0;
   return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+// interpreta texto digitado/colado no formato brasileiro (ex: "1.730,00" ou "1730,5")
+// como número — inputs de valor são type="text" justamente para não deixar o navegador
+// truncar a vírgula decimal como faria um type="number" nativo.
+function parseValorBR(texto) {
+  let s = String(texto ?? '').trim();
+  if (!s) return 0;
+  const temPonto = s.includes('.');
+  const temVirgula = s.includes(',');
+  if (temPonto && temVirgula) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (temVirgula) {
+    s = s.replace(',', '.');
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
 function formatDatePt(iso) {
   const [, m, d] = iso.split('-');
   return d + '/' + m;
 }
 function dataKey(date, catId) { return date + '|' + catId; }
+// busca as entradas de TODAS as categorias em paralelo — reutilizada tanto pelo fetch
+// inicial (ao trocar de data/carregar categorias) quanto pelo polling de sincronização
+// multi-usuário (ver useEffect de polling em RankingPage). Não conhece estado do
+// componente; recebe tudo por parâmetro para poder ficar fora do componente.
+function fetchAllEntradas(date, categorias) {
+  return Promise.all(
+    categorias.map(c =>
+      fetchEntradas(date, c.id).then(lista => ({ catId: c.id, lista }))
+    )
+  );
+}
+// funde o resultado de fetchAllEntradas no estado `entries` existente. `protect`
+// (opcional, { catId, lojaId }) evita sobrescrever, na categoria indicada, o valor da
+// loja indicada — usado só pelo polling em background pra não sobrescrever o input que
+// o usuário está editando neste exato momento; o fetch inicial ao trocar de data não
+// passa `protect` e sobrescreve tudo, como sempre fez.
+function mergeEntradasResults(prev, results, date, protect) {
+  const next = { ...prev };
+  results.forEach(({ catId, lista }) => {
+    const vals = {};
+    (lista || []).forEach(e => { vals[e.loja_id] = e.valor; });
+    const key = dataKey(date, catId);
+    if (protect && protect.lojaId != null && protect.catId === catId) {
+      const localVals = prev[key] || {};
+      if (Object.prototype.hasOwnProperty.call(localVals, protect.lojaId)) {
+        vals[protect.lojaId] = localVals[protect.lojaId];
+      }
+    }
+    next[key] = vals;
+  });
+  return next;
+}
 // ordem fixa de exibição no relatório gerado (buildFullReport) — não afeta a ordem
 // das abas na tela nem config.categorias em si. Comparação é insensível a acento/caixa
 // para tolerar pequenas divergências de digitação no cadastro da categoria.
@@ -118,22 +166,10 @@ export default function RankingPage() {
   useEffect(() => {
     if (!config.categorias.length) return;
     let cancelled = false;
-    Promise.all(
-      config.categorias.map(c =>
-        fetchEntradas(currentDate, c.id).then(lista => ({ catId: c.id, lista }))
-      )
-    )
+    fetchAllEntradas(currentDate, config.categorias)
       .then(results => {
         if (cancelled) return;
-        setEntries(prev => {
-          const next = { ...prev };
-          results.forEach(({ catId, lista }) => {
-            const vals = {};
-            (lista || []).forEach(e => { vals[e.loja_id] = e.valor; });
-            next[dataKey(currentDate, catId)] = vals;
-          });
-          return next;
-        });
+        setEntries(prev => mergeEntradasResults(prev, results, currentDate));
         setEntriesError(null);
       })
       .catch(err => {
@@ -142,6 +178,59 @@ export default function RankingPage() {
       });
     return () => { cancelled = true; };
   }, [currentDate, config.categorias]);
+
+  // ---------- polling de sincronização multi-usuário (a cada 5s, só na tela de relatório) ----------
+  // refs para acessar sempre os valores mais recentes de dentro do setInterval sem precisar
+  // reiniciar o intervalo a cada mudança de aba/foco (o efeito abaixo só depende de
+  // currentDate/config.categorias/currentView, conforme pedido).
+  const [focusedLojaId, setFocusedLojaId] = useState(null);
+  const catRef = useRef(cat);
+  useEffect(() => { catRef.current = cat; }, [cat]);
+  const focusedLojaIdRef = useRef(focusedLojaId);
+  useEffect(() => { focusedLojaIdRef.current = focusedLojaId; }, [focusedLojaId]);
+
+  useEffect(() => {
+    if (currentView !== 'report' || !config.categorias.length) return;
+
+    let intervalId = null;
+
+    function poll() {
+      fetchAllEntradas(currentDate, config.categorias)
+        .then(results => {
+          setEntries(prev => mergeEntradasResults(prev, results, currentDate, {
+            catId: catRef.current?.id,
+            lojaId: focusedLojaIdRef.current,
+          }));
+        })
+        .catch(() => {
+          // falha de polling em background é ignorada silenciosamente — não usamos
+          // entriesError aqui pra não incomodar o usuário a cada 5s numa instabilidade de rede.
+        });
+    }
+
+    function startPolling() {
+      if (intervalId) return;
+      intervalId = setInterval(poll, 5000);
+    }
+    function stopPolling() {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    }
+    function handleVisibilityChange() {
+      if (document.hidden) stopPolling();
+      else startPolling();
+    }
+
+    if (!document.hidden) startPolling();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [currentDate, config.categorias, currentView]);
 
   // type 'success' (padrão, usado ex. em "Salvo") some rápido; type 'error' (mensagens do backend,
   // incluindo bloqueios 409, que podem ser mais longas) fica visível por mais tempo.
@@ -161,10 +250,21 @@ export default function RankingPage() {
 
   function onBlurSave(lojaId) {
     if (!cat) return;
-    const valor = Number(values[lojaId]) || 0;
+    const valor = parseValorBR(values[lojaId]);
+    setValue(lojaId, valor);
     salvarEntrada({ data: currentDate, categoriaId: cat.id, lojaId, valor })
       .then(() => flash('Salvo'))
       .catch(err => flash(err.message || 'Erro ao salvar', 'error'));
+  }
+
+  // marca/desmarca qual loja está com o input focado — usado pelo polling de sincronização
+  // acima pra não sobrescrever, a cada 5s, o valor que o usuário está digitando agora mesmo.
+  function handleValueFocus(lojaId) {
+    setFocusedLojaId(lojaId);
+  }
+  function handleValueBlur(lojaId) {
+    onBlurSave(lojaId);
+    setFocusedLojaId(null);
   }
 
   function addCategoria() {
@@ -391,7 +491,8 @@ export default function RankingPage() {
               ? <ConfigView config={config} removeRede={removeRede} removeLoja={removeLoja} addLoja={addLoja} addRede={addRede} removeCategoria={removeCategoria} isAdmin={isAdmin} toggleRedeVisivel={toggleRedeVisivel} updateRedeResponsavel={updateRedeResponsavel} toggleLojaAtivo={toggleLojaAtivo} />
               : (
                 <ReportView
-                  config={config} cat={cat} values={values} setValue={setValue} onBlurSave={onBlurSave}
+                  config={config} cat={cat} values={values} setValue={setValue} onBlurSave={handleValueBlur}
+                  onFocusValue={handleValueFocus}
                   currentCatId={currentCatId} setCurrentCatId={setCurrentCatId} addCategoria={addCategoria}
                   currentDate={currentDate} handleGenReport={handleGenReport} handleCopyReport={handleCopyReport}
                   reportText={reportText} copyShown={copyShown} handleExportExcel={handleExportExcel}
@@ -418,7 +519,7 @@ export default function RankingPage() {
   );
 }
 
-function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId, addCategoria, currentDate, handleGenReport, handleCopyReport, reportText, copyShown, handleExportExcel, handleSendEmail, sendingEmail, isAdmin, toggleRedeVisivel }) {
+function ReportView({ config, cat, values, setValue, onBlurSave, onFocusValue, setCurrentCatId, addCategoria, currentDate, handleGenReport, handleCopyReport, reportText, copyShown, handleExportExcel, handleSendEmail, sendingEmail, isAdmin, toggleRedeVisivel }) {
   const redesVisiveis = config.redes.filter(r => r.visivel !== false);
   return (
     <div>
@@ -483,9 +584,10 @@ function ReportView({ config, cat, values, setValue, onBlurSave, setCurrentCatId
                     <div className="text-base w-5 text-center flex-shrink-0">{l.emoji || ''}</div>
                     <div className="flex-1 text-[14.5px] font-semibold">{l.nome}</div>
                     <input
-                      type="number" step="0.01" value={values[l.id] ?? ''} placeholder="0,00"
-                      onChange={e => setValue(l.id, e.target.value)} onBlur={() => onBlurSave(l.id)}
-                      className="font-display w-[130px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-base text-right font-semibold focus:outline-none focus:border-[var(--teal)] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]"
+                      type="text" inputMode="decimal" value={values[l.id] ?? ''} placeholder="0,00"
+                      onChange={e => setValue(l.id, e.target.value)}
+                      onFocus={() => onFocusValue(l.id)} onBlur={() => onBlurSave(l.id)}
+                      className="font-display w-[130px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-base text-right font-semibold focus:outline-none focus:border-[var(--teal)]"
                     />
                   </div>
                 ))

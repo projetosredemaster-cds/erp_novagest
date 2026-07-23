@@ -12,8 +12,8 @@
 //    resolver; se a promise rejeitar, o estado local não muda e o flash de
 //    erro aparece.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import RankingPage from './RankingPage.jsx';
 
@@ -531,6 +531,65 @@ describe('RankingPage — ocultar loja individualmente (Lojas.ativo, grid princi
   });
 });
 
+describe('RankingPage — parsing de valor BR no input de lançamento (parseValorBR)', () => {
+  it('colar "1.730,00" (formato BR com milhar) soma o total corretamente como R$ 1.730,00, não R$ 1,73', async () => {
+    useAuth.mockReturnValue({ isAdmin: false });
+    mockDadosIniciais({ redes: [redeVisivel()] });
+    rankingApi.salvarEntrada.mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    await renderPage();
+
+    const input = screen.getByPlaceholderText('0,00');
+    await user.clear(input);
+    await user.paste('1.730,00');
+    await user.tab();
+
+    await waitFor(() => expect(rankingApi.salvarEntrada).toHaveBeenCalledWith(
+      expect.objectContaining({ lojaId: 100, valor: 1730 })
+    ));
+    expect(await screen.findByText('R$ 1.730,00')).toBeInTheDocument();
+  });
+
+  it('digitar manualmente "1730,50" continua funcionando (vírgula decimal sem separador de milhar)', async () => {
+    useAuth.mockReturnValue({ isAdmin: false });
+    mockDadosIniciais({ redes: [redeVisivel()] });
+    rankingApi.salvarEntrada.mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    await renderPage();
+
+    const input = screen.getByPlaceholderText('0,00');
+    await user.clear(input);
+    await user.type(input, '1730,50');
+    await user.tab();
+
+    await waitFor(() => expect(rankingApi.salvarEntrada).toHaveBeenCalledWith(
+      expect.objectContaining({ lojaId: 100, valor: 1730.5 })
+    ));
+    expect(await screen.findByText('R$ 1.730,50')).toBeInTheDocument();
+  });
+
+  it('colar um valor simples sem separador de milhar ("500,00") continua funcionando', async () => {
+    useAuth.mockReturnValue({ isAdmin: false });
+    mockDadosIniciais({ redes: [redeVisivel()] });
+    rankingApi.salvarEntrada.mockResolvedValue(undefined);
+
+    const user = userEvent.setup();
+    await renderPage();
+
+    const input = screen.getByPlaceholderText('0,00');
+    await user.clear(input);
+    await user.paste('500,00');
+    await user.tab();
+
+    await waitFor(() => expect(rankingApi.salvarEntrada).toHaveBeenCalledWith(
+      expect.objectContaining({ lojaId: 100, valor: 500 })
+    ));
+    expect(await screen.findByText('R$ 500,00')).toBeInTheDocument();
+  });
+});
+
 describe('RankingPage — ConfigView: botão Ocultar/Mostrar loja (Lojas.ativo)', () => {
   it('isAdmin:false — nenhum botão Ocultar/Mostrar loja existe em lugar nenhum', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
@@ -593,5 +652,111 @@ describe('RankingPage — ConfigView: botão Ocultar/Mostrar loja (Lojas.ativo)'
 
     await waitFor(() => expect(screen.getByText('Falha simulada ao atualizar loja')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Ocultar loja Loja Ativa' })).toBeInTheDocument();
+  });
+});
+
+describe('RankingPage — polling automático de sincronização multi-usuário (a cada 5s)', () => {
+  // Os timers fake precisam estar instalados ANTES de o setInterval do polling ser
+  // criado, senão o intervalo real já agendado no primeiro mount não é afetado pelo
+  // avanço de tempo fake. Por isso cada teste: 1) renderiza e espera a carga inicial
+  // com timers reais (via renderPage(), que já usa waitFor normalmente); 2) instala
+  // vi.useFakeTimers(); 3) alterna currentView 'report' -> 'config' -> 'report'
+  // (usando o botão de admin) só para forçar o efeito de polling a limpar o interval
+  // real antigo e recriar um novo já sob os timers fake — sem isso o teste não
+  // conseguiria "adiantar" o polling.
+  function armPolling() {
+    fireEvent.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Voltar ao relatório/ }));
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('atualiza o valor de uma loja não focada depois de ~5s quando o polling (fetchEntradas) retorna um valor novo', async () => {
+    useAuth.mockReturnValue({ isAdmin: true });
+    mockDadosIniciais({ redes: [redeVisivel()] });
+
+    await renderPage();
+    expect(await screen.findByPlaceholderText('0,00')).toHaveValue('50');
+
+    vi.useFakeTimers();
+    armPolling();
+
+    rankingApi.fetchEntradas.mockResolvedValue([{ loja_id: 100, valor: 777 }]);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(screen.getByPlaceholderText('0,00')).toHaveValue('777');
+  });
+
+  it('NÃO sobrescreve o valor do input atualmente focado, mesmo que o polling retorne um valor diferente do servidor', async () => {
+    useAuth.mockReturnValue({ isAdmin: true });
+    mockDadosIniciais({ redes: [redeVisivel()] });
+
+    await renderPage();
+    const input = await screen.findByPlaceholderText('0,00');
+
+    vi.useFakeTimers();
+    armPolling();
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '123' } });
+
+    rankingApi.fetchEntradas.mockResolvedValue([{ loja_id: 100, valor: 999 }]);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(input).toHaveValue('123');
+  });
+
+  it('pausa o polling quando a aba fica oculta (document.hidden) e retoma quando ela volta a ficar visível', async () => {
+    useAuth.mockReturnValue({ isAdmin: true });
+    mockDadosIniciais({ redes: [redeVisivel()] });
+
+    await renderPage();
+
+    vi.useFakeTimers();
+    armPolling();
+    rankingApi.fetchEntradas.mockClear();
+
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(rankingApi.fetchEntradas).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(rankingApi.fetchEntradas).toHaveBeenCalled();
+  });
+
+  it('limpa o interval ao desmontar o componente (nenhuma chamada de polling depois do unmount)', async () => {
+    useAuth.mockReturnValue({ isAdmin: true });
+    mockDadosIniciais({ redes: [redeVisivel()] });
+
+    const { unmount } = await renderPage();
+
+    vi.useFakeTimers();
+    armPolling();
+    rankingApi.fetchEntradas.mockClear();
+
+    unmount();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+
+    expect(rankingApi.fetchEntradas).not.toHaveBeenCalled();
   });
 });
