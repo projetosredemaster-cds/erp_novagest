@@ -33,6 +33,41 @@ function parseValorBR(texto) {
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : 0;
 }
+// máscara monetária ao vivo (estilo app bancário): dígitos digitados são tratados da
+// direita pra esquerda como centavos — "173000" digitado vira "1.730,00" exibido.
+// extrai só os dígitos (0-9) de um texto — usado a cada tecla pra achar a base em centavos
+function extrairDigitos(texto) {
+  return String(texto ?? '').replace(/\D/g, '');
+}
+// formata a base de dígitos (centavos) no padrão BR: "173000" -> "1.730,00"
+function formatarDigitosBR(digitos) {
+  if (!digitos) return '';
+  const n = parseInt(digitos, 10) || 0;
+  const centavos = String(n % 100).padStart(2, '0');
+  const inteiro = String(Math.floor(n / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${inteiro},${centavos}`;
+}
+// base de dígitos -> valor float guardado em `entries` (nunca a string formatada); base
+// vazia representa campo vazio, não zero — preserva a distinção "nunca digitado" vs "digitou 0"
+function digitosParaValor(digitos) {
+  if (!digitos) return '';
+  return (parseInt(digitos, 10) || 0) / 100;
+}
+// caminho inverso: reconstrói a base de dígitos a partir do valor float em `entries` —
+// usado a cada render pra formatar o input e pelo backspace pra saber o que remover
+function valorParaDigitos(valor) {
+  if (valor === '' || valor === undefined || valor === null) return '';
+  const n = Math.round(Number(valor) * 100);
+  return Number.isFinite(n) ? String(n) : '';
+}
+// força o cursor pro final do campo após a formatação reescrever o texto — mantém o
+// comportamento "digita da direita pra esquerda" de uma máscara de app bancário
+function moveCaretToEnd(el) {
+  requestAnimationFrame(() => {
+    const len = el.value.length;
+    el.setSelectionRange(len, len);
+  });
+}
 function formatDatePt(iso) {
   const [, m, d] = iso.split('-');
   return d + '/' + m;
@@ -584,8 +619,23 @@ function ReportView({ config, cat, values, setValue, onBlurSave, onFocusValue, s
                     <div className="text-base w-5 text-center flex-shrink-0">{l.emoji || ''}</div>
                     <div className="flex-1 text-[14.5px] font-semibold">{l.nome}</div>
                     <input
-                      type="text" inputMode="decimal" value={values[l.id] ?? ''} placeholder="0,00"
-                      onChange={e => setValue(l.id, e.target.value)}
+                      type="text" inputMode="decimal" value={formatarDigitosBR(valorParaDigitos(values[l.id]))} placeholder="0,00"
+                      onChange={e => {
+                        setValue(l.id, digitosParaValor(extrairDigitos(e.target.value)));
+                        moveCaretToEnd(e.target);
+                      }}
+                      onKeyDown={e => {
+                        if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+                        e.preventDefault();
+                        const digitos = valorParaDigitos(values[l.id]);
+                        setValue(l.id, digitosParaValor(digitos.slice(0, -1)));
+                        moveCaretToEnd(e.target);
+                      }}
+                      onPaste={e => {
+                        e.preventDefault();
+                        setValue(l.id, parseValorBR(e.clipboardData.getData('text')));
+                        moveCaretToEnd(e.target);
+                      }}
                       onFocus={() => onFocusValue(l.id)} onBlur={() => onBlurSave(l.id)}
                       className="font-display w-[130px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-base text-right font-semibold focus:outline-none focus:border-[var(--teal)]"
                     />

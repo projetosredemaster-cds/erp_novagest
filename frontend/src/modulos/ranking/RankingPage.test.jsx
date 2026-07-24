@@ -678,7 +678,7 @@ describe('RankingPage — polling automático de sincronização multi-usuário 
     mockDadosIniciais({ redes: [redeVisivel()] });
 
     await renderPage();
-    expect(await screen.findByPlaceholderText('0,00')).toHaveValue('50');
+    expect(await screen.findByPlaceholderText('0,00')).toHaveValue('50,00');
 
     vi.useFakeTimers();
     armPolling();
@@ -689,7 +689,7 @@ describe('RankingPage — polling automático de sincronização multi-usuário 
       await vi.advanceTimersByTimeAsync(5000);
     });
 
-    expect(screen.getByPlaceholderText('0,00')).toHaveValue('777');
+    expect(screen.getByPlaceholderText('0,00')).toHaveValue('777,00');
   });
 
   it('NÃO sobrescreve o valor do input atualmente focado, mesmo que o polling retorne um valor diferente do servidor', async () => {
