@@ -89,6 +89,47 @@ async function criarOuAtualizarEntrada(req, res) {
 }
 
 /**
+ * DELETE /api/ranking/entradas?data=YYYY-MM-DD&categoriaId=X&redeId=Y
+ * Remove a entrada de (data, categoriaId, redeId). Idempotente: 204 tanto se
+ * a linha existia quanto se não existia (ver CONTRATO-RANKING-API.md, 10.1).
+ */
+async function excluirEntrada(req, res) {
+  const { data, categoriaId, redeId } = req.query;
+
+  if (!data || !DATE_REGEX.test(data)) {
+    return res.status(400).json({
+      error: 'Parâmetro "data" é obrigatório e deve estar no formato YYYY-MM-DD.',
+    });
+  }
+
+  const categoriaIdNum = Number(categoriaId);
+  if (!categoriaId || !isPositiveInteger(categoriaIdNum)) {
+    return res.status(400).json({
+      error: 'Parâmetro "categoriaId" é obrigatório e deve ser um número inteiro positivo.',
+    });
+  }
+
+  const redeIdNum = Number(redeId);
+  if (!redeId || !isPositiveInteger(redeIdNum)) {
+    return res.status(400).json({
+      error: 'Parâmetro "redeId" é obrigatório e deve ser um número inteiro positivo.',
+    });
+  }
+
+  try {
+    await rankingService.removerEntrada({
+      data,
+      categoriaId: categoriaIdNum,
+      redeId: redeIdNum,
+    });
+    return res.status(204).send();
+  } catch (err) {
+    console.error('[ranking.controller] Erro ao excluir entrada:', err);
+    return res.status(500).json({ error: 'Erro interno ao excluir entrada.' });
+  }
+}
+
+/**
  * GET /api/ranking/diretores
  */
 async function listarDiretores(req, res) {
@@ -485,6 +526,7 @@ async function excluirResponsavel(req, res) {
 module.exports = {
   listarEntradas,
   criarOuAtualizarEntrada,
+  excluirEntrada,
   listarDiretores,
   listarCategorias,
   criarDiretor,

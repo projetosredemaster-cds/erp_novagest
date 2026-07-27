@@ -311,6 +311,37 @@ Upsert por `(data, categoriaId, redeId)` — **campo renomeado de `lojaId` para 
 
 ---
 
+## 10.1. `DELETE /api/ranking/entradas?data=YYYY-MM-DD&categoriaId=X&redeId=Y`
+
+Remove a entrada correspondente a `(data, categoriaId, redeId)`, se existir.
+Usada pelo frontend quando o usuário limpa/zera um campo que já tinha valor
+salvo (já que `POST /entradas` nunca persiste um valor zero — ver decisão de
+produto registrada em conversa: evitar lançamentos de R$0,00 desnecessários
+no banco, mas ainda permitir corrigir/apagar um valor real digitado errado).
+
+### Parâmetros de query (todos obrigatórios)
+Mesma validação de `GET /entradas` (seção 9) para `data`/`categoriaId`, mais:
+
+| Parâmetro | Tipo   | Obrigatório | Validação |
+|-----------|--------|-------------|-----------|
+| `redeId`  | number | sim | inteiro positivo, senão `400`: `{ "error": "Parâmetro \"redeId\" é obrigatório e deve ser um número inteiro positivo." }` |
+
+### Comportamento — IDEMPOTENTE (decisão de design)
+`DELETE FROM Entradas WHERE data_ref = @data AND categoria_id = @categoriaId AND rede_id = @redeId`.
+Retorna `204 No Content` **tanto se a linha existia quanto se não existia** —
+diferente do `DELETE /redes/:id`/`DELETE /lojas/:id` (que dão `404` se o
+recurso não existe), aqui a intenção do chamador é sempre "garanta que não
+existe valor lançado para essa combinação", então não existir já é sucesso.
+Não há bloqueio de conflito nesta rota (diferente de `DELETE /redes/:id`).
+
+### Resposta de sucesso — `204 No Content`
+
+### Erros
+- `400 Bad Request` — `data`/`categoriaId`/`redeId` ausentes/inválidos.
+- `500 Internal Server Error`: `{ "error": "Erro interno ao excluir entrada." }`
+
+---
+
 ## 11. `POST /api/ranking/relatorio/email`
 
 **Sem mudança** em relação ao contrato anterior (continua recebendo `texto` pronto e repassando ao Brevo).

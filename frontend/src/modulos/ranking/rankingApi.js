@@ -36,6 +36,15 @@ export function salvarEntrada({ data, categoriaId, redeId, valor }) {
   });
 }
 
+export function removerEntrada({ data, categoriaId, redeId }) {
+  const params = new URLSearchParams({
+    data,
+    categoriaId: String(categoriaId),
+    redeId: String(redeId),
+  });
+  return request(`/api/ranking/entradas?${params.toString()}`, { method: 'DELETE' });
+}
+
 export function criarDiretor({ nome }) {
   return request('/api/ranking/diretores', {
     method: 'POST',

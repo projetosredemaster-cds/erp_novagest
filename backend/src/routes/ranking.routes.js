@@ -10,6 +10,9 @@ router.get('/entradas', rankingController.listarEntradas);
 // POST /api/ranking/entradas  (upsert por data + categoriaId + redeId)
 router.post('/entradas', rankingController.criarOuAtualizarEntrada);
 
+// DELETE /api/ranking/entradas?data=YYYY-MM-DD&categoriaId=X&redeId=Y  (idempotente, sempre 204)
+router.delete('/entradas', rankingController.excluirEntrada);
+
 // GET  /api/ranking/diretores  (diretores com redes aninhadas)
 router.get('/diretores', rankingController.listarDiretores);
 

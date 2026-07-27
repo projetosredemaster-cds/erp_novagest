@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
-  fetchDiretores, fetchCategorias, fetchEntradas, salvarEntrada,
+  fetchDiretores, fetchCategorias, fetchEntradas, salvarEntrada, removerEntrada,
   criarDiretor, atualizarDiretor, removerDiretor,
   criarRede, atualizarRede, removerRede,
   enviarRelatorioPorEmail,
@@ -292,7 +292,12 @@ export default function RankingPage() {
     if (!cat) return;
     const valor = parseValorBR(values[redeId]);
     setValue(redeId, valor);
-    if (valor === 0) return;
+    if (valor === 0) {
+      removerEntrada({ data: currentDate, categoriaId: cat.id, redeId })
+        .then(() => flash('Salvo'))
+        .catch(err => flash(err.message || 'Erro ao salvar', 'error'));
+      return;
+    }
     salvarEntrada({ data: currentDate, categoriaId: cat.id, redeId, valor })
       .then(() => flash('Salvo'))
       .catch(err => flash(err.message || 'Erro ao salvar', 'error'));

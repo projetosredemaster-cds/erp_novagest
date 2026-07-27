@@ -54,6 +54,26 @@ async function listEntradas({ data, categoriaId }) {
 }
 
 /**
+ * Remove a entrada correspondente a (data_ref, categoria_id, rede_id), se
+ * existir. Idempotente por design — não lança/sinaliza erro se a linha não
+ * existir (ver CONTRATO-RANKING-API.md, seção 10.1).
+ */
+async function deleteEntrada({ data, categoriaId, redeId }) {
+  const pool = await getPool();
+  const request = pool.request();
+  request.input('data', sql.Date, data);
+  request.input('categoriaId', sql.Int, categoriaId);
+  request.input('redeId', sql.Int, redeId);
+
+  await request.query(`
+    DELETE FROM Entradas
+    WHERE data_ref = @data
+      AND categoria_id = @categoriaId
+      AND rede_id = @redeId
+  `);
+}
+
+/**
  * Cria ou atualiza (upsert) uma entrada, identificada pela combinação
  * (data_ref, categoria_id, rede_id), usando MERGE dentro de uma transação.
  */
@@ -570,6 +590,7 @@ async function deleteResponsavelIfNoRedes(id) {
 module.exports = {
   listEntradas,
   upsertEntrada,
+  deleteEntrada,
   listDiretoresComRedes,
   listCategorias,
   getDiretorComRedesById,

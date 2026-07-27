@@ -15,6 +15,10 @@ async function salvarEntrada({ data, categoriaId, redeId, valor }) {
   return rankingModel.upsertEntrada({ data, categoriaId, redeId, valor });
 }
 
+async function removerEntrada({ data, categoriaId, redeId }) {
+  return rankingModel.deleteEntrada({ data, categoriaId, redeId });
+}
+
 async function getDiretoresComRedes() {
   return rankingModel.listDiretoresComRedes();
 }
@@ -180,6 +184,7 @@ async function excluirResponsavel(id) {
 module.exports = {
   getEntradas,
   salvarEntrada,
+  removerEntrada,
   getDiretoresComRedes,
   getCategorias,
   criarDiretor,
