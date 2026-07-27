@@ -6,18 +6,14 @@
 // lendo o token salvo (mesmo lugar que AuthContext usa) e dispara o logout
 // global se a API responder 401 (token ausente/expirado).
 //
-// Hierarquia de dados (ver CONTRATO-RANKING-API.md v2): Diretor -> Rede.
-// O Ranking nunca opera no nível Loja física (tabela `Lojas`, usada só pelo
-// módulo Margens) — "rede" aqui sempre se refere à antiga "loja" do modelo
-// de 2 níveis (Delta, Lendários...), agora aninhada dentro de um Diretor.
+// CRUD de Diretor/Rede/Responsavel foi extraído para src/lib/cadastrosApi.js
+// (cadastro compartilhado com o módulo Margens) — ver CONTRATO-RANKING-API.md
+// v3 e CONTRATO-CADASTROS-API.md. Este arquivo é dono só de
+// Categorias/Entradas e do envio de relatório por e-mail.
 import { apiRequest } from '../../lib/apiClient.js';
 
 function request(path, options) {
   return apiRequest(path, options);
-}
-
-export function fetchDiretores() {
-  return request('/api/ranking/diretores');
 }
 
 export function fetchCategorias() {
@@ -45,60 +41,9 @@ export function removerEntrada({ data, categoriaId, redeId }) {
   return request(`/api/ranking/entradas?${params.toString()}`, { method: 'DELETE' });
 }
 
-export function criarDiretor({ nome }) {
-  return request('/api/ranking/diretores', {
-    method: 'POST',
-    body: JSON.stringify({ nome }),
-  });
-}
-
-export function atualizarDiretor(id, { nome }) {
-  return request(`/api/ranking/diretores/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify({ nome }),
-  });
-}
-
-export function removerDiretor(id) {
-  return request(`/api/ranking/diretores/${id}`, { method: 'DELETE' });
-}
-
-export function criarRede({ diretorId, nome, emoji }) {
-  return request('/api/ranking/redes', {
-    method: 'POST',
-    body: JSON.stringify({ diretorId, nome, emoji }),
-  });
-}
-
-export function atualizarRede(id, { nome, emoji, responsavelId, ativo, visivel }) {
-  return request(`/api/ranking/redes/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify({ nome, emoji, responsavelId, ativo, visivel }),
-  });
-}
-
-export function removerRede(id) {
-  return request(`/api/ranking/redes/${id}`, { method: 'DELETE' });
-}
-
 export function enviarRelatorioPorEmail({ texto, assunto }) {
   return request('/api/ranking/relatorio/email', {
     method: 'POST',
     body: JSON.stringify({ texto, assunto }),
   });
-}
-
-export function fetchResponsaveis() {
-  return request('/api/ranking/responsaveis');
-}
-
-export function criarResponsavel({ nome }) {
-  return request('/api/ranking/responsaveis', {
-    method: 'POST',
-    body: JSON.stringify({ nome }),
-  });
-}
-
-export function removerResponsavel(id) {
-  return request(`/api/ranking/responsaveis/${id}`, { method: 'DELETE' });
 }

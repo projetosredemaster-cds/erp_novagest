@@ -2,12 +2,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
-  fetchDiretores, fetchCategorias, fetchEntradas, salvarEntrada, removerEntrada,
+  fetchCategorias, fetchEntradas, salvarEntrada, removerEntrada,
+  enviarRelatorioPorEmail,
+} from './rankingApi';
+import {
+  fetchDiretores,
   criarDiretor, atualizarDiretor, removerDiretor,
   criarRede, atualizarRede, removerRede,
-  enviarRelatorioPorEmail,
   fetchResponsaveis, criarResponsavel, removerResponsavel,
-} from './rankingApi';
+} from '../../lib/cadastrosApi';
 import { useAuth } from '../../app/AuthContext.jsx';
 
 // estado inicial vazio: diretores/categorias agora vêm da API (ver useEffect de carga em RankingPage)

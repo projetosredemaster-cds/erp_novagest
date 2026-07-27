@@ -1,4 +1,5 @@
 import RankingPage from '../modulos/ranking/RankingPage.jsx';
+import MargensPage from '../modulos/margens/MargensPage.jsx';
 import UsuariosPage from '../modulos/admin/UsuariosPage.jsx';
 
 // Lista central de módulos do ERP. Cada item vira uma rota + um botão no
@@ -14,6 +15,13 @@ export const moduleRegistry = [
     path: '/ranking',
     icon: '🏆',
     element: RankingPage,
+  },
+  {
+    id: 'margens',
+    label: 'Margens',
+    path: '/margens',
+    icon: '📊',
+    element: MargensPage,
   },
   {
     id: 'usuarios',

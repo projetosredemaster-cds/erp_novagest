@@ -4,6 +4,8 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
 const rankingRoutes = require('./routes/ranking.routes');
+const cadastrosRoutes = require('./routes/cadastros.routes');
+const margensRoutes = require('./routes/margens.routes');
 const authRoutes = require('./routes/auth.routes');
 const adminRoutes = require('./routes/admin.routes');
 const authMiddleware = require('./middlewares/authMiddleware');
@@ -43,12 +45,22 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Rotas do módulo Ranking. Futuros módulos do erp_Novagest devem ser
-// montados aqui seguindo o mesmo padrão: app.use('/api/<modulo>', rotas).
-// Protegidas por authMiddleware — qualquer usuário autenticado (admin ou
-// não) pode usá-las; ver CONTRATO-AUTH-API.md, seção "Rotas protegidas do
-// resto do sistema".
+// Rotas dos módulos Ranking e Cadastros. Futuros módulos do erp_Novagest
+// devem ser montados aqui seguindo o mesmo padrão: app.use('/api/<modulo>',
+// rotas). Protegidas por authMiddleware — qualquer usuário autenticado
+// (admin ou não) pode usá-las; ver CONTRATO-AUTH-API.md, seção "Rotas
+// protegidas do resto do sistema".
 app.use('/api/ranking', authMiddleware, rankingRoutes);
+
+// Cadastros compartilhados (Diretor/Rede/Loja/Responsavel) — ver
+// CONTRATO-CADASTROS-API.md. Consumido pelo Ranking e pelo Margens (e
+// módulos futuros); não pertence a nenhum módulo de negócio específico.
+app.use('/api/cadastros', authMiddleware, cadastrosRoutes);
+
+// Módulo Margens (lançamentos diários de margem por Loja + relatório de
+// período) — ver CONTRATO-MARGENS-API.md. Lê Diretor/Rede/Loja/Responsavel
+// só via JOIN (dado compartilhado do módulo Cadastros).
+app.use('/api/margens', authMiddleware, margensRoutes);
 
 // 404 — rota não encontrada
 app.use((req, res) => {
