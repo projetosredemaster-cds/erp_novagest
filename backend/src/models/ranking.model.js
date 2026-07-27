@@ -3,20 +3,24 @@ const { sql, getPool } = require('../config/db');
 /**
  * Camada de acesso a dados (data access) do módulo Ranking.
  *
- * IMPORTANTE — suposição de schema:
- * As tabelas Redes/Lojas/Categorias/Entradas já existem no banco, mas os
- * nomes exatos de colunas não foram informados. Os nomes abaixo são um
- * PALPITE razoável e PRECISAM ser conferidos/ajustados contra o schema real:
- *   - Redes      (id, nome, responsavel [coluna antiga, não lida por código
- *                 novo], responsavel_id -> FK Responsaveis, visivel, criado_em)
- *   - Lojas      (id, rede_id -> FK Redes, nome, emoji, ativo, criado_em)
- *   - Categorias (id, nome, principal, criado_em)
- *   - Entradas   (id, data_ref, categoria_id -> FK Categorias, loja_id -> FK Lojas,
- *                 valor, atualizado_em; UNIQUE em data_ref+categoria_id+loja_id)
- *   - Responsaveis (id, nome, criado_em) — ver migrations/003_add_responsaveis.sql
- * Se os nomes reais de alguma coluna forem diferentes, ajuste as queries
- * deste arquivo — o restante da aplicação (service/controller) não precisa
- * saber de detalhes de schema.
+ * IMPORTANTE — hierarquia de dados (v2, ver CONTRATO-RANKING-API.md):
+ *   - Diretores   (id, nome, criado_em) — o que antes era `Redes`.
+ *   - Redes       (id, diretor_id -> FK Diretores, nome, emoji, ativo,
+ *                 visivel, responsavel_id -> FK Responsaveis, criado_em) —
+ *                 o que antes era `Lojas`. O Ranking lança valores neste
+ *                 nível, nunca em `Lojas` (tabela física nova do módulo
+ *                 Margens, não usada aqui).
+ *   - Categorias  (id, nome, principal, criado_em) — sem mudança.
+ *   - Entradas    (id, data_ref, categoria_id -> FK Categorias, rede_id -> FK
+ *                 Redes, valor, atualizado_em; UNIQUE em
+ *                 data_ref+categoria_id+rede_id). No schema local (criado do
+ *                 zero, sem migration de rename), a coluna já nasceu com o
+ *                 nome `rede_id` — leitura/escrita direta, sem alias.
+ *   - Responsaveis (id, nome, criado_em) — sem mudança; a FK que a
+ *                 referencia (`responsavel_id`) migrou de `Diretores` para
+ *                 `Redes`, mas como o nome da tabela `Redes` já aponta para
+ *                 a entidade certa após o rename, nenhuma query aqui
+ *                 precisou mudar.
  *
  * Todas as queries são parametrizadas via `request.input(...)` — nunca
  * concatenar valores vindos do usuário diretamente na string SQL.
@@ -33,14 +37,14 @@ async function listEntradas({ data, categoriaId }) {
       e.id,
       e.data_ref,
       e.categoria_id,
-      e.loja_id,
+      e.rede_id,
       e.valor,
       e.atualizado_em,
-      l.nome  AS loja_nome,
-      l.emoji AS loja_emoji,
-      l.rede_id
+      r.nome  AS rede_nome,
+      r.emoji AS rede_emoji,
+      r.diretor_id
     FROM Entradas e
-    INNER JOIN Lojas l ON l.id = e.loja_id
+    INNER JOIN Redes r ON r.id = e.rede_id
     WHERE e.data_ref = @data
       AND e.categoria_id = @categoriaId
     ORDER BY e.valor DESC
@@ -51,9 +55,9 @@ async function listEntradas({ data, categoriaId }) {
 
 /**
  * Cria ou atualiza (upsert) uma entrada, identificada pela combinação
- * (data_ref, categoria_id, loja_id), usando MERGE dentro de uma transação.
+ * (data_ref, categoria_id, rede_id), usando MERGE dentro de uma transação.
  */
-async function upsertEntrada({ data, categoriaId, lojaId, valor }) {
+async function upsertEntrada({ data, categoriaId, redeId, valor }) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
 
@@ -62,26 +66,26 @@ async function upsertEntrada({ data, categoriaId, lojaId, valor }) {
     const request = new sql.Request(transaction);
     request.input('data', sql.Date, data);
     request.input('categoriaId', sql.Int, categoriaId);
-    request.input('lojaId', sql.Int, lojaId);
+    request.input('redeId', sql.Int, redeId);
     request.input('valor', sql.Decimal(18, 2), valor);
 
     const result = await request.query(`
       MERGE INTO Entradas AS target
-      USING (SELECT @data AS data_ref, @categoriaId AS categoria_id, @lojaId AS loja_id) AS source
+      USING (SELECT @data AS data_ref, @categoriaId AS categoria_id, @redeId AS rede_id) AS source
         ON target.data_ref = source.data_ref
         AND target.categoria_id = source.categoria_id
-        AND target.loja_id = source.loja_id
+        AND target.rede_id = source.rede_id
       WHEN MATCHED THEN
         UPDATE SET valor = @valor, atualizado_em = SYSUTCDATETIME()
       WHEN NOT MATCHED THEN
-        INSERT (data_ref, categoria_id, loja_id, valor, atualizado_em)
-        VALUES (@data, @categoriaId, @lojaId, @valor, SYSUTCDATETIME())
+        INSERT (data_ref, categoria_id, rede_id, valor, atualizado_em)
+        VALUES (@data, @categoriaId, @redeId, @valor, SYSUTCDATETIME())
       OUTPUT
         $action AS acao,
         inserted.id,
         inserted.data_ref,
         inserted.categoria_id,
-        inserted.loja_id,
+        inserted.rede_id,
         inserted.valor,
         inserted.atualizado_em;
     `);
@@ -96,18 +100,21 @@ async function upsertEntrada({ data, categoriaId, lojaId, valor }) {
 
 /**
  * Consulta base de Redes com LEFT JOIN em Responsaveis (via responsavel_id),
- * usada por `listRedesComLojas`, `getRedeComLojasById` e `findRedeById`. Não
- * lê mais a coluna antiga `Redes.responsavel` (texto livre) — só
- * `responsavel_id`, mapeado para o objeto `{ id, nome }`/`null` por
- * `mapRedeRow`.
+ * usada por `listDiretoresComRedes`, `getDiretorComRedesById` e
+ * `findRedeById`. `Redes` é o nível que ganhou `responsavel_id`/`visivel`
+ * nesta versão do schema (antes vivia em `Diretores`, quando esta tabela
+ * ainda se chamava `Redes`).
  */
 const SELECT_REDE_COM_RESPONSAVEL = `
   SELECT
     r.id,
+    r.diretor_id,
     r.nome,
+    r.emoji,
+    r.ativo,
+    r.visivel,
     r.responsavel_id,
     resp.nome AS responsavel_nome,
-    r.visivel,
     r.criado_em
   FROM Redes r
   LEFT JOIN Responsaveis resp ON resp.id = r.responsavel_id
@@ -126,31 +133,35 @@ function mapRedeRow(row) {
   };
 }
 
-async function listRedesComLojas() {
+/**
+ * Lista todos os diretores, cada um com o array `redes` aninhado (montado em
+ * memória, agrupando pelo `diretor_id` de cada rede).
+ */
+async function listDiretoresComRedes() {
   const pool = await getPool();
+
+  const diretoresResult = await pool.request().query(`
+    SELECT id, nome, criado_em
+    FROM Diretores
+    ORDER BY nome
+  `);
 
   const redesResult = await pool.request().query(`
     ${SELECT_REDE_COM_RESPONSAVEL}
     ORDER BY r.nome
   `);
 
-  const lojasResult = await pool.request().query(`
-    SELECT id, rede_id, nome, emoji, ativo, criado_em
-    FROM Lojas
-    ORDER BY nome
-  `);
-
-  const lojasPorRede = new Map();
-  for (const loja of lojasResult.recordset) {
-    if (!lojasPorRede.has(loja.rede_id)) {
-      lojasPorRede.set(loja.rede_id, []);
+  const redesPorDiretor = new Map();
+  for (const rede of redesResult.recordset) {
+    if (!redesPorDiretor.has(rede.diretor_id)) {
+      redesPorDiretor.set(rede.diretor_id, []);
     }
-    lojasPorRede.get(loja.rede_id).push(loja);
+    redesPorDiretor.get(rede.diretor_id).push(mapRedeRow(rede));
   }
 
-  return redesResult.recordset.map((rede) => ({
-    ...mapRedeRow(rede),
-    lojas: lojasPorRede.get(rede.id) || [],
+  return diretoresResult.recordset.map((diretor) => ({
+    ...diretor,
+    redes: redesPorDiretor.get(diretor.id) || [],
   }));
 }
 
@@ -165,45 +176,41 @@ async function listCategorias() {
 }
 
 /**
- * Busca uma rede por id, já com o array `lojas` aninhado (mesmo shape de
- * `listRedesComLojas`). Retorna `undefined` se a rede não existir.
+ * Busca um diretor por id, já com o array `redes` aninhado (mesmo shape de
+ * `listDiretoresComRedes`). Retorna `undefined` se o diretor não existir.
  */
-async function getRedeComLojasById(id) {
+async function getDiretorComRedesById(id) {
   const pool = await getPool();
 
-  const redeResult = await pool
+  const diretorResult = await pool
     .request()
     .input('id', sql.Int, id)
-    .query(`
-      ${SELECT_REDE_COM_RESPONSAVEL}
-      WHERE r.id = @id
-    `);
+    .query('SELECT id, nome, criado_em FROM Diretores WHERE id = @id');
 
-  const rede = redeResult.recordset[0];
-  if (!rede) {
+  const diretor = diretorResult.recordset[0];
+  if (!diretor) {
     return undefined;
   }
 
-  const lojasResult = await pool
+  const redesResult = await pool
     .request()
-    .input('redeId', sql.Int, id)
+    .input('diretorId', sql.Int, id)
     .query(`
-      SELECT id, rede_id, nome, emoji, ativo, criado_em
-      FROM Lojas
-      WHERE rede_id = @redeId
-      ORDER BY nome
+      ${SELECT_REDE_COM_RESPONSAVEL}
+      WHERE r.diretor_id = @diretorId
+      ORDER BY r.nome
     `);
 
-  return { ...mapRedeRow(rede), lojas: lojasResult.recordset };
+  return { ...diretor, redes: redesResult.recordset.map(mapRedeRow) };
 }
 
 /**
- * Verifica se já existe uma rede com o mesmo `nome` (case-insensitive,
- * ignorando espaços extras no início/fim). Se `excludeId` for informado,
- * a própria rede com esse id é excluída da checagem (usado no PUT, para
- * não bloquear reenviar o nome atual sem alteração).
+ * Verifica se já existe um diretor com o mesmo `nome` (case-insensitive,
+ * ignorando espaços extras no início/fim). Se `excludeId` for informado, o
+ * próprio diretor com esse id é excluído da checagem (usado no PUT, para não
+ * bloquear reenviar o nome atual sem alteração).
  */
-async function existeRedeComNome(nome, excludeId = null) {
+async function existeDiretorComNome(nome, excludeId = null) {
   const pool = await getPool();
   const result = await pool
     .request()
@@ -211,7 +218,7 @@ async function existeRedeComNome(nome, excludeId = null) {
     .input('excludeId', sql.Int, excludeId)
     .query(`
       SELECT COUNT(*) AS total
-      FROM Redes
+      FROM Diretores
       WHERE LOWER(LTRIM(RTRIM(nome))) = LOWER(LTRIM(RTRIM(@nome)))
         AND (@excludeId IS NULL OR id <> @excludeId)
     `);
@@ -219,26 +226,145 @@ async function existeRedeComNome(nome, excludeId = null) {
 }
 
 /**
- * Insere uma nova rede e retorna o registro criado (sem `lojas`, quem
- * monta o shape completo é o service). Toda rede nova é criada com
- * `responsavel_id = NULL` — este endpoint não aceita mais atribuir um
- * responsável na criação (ver `PUT /redes/:id`, seção 6 do contrato).
+ * Insere um novo diretor e retorna o registro criado (sem `redes`, quem
+ * monta o shape completo é o service).
  */
-async function insertRede({ nome }) {
+async function insertDiretor({ nome }) {
   const pool = await getPool();
   const result = await pool
     .request()
     .input('nome', sql.NVarChar, nome)
     .query(`
-      INSERT INTO Redes (nome, responsavel_id, criado_em)
-      OUTPUT inserted.id, inserted.nome, inserted.visivel, inserted.criado_em
-      VALUES (@nome, NULL, SYSUTCDATETIME())
+      INSERT INTO Diretores (nome, criado_em)
+      OUTPUT inserted.id, inserted.nome, inserted.criado_em
+      VALUES (@nome, SYSUTCDATETIME())
+    `);
+  return result.recordset[0];
+}
+
+/**
+ * Busca um diretor "cru" (sem redes) por id. Retorna `undefined` se não existir.
+ */
+async function findDiretorById(id) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.Int, id)
+    .query('SELECT id, nome, criado_em FROM Diretores WHERE id = @id');
+  return result.recordset[0];
+}
+
+/**
+ * Atualização parcial de um diretor: só `nome` existe neste nível.
+ */
+async function updateDiretor(id, { nome }) {
+  const pool = await getPool();
+  await pool
+    .request()
+    .input('id', sql.Int, id)
+    .input('nome', sql.NVarChar, nome ?? null)
+    .query(`
+      UPDATE Diretores
+      SET nome = COALESCE(@nome, nome)
+      WHERE id = @id
+    `);
+}
+
+/**
+ * Verifica existência + bloqueio de vínculo (redes) e exclui o diretor, tudo
+ * dentro de uma transação, para evitar condição de corrida entre o SELECT de
+ * checagem e o DELETE.
+ * Retorna 'not_found' | 'has_redes' | 'deleted'.
+ */
+async function deleteDiretorIfNoRedes(id) {
+  const pool = await getPool();
+  const transaction = new sql.Transaction(pool);
+
+  await transaction.begin();
+  try {
+    const diretorRequest = new sql.Request(transaction);
+    diretorRequest.input('id', sql.Int, id);
+    const diretorResult = await diretorRequest.query(
+      'SELECT id FROM Diretores WHERE id = @id'
+    );
+
+    if (!diretorResult.recordset[0]) {
+      await transaction.rollback();
+      return 'not_found';
+    }
+
+    const countRequest = new sql.Request(transaction);
+    countRequest.input('diretorId', sql.Int, id);
+    const countResult = await countRequest.query(
+      'SELECT COUNT(*) AS total FROM Redes WHERE diretor_id = @diretorId'
+    );
+
+    if (countResult.recordset[0].total > 0) {
+      await transaction.rollback();
+      return 'has_redes';
+    }
+
+    const deleteRequest = new sql.Request(transaction);
+    deleteRequest.input('id', sql.Int, id);
+    await deleteRequest.query('DELETE FROM Diretores WHERE id = @id');
+
+    await transaction.commit();
+    return 'deleted';
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
+}
+
+/**
+ * Verifica se já existe uma rede com o mesmo `nome` dentro do mesmo
+ * `diretor_id` (case-insensitive, ignorando espaços extras no início/fim).
+ * Se `excludeId` for informado, a própria rede com esse id é excluída da
+ * checagem (usado no PUT, para não bloquear reenviar o nome atual sem
+ * alteração).
+ */
+async function existeRedeComNomeNoDiretor({ nome, diretorId, excludeId = null }) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('nome', sql.NVarChar, nome)
+    .input('diretorId', sql.Int, diretorId)
+    .input('excludeId', sql.Int, excludeId)
+    .query(`
+      SELECT COUNT(*) AS total
+      FROM Redes
+      WHERE diretor_id = @diretorId
+        AND LOWER(LTRIM(RTRIM(nome))) = LOWER(LTRIM(RTRIM(@nome)))
+        AND (@excludeId IS NULL OR id <> @excludeId)
+    `);
+  return result.recordset[0].total > 0;
+}
+
+/**
+ * Insere uma nova rede vinculada a um diretor existente e retorna o
+ * registro criado. Toda rede nova é criada com `responsavel_id = NULL` —
+ * este endpoint não aceita atribuir um responsável na criação (ver
+ * `PUT /redes/:id`, seção 6 do contrato).
+ */
+async function insertRede({ diretorId, nome, emoji }) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('diretorId', sql.Int, diretorId)
+    .input('nome', sql.NVarChar, nome)
+    .input('emoji', sql.NVarChar, emoji ?? null)
+    .query(`
+      INSERT INTO Redes (diretor_id, nome, emoji, ativo, visivel, responsavel_id, criado_em)
+      OUTPUT inserted.id, inserted.diretor_id, inserted.nome, inserted.emoji,
+             inserted.ativo, inserted.visivel, inserted.criado_em
+      VALUES (@diretorId, @nome, @emoji, 1, 1, NULL, SYSUTCDATETIME())
     `);
   return { ...result.recordset[0], responsavel: null };
 }
 
 /**
- * Busca uma rede "crua" (sem lojas) por id. Retorna `undefined` se não existir.
+ * Busca uma rede por id, já com `responsavel` mapeado. Retorna `undefined`
+ * se não existir.
  */
 async function findRedeById(id) {
   const pool = await getPool();
@@ -254,51 +380,44 @@ async function findRedeById(id) {
 }
 
 /**
- * Verifica se existe um responsável com o `id` informado.
- */
-async function existeResponsavel(id) {
-  const pool = await getPool();
-  const result = await pool
-    .request()
-    .input('id', sql.Int, id)
-    .query('SELECT 1 AS ok FROM Responsaveis WHERE id = @id');
-  return result.recordset.length > 0;
-}
-
-/**
  * Atualização parcial de uma rede: campos ausentes (undefined) permanecem
  * com o valor atual no banco via COALESCE. `responsavelId` é a exceção
  * "parcial com null explícito": quando presente (mesmo `null`), sobrescreve
  * `responsavel_id` (permitindo desatribuir o responsável); só a AUSÊNCIA do
- * campo no corpo preserva o valor atual.
+ * campo no corpo preserva o valor atual. Mesma lógica para `emoji`.
  */
-async function updateRede(id, { nome, responsavelId, visivel }) {
+async function updateRede(id, { nome, emoji, responsavelId, ativo, visivel }) {
   const pool = await getPool();
   await pool
     .request()
     .input('id', sql.Int, id)
     .input('nome', sql.NVarChar, nome ?? null)
+    .input('emoji', sql.NVarChar, emoji !== undefined ? emoji : null)
+    .input('emojiInformado', sql.Bit, emoji !== undefined ? 1 : 0)
     .input('responsavelId', sql.Int, responsavelId !== undefined ? responsavelId : null)
     .input('responsavelIdInformado', sql.Bit, responsavelId !== undefined ? 1 : 0)
+    .input('ativo', sql.Bit, ativo !== undefined ? ativo : null)
     .input('visivel', sql.Bit, visivel !== undefined ? visivel : null)
     .input('visivelInformado', sql.Bit, visivel !== undefined ? 1 : 0)
     .query(`
       UPDATE Redes
       SET
         nome = COALESCE(@nome, nome),
+        emoji = CASE WHEN @emojiInformado = 1 THEN @emoji ELSE emoji END,
         responsavel_id = CASE WHEN @responsavelIdInformado = 1 THEN @responsavelId ELSE responsavel_id END,
+        ativo = COALESCE(@ativo, ativo),
         visivel = CASE WHEN @visivelInformado = 1 THEN @visivel ELSE visivel END
       WHERE id = @id
     `);
 }
 
 /**
- * Verifica existência + bloqueio de vínculo (lojas) e exclui a rede, tudo
- * dentro de uma transação, para evitar condição de corrida entre o SELECT
- * de checagem e o DELETE.
- * Retorna 'not_found' | 'has_lojas' | 'deleted'.
+ * Verifica existência + bloqueio de vínculo (entradas) e exclui a rede, tudo
+ * dentro de uma transação, para evitar condição de corrida entre o SELECT de
+ * checagem e o DELETE.
+ * Retorna 'not_found' | 'has_entradas' | 'deleted'.
  */
-async function deleteRedeIfNoLojas(id) {
+async function deleteRedeIfNoEntradas(id) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
 
@@ -318,12 +437,12 @@ async function deleteRedeIfNoLojas(id) {
     const countRequest = new sql.Request(transaction);
     countRequest.input('redeId', sql.Int, id);
     const countResult = await countRequest.query(
-      'SELECT COUNT(*) AS total FROM Lojas WHERE rede_id = @redeId'
+      'SELECT COUNT(*) AS total FROM Entradas WHERE rede_id = @redeId'
     );
 
     if (countResult.recordset[0].total > 0) {
       await transaction.rollback();
-      return 'has_lojas';
+      return 'has_entradas';
     }
 
     const deleteRequest = new sql.Request(transaction);
@@ -339,130 +458,15 @@ async function deleteRedeIfNoLojas(id) {
 }
 
 /**
- * Verifica se já existe uma loja com o mesmo `nome` dentro da mesma
- * `rede_id` (case-insensitive, ignorando espaços extras no início/fim).
- * Se `excludeId` for informado, a própria loja com esse id é excluída da
- * checagem (usado no PUT, para não bloquear reenviar o nome atual sem
- * alteração).
+ * Verifica se existe um responsável com o `id` informado.
  */
-async function existeLojaComNomeNaRede({ nome, redeId, excludeId = null }) {
-  const pool = await getPool();
-  const result = await pool
-    .request()
-    .input('nome', sql.NVarChar, nome)
-    .input('redeId', sql.Int, redeId)
-    .input('excludeId', sql.Int, excludeId)
-    .query(`
-      SELECT COUNT(*) AS total
-      FROM Lojas
-      WHERE rede_id = @redeId
-        AND LOWER(LTRIM(RTRIM(nome))) = LOWER(LTRIM(RTRIM(@nome)))
-        AND (@excludeId IS NULL OR id <> @excludeId)
-    `);
-  return result.recordset[0].total > 0;
-}
-
-/**
- * Insere uma nova loja e retorna o registro criado.
- */
-async function insertLoja({ redeId, nome, emoji }) {
-  const pool = await getPool();
-  const result = await pool
-    .request()
-    .input('redeId', sql.Int, redeId)
-    .input('nome', sql.NVarChar, nome)
-    .input('emoji', sql.NVarChar, emoji ?? null)
-    .query(`
-      INSERT INTO Lojas (rede_id, nome, emoji, ativo, criado_em)
-      OUTPUT inserted.id, inserted.rede_id, inserted.nome, inserted.emoji, inserted.ativo, inserted.criado_em
-      VALUES (@redeId, @nome, @emoji, 1, SYSUTCDATETIME())
-    `);
-  return result.recordset[0];
-}
-
-/**
- * Busca uma loja por id. Retorna `undefined` se não existir.
- */
-async function findLojaById(id) {
+async function existeResponsavel(id) {
   const pool = await getPool();
   const result = await pool
     .request()
     .input('id', sql.Int, id)
-    .query(`
-      SELECT id, rede_id, nome, emoji, ativo, criado_em
-      FROM Lojas
-      WHERE id = @id
-    `);
-  return result.recordset[0];
-}
-
-/**
- * Atualização parcial de uma loja: campos ausentes (undefined) permanecem
- * com o valor atual no banco via COALESCE.
- */
-async function updateLoja(id, { nome, emoji, ativo }) {
-  const pool = await getPool();
-  await pool
-    .request()
-    .input('id', sql.Int, id)
-    .input('nome', sql.NVarChar, nome ?? null)
-    .input('emoji', sql.NVarChar, emoji !== undefined ? emoji : null)
-    .input('emojiInformado', sql.Bit, emoji !== undefined ? 1 : 0)
-    .input('ativo', sql.Bit, ativo !== undefined ? ativo : null)
-    .query(`
-      UPDATE Lojas
-      SET
-        nome = COALESCE(@nome, nome),
-        emoji = CASE WHEN @emojiInformado = 1 THEN @emoji ELSE emoji END,
-        ativo = COALESCE(@ativo, ativo)
-      WHERE id = @id
-    `);
-}
-
-/**
- * Verifica existência + bloqueio de vínculo (entradas) e exclui a loja,
- * tudo dentro de uma transação, para evitar condição de corrida entre o
- * SELECT de checagem e o DELETE.
- * Retorna 'not_found' | 'has_entradas' | 'deleted'.
- */
-async function deleteLojaIfNoEntradas(id) {
-  const pool = await getPool();
-  const transaction = new sql.Transaction(pool);
-
-  await transaction.begin();
-  try {
-    const lojaRequest = new sql.Request(transaction);
-    lojaRequest.input('id', sql.Int, id);
-    const lojaResult = await lojaRequest.query(
-      'SELECT id FROM Lojas WHERE id = @id'
-    );
-
-    if (!lojaResult.recordset[0]) {
-      await transaction.rollback();
-      return 'not_found';
-    }
-
-    const countRequest = new sql.Request(transaction);
-    countRequest.input('lojaId', sql.Int, id);
-    const countResult = await countRequest.query(
-      'SELECT COUNT(*) AS total FROM Entradas WHERE loja_id = @lojaId'
-    );
-
-    if (countResult.recordset[0].total > 0) {
-      await transaction.rollback();
-      return 'has_entradas';
-    }
-
-    const deleteRequest = new sql.Request(transaction);
-    deleteRequest.input('id', sql.Int, id);
-    await deleteRequest.query('DELETE FROM Lojas WHERE id = @id');
-
-    await transaction.commit();
-    return 'deleted';
-  } catch (err) {
-    await transaction.rollback();
-    throw err;
-  }
+    .query('SELECT 1 AS ok FROM Responsaveis WHERE id = @id');
+  return result.recordset.length > 0;
 }
 
 /**
@@ -481,7 +485,7 @@ async function listResponsaveis() {
 /**
  * Verifica se já existe um responsável com o mesmo `nome` (case-insensitive,
  * ignorando espaços extras no início/fim). Mesmo padrão de
- * `existeRedeComNome`/`existeLojaComNomeNaRede`.
+ * `existeDiretorComNome`/`existeRedeComNomeNoDiretor`.
  */
 async function existeResponsavelComNome(nome) {
   const pool = await getPool();
@@ -516,8 +520,12 @@ async function insertResponsavel({ nome }) {
  * Verifica existência + bloqueio de vínculo (redes) e exclui o responsável,
  * tudo dentro de uma transação, para evitar condição de corrida entre o
  * SELECT de checagem e o DELETE. Mesmo padrão de
- * `deleteRedeIfNoLojas`/`deleteLojaIfNoEntradas`.
+ * `deleteDiretorIfNoRedes`/`deleteRedeIfNoEntradas`.
  * Retorna 'not_found' | 'has_redes' | 'deleted'.
+ *
+ * Nota: o vínculo checado (`Redes.responsavel_id`) agora é com a Rede
+ * (Delta, Lendários...), não mais com o Diretor — a query não precisou
+ * mudar porque `Redes` já é o nome da tabela certa após o rename do schema.
  */
 async function deleteResponsavelIfNoRedes(id) {
   const pool = await getPool();
@@ -562,19 +570,19 @@ async function deleteResponsavelIfNoRedes(id) {
 module.exports = {
   listEntradas,
   upsertEntrada,
-  listRedesComLojas,
+  listDiretoresComRedes,
   listCategorias,
-  getRedeComLojasById,
+  getDiretorComRedesById,
+  insertDiretor,
+  findDiretorById,
+  updateDiretor,
+  existeDiretorComNome,
+  deleteDiretorIfNoRedes,
   insertRede,
   findRedeById,
   updateRede,
-  existeRedeComNome,
-  deleteRedeIfNoLojas,
-  insertLoja,
-  findLojaById,
-  updateLoja,
-  existeLojaComNomeNaRede,
-  deleteLojaIfNoEntradas,
+  existeRedeComNomeNoDiretor,
+  deleteRedeIfNoEntradas,
   existeResponsavel,
   listResponsaveis,
   existeResponsavelComNome,

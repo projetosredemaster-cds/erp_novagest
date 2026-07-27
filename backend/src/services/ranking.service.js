@@ -11,12 +11,12 @@ async function getEntradas({ data, categoriaId }) {
   return rankingModel.listEntradas({ data, categoriaId });
 }
 
-async function salvarEntrada({ data, categoriaId, lojaId, valor }) {
-  return rankingModel.upsertEntrada({ data, categoriaId, lojaId, valor });
+async function salvarEntrada({ data, categoriaId, redeId, valor }) {
+  return rankingModel.upsertEntrada({ data, categoriaId, redeId, valor });
 }
 
-async function getRedesComLojas() {
-  return rankingModel.listRedesComLojas();
+async function getDiretoresComRedes() {
+  return rankingModel.listDiretoresComRedes();
 }
 
 async function getCategorias() {
@@ -24,38 +24,96 @@ async function getCategorias() {
 }
 
 /**
- * Cria uma nova rede e retorna o objeto completo (com `lojas: []`, já que
- * uma rede recém-criada nunca tem lojas ainda). Toda rede nova é criada sem
- * responsável atribuído (`responsavel: null`) — este endpoint não aceita
- * mais o campo `responsavel`/`responsavelId` na criação.
- * Retorna 'nome_duplicado' se já existir uma rede com o mesmo nome
+ * Cria um novo diretor e retorna o objeto completo (com `redes: []`, já que
+ * um diretor recém-criado nunca tem redes ainda).
+ * Retorna 'nome_duplicado' se já existir um diretor com o mesmo nome
  * (case-insensitive, ignorando espaços extras).
  */
-async function criarRede({ nome }) {
-  const duplicado = await rankingModel.existeRedeComNome(nome);
+async function criarDiretor({ nome }) {
+  const duplicado = await rankingModel.existeDiretorComNome(nome);
   if (duplicado) {
     return 'nome_duplicado';
   }
 
-  const redeCriada = await rankingModel.insertRede({ nome });
-  return { ...redeCriada, lojas: [] };
+  const diretorCriado = await rankingModel.insertDiretor({ nome });
+  return { ...diretorCriado, redes: [] };
 }
 
 /**
- * Atualiza parcialmente uma rede existente e retorna o objeto completo
- * (com `lojas[]`), `null` se a rede não existir, 'nome_duplicado' se o
- * novo nome já pertencer a outra rede (case-insensitive, ignorando espaços
- * extras), ou 'responsavel_inexistente' se `responsavelId` for informado
- * (não nulo) mas não corresponder a nenhum `Responsaveis.id` existente.
+ * Atualiza o nome de um diretor existente e retorna o objeto completo (com
+ * `redes[]`), `null` se o diretor não existir, ou 'nome_duplicado' se o novo
+ * nome já pertencer a outro diretor (case-insensitive, ignorando espaços
+ * extras).
  */
-async function atualizarRede(id, { nome, responsavelId, visivel }) {
+async function atualizarDiretor(id, { nome }) {
+  const existente = await rankingModel.findDiretorById(id);
+  if (!existente) {
+    return null;
+  }
+
+  if (nome !== undefined) {
+    const duplicado = await rankingModel.existeDiretorComNome(nome, id);
+    if (duplicado) {
+      return 'nome_duplicado';
+    }
+  }
+
+  await rankingModel.updateDiretor(id, { nome });
+  return rankingModel.getDiretorComRedesById(id);
+}
+
+/**
+ * Exclui um diretor, bloqueando com conflito se houver qualquer rede
+ * vinculada.
+ * Retorna 'not_found' | 'has_redes' | 'deleted'.
+ */
+async function excluirDiretor(id) {
+  return rankingModel.deleteDiretorIfNoRedes(id);
+}
+
+/**
+ * Cria uma nova rede vinculada a um diretor existente. Toda rede nova é
+ * criada sem responsável atribuído (`responsavel: null`) — este endpoint
+ * não aceita o campo `responsavelId` na criação.
+ * Retorna 'diretor_inexistente' | 'nome_duplicado' | a rede criada.
+ * 'nome_duplicado' quando já existe uma rede com o mesmo nome
+ * (case-insensitive, ignorando espaços extras) dentro do mesmo diretor.
+ */
+async function criarRede({ diretorId, nome, emoji }) {
+  const diretor = await rankingModel.findDiretorById(diretorId);
+  if (!diretor) {
+    return 'diretor_inexistente';
+  }
+
+  const duplicado = await rankingModel.existeRedeComNomeNoDiretor({ nome, diretorId });
+  if (duplicado) {
+    return 'nome_duplicado';
+  }
+
+  return rankingModel.insertRede({ diretorId, nome, emoji });
+}
+
+/**
+ * Atualiza parcialmente uma rede existente e retorna o objeto completo,
+ * `null` se a rede não existir, 'nome_duplicado' se o novo nome já
+ * pertencer a outra rede do mesmo diretor (case-insensitive, ignorando
+ * espaços extras), ou 'responsavel_inexistente' se `responsavelId` for
+ * informado (não nulo) mas não corresponder a nenhum `Responsaveis.id`
+ * existente. Esta rota não permite trocar a rede de diretor, então a
+ * comparação de nome usa o `diretor_id` atual da rede.
+ */
+async function atualizarRede(id, { nome, emoji, responsavelId, ativo, visivel }) {
   const existente = await rankingModel.findRedeById(id);
   if (!existente) {
     return null;
   }
 
   if (nome !== undefined) {
-    const duplicado = await rankingModel.existeRedeComNome(nome, id);
+    const duplicado = await rankingModel.existeRedeComNomeNoDiretor({
+      nome,
+      diretorId: existente.diretor_id,
+      excludeId: id,
+    });
     if (duplicado) {
       return 'nome_duplicado';
     }
@@ -68,74 +126,17 @@ async function atualizarRede(id, { nome, responsavelId, visivel }) {
     }
   }
 
-  await rankingModel.updateRede(id, { nome, responsavelId, visivel });
-  return rankingModel.getRedeComLojasById(id);
+  await rankingModel.updateRede(id, { nome, emoji, responsavelId, ativo, visivel });
+  return rankingModel.findRedeById(id);
 }
 
 /**
- * Exclui uma rede, bloqueando com conflito se houver qualquer loja
- * vinculada (independente do valor de `ativo`).
- * Retorna 'not_found' | 'has_lojas' | 'deleted'.
- */
-async function excluirRede(id) {
-  return rankingModel.deleteRedeIfNoLojas(id);
-}
-
-/**
- * Cria uma nova loja vinculada a uma rede existente.
- * Retorna 'rede_inexistente' | 'nome_duplicado' | a loja criada.
- * 'nome_duplicado' quando já existe uma loja com o mesmo nome
- * (case-insensitive, ignorando espaços extras) dentro da mesma rede.
- */
-async function criarLoja({ redeId, nome, emoji }) {
-  const rede = await rankingModel.findRedeById(redeId);
-  if (!rede) {
-    return 'rede_inexistente';
-  }
-
-  const duplicado = await rankingModel.existeLojaComNomeNaRede({ nome, redeId });
-  if (duplicado) {
-    return 'nome_duplicado';
-  }
-
-  return rankingModel.insertLoja({ redeId, nome, emoji });
-}
-
-/**
- * Atualiza parcialmente uma loja existente e retorna o objeto completo,
- * `null` se a loja não existir, ou 'nome_duplicado' se o novo nome já
- * pertencer a outra loja da mesma rede (case-insensitive, ignorando
- * espaços extras). Esta rota não permite trocar a loja de rede, então a
- * comparação usa o `rede_id` atual da loja.
- */
-async function atualizarLoja(id, { nome, emoji, ativo }) {
-  const existente = await rankingModel.findLojaById(id);
-  if (!existente) {
-    return null;
-  }
-
-  if (nome !== undefined) {
-    const duplicado = await rankingModel.existeLojaComNomeNaRede({
-      nome,
-      redeId: existente.rede_id,
-      excludeId: id,
-    });
-    if (duplicado) {
-      return 'nome_duplicado';
-    }
-  }
-
-  await rankingModel.updateLoja(id, { nome, emoji, ativo });
-  return rankingModel.findLojaById(id);
-}
-
-/**
- * Exclui uma loja, bloqueando com conflito se houver qualquer entrada
+ * Exclui uma rede, bloqueando com conflito se houver qualquer entrada
  * vinculada.
  * Retorna 'not_found' | 'has_entradas' | 'deleted'.
  */
-async function excluirLoja(id) {
-  return rankingModel.deleteLojaIfNoEntradas(id);
+async function excluirRede(id) {
+  return rankingModel.deleteRedeIfNoEntradas(id);
 }
 
 /**
@@ -179,14 +180,14 @@ async function excluirResponsavel(id) {
 module.exports = {
   getEntradas,
   salvarEntrada,
-  getRedesComLojas,
+  getDiretoresComRedes,
   getCategorias,
+  criarDiretor,
+  atualizarDiretor,
+  excluirDiretor,
   criarRede,
   atualizarRede,
   excluirRede,
-  criarLoja,
-  atualizarLoja,
-  excluirLoja,
   enviarRelatorioEmail,
   getResponsaveis,
   criarResponsavel,

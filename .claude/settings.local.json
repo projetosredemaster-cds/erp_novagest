@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(npm ls *)",
+      "Bash(npx --no-install playwright --version)",
+      "Bash(mkdir -p \"C:/Users/palla/AppData/Local/Temp/claude/c--Users-palla-OneDrive-Documentos-projetos-erp-Novagest/60f72ce2-3f9a-4ad6-9cd4-f2a831319415/scratchpad\")",
+      "Bash(\"/c/Program Files/Google/Chrome/Application/chrome.exe\" --headless=new --disable-gpu --no-sandbox --screenshot=\"C:/Users/palla/AppData/Local/Temp/claude/c--Users-palla-OneDrive-Documentos-projetos-erp-Novagest/60f72ce2-3f9a-4ad6-9cd4-f2a831319415/scratchpad/ranking.png\" --window-size=1440,900 --virtual-time-budget=4000 \"http://localhost:5174/ranking\")",
+      "Bash(\"/c/Program Files/Google/Chrome/Application/chrome.exe\" --headless=new --disable-gpu --no-sandbox --enable-logging=stderr --v=1 --screenshot=\"C:/Users/palla/AppData/Local/Temp/claude/c--Users-palla-OneDrive-Documentos-projetos-erp-Novagest/60f72ce2-3f9a-4ad6-9cd4-f2a831319415/scratchpad/ranking2.png\" --window-size=1440,900 \"http://localhost:5174/ranking\")",
+      "Bash(powershell -NoProfile -Command \"Get-NetTCPConnection -LocalPort 3000,5173 -State Listen -ErrorAction SilentlyContinue | Select-Object LocalPort, OwningProcess\")"
+    ]
+  }
+}

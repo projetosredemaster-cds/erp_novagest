@@ -5,14 +5,19 @@
 // src/lib/apiClient.js) já anexa o header `Authorization: Bearer <token>`
 // lendo o token salvo (mesmo lugar que AuthContext usa) e dispara o logout
 // global se a API responder 401 (token ausente/expirado).
+//
+// Hierarquia de dados (ver CONTRATO-RANKING-API.md v2): Diretor -> Rede.
+// O Ranking nunca opera no nível Loja física (tabela `Lojas`, usada só pelo
+// módulo Margens) — "rede" aqui sempre se refere à antiga "loja" do modelo
+// de 2 níveis (Delta, Lendários...), agora aninhada dentro de um Diretor.
 import { apiRequest } from '../../lib/apiClient.js';
 
 function request(path, options) {
   return apiRequest(path, options);
 }
 
-export function fetchRedes() {
-  return request('/api/ranking/redes');
+export function fetchDiretores() {
+  return request('/api/ranking/diretores');
 }
 
 export function fetchCategorias() {
@@ -24,47 +29,47 @@ export function fetchEntradas(data, categoriaId) {
   return request(`/api/ranking/entradas?${params.toString()}`);
 }
 
-export function salvarEntrada({ data, categoriaId, lojaId, valor }) {
+export function salvarEntrada({ data, categoriaId, redeId, valor }) {
   return request('/api/ranking/entradas', {
     method: 'POST',
-    body: JSON.stringify({ data, categoriaId, lojaId, valor }),
+    body: JSON.stringify({ data, categoriaId, redeId, valor }),
   });
 }
 
-export function criarRede({ nome }) {
-  return request('/api/ranking/redes', {
+export function criarDiretor({ nome }) {
+  return request('/api/ranking/diretores', {
     method: 'POST',
     body: JSON.stringify({ nome }),
   });
 }
 
-export function atualizarRede(id, { nome, responsavelId, visivel }) {
+export function atualizarDiretor(id, { nome }) {
+  return request(`/api/ranking/diretores/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ nome }),
+  });
+}
+
+export function removerDiretor(id) {
+  return request(`/api/ranking/diretores/${id}`, { method: 'DELETE' });
+}
+
+export function criarRede({ diretorId, nome, emoji }) {
+  return request('/api/ranking/redes', {
+    method: 'POST',
+    body: JSON.stringify({ diretorId, nome, emoji }),
+  });
+}
+
+export function atualizarRede(id, { nome, emoji, responsavelId, ativo, visivel }) {
   return request(`/api/ranking/redes/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ nome, responsavelId, visivel }),
+    body: JSON.stringify({ nome, emoji, responsavelId, ativo, visivel }),
   });
 }
 
 export function removerRede(id) {
   return request(`/api/ranking/redes/${id}`, { method: 'DELETE' });
-}
-
-export function criarLoja({ redeId, nome, emoji }) {
-  return request('/api/ranking/lojas', {
-    method: 'POST',
-    body: JSON.stringify({ redeId, nome, emoji }),
-  });
-}
-
-export function atualizarLoja(id, { nome, emoji, ativo }) {
-  return request(`/api/ranking/lojas/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify({ nome, emoji, ativo }),
-  });
-}
-
-export function removerLoja(id) {
-  return request(`/api/ranking/lojas/${id}`, { method: 'DELETE' });
 }
 
 export function enviarRelatorioPorEmail({ texto, assunto }) {

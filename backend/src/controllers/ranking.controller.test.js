@@ -1,12 +1,14 @@
 // Testes de integração de rota (Supertest, sem subir o servidor de verdade,
-// sem tocar o Azure SQL real) para a feature "ocultar rede" (campo
-// `Redes.visivel`), cobrindo:
-//   - GET  /api/ranking/redes   (shape com `visivel`)
-//   - PUT  /api/ranking/redes/:id (aceitar/validar `visivel`, sem regressão
-//     nos campos `nome`/`responsavel` já existentes)
+// sem tocar o Azure SQL real) para o módulo Ranking na hierarquia v2
+// (Diretor -> Rede, ver CONTRATO-RANKING-API.md). Migrado do contrato antigo
+// de 2 níveis (Rede -> Loja); cobre:
+//   - GET/POST/PUT/DELETE /api/ranking/diretores
+//   - POST/PUT/DELETE     /api/ranking/redes
 //   - autenticação (401 sem token / token inválido)
-//   - o fato de que a rota NÃO tem nenhuma checagem de admin no backend
-//     (achado de QA, ver relatório final).
+//   - o fato de que PUT /api/ranking/redes/:id NÃO tem nenhuma checagem de
+//     admin no backend (achado de QA, ver relatório final)
+//   - CRUD de Responsaveis (sem mudança de rota/payload, só de significado —
+//     vínculo agora é com Rede, não Diretor).
 //
 // NOTA DE IMPLEMENTAÇÃO — por que `require()` (CJS puro) em vez de `import`:
 // `vi.mock('../models/ranking.model', factory)` com sintaxe `import` só
@@ -58,58 +60,339 @@ beforeEach(() => {
   }
 });
 
-describe('GET /api/ranking/redes', () => {
+describe('GET /api/ranking/diretores', () => {
   it('retorna 401 sem header Authorization', async () => {
-    const res = await request(app).get('/api/ranking/redes');
+    const res = await request(app).get('/api/ranking/diretores');
     expect(res.status).toBe(401);
     expect(res.body).toEqual({ error: 'Token de autenticação não informado.' });
   });
 
   it('retorna 401 com token inválido', async () => {
     const res = await request(app)
-      .get('/api/ranking/redes')
+      .get('/api/ranking/diretores')
       .set('Authorization', 'Bearer token-invalido');
     expect(res.status).toBe(401);
     expect(res.body).toEqual({ error: 'Token de autenticação inválido ou expirado.' });
   });
 
-  it('200 — retorna as redes com o campo "visivel" no shape, autenticado', async () => {
-    rankingModel.listRedesComLojas.mockResolvedValue([
-      { id: 1, nome: 'Rede A', responsavel: { id: 3, nome: 'Fulano' }, visivel: true, criado_em: '2024-01-01T00:00:00.000Z', lojas: [] },
-      { id: 2, nome: 'Rede B', responsavel: null, visivel: false, criado_em: '2024-01-02T00:00:00.000Z', lojas: [] },
+  it('200 — retorna os diretores com redes aninhadas, autenticado', async () => {
+    rankingModel.listDiretoresComRedes.mockResolvedValue([
+      {
+        id: 1,
+        nome: 'Victor Hugo',
+        criado_em: '2024-01-01T00:00:00.000Z',
+        redes: [
+          { id: 5, diretor_id: 1, nome: 'Delta', emoji: '🔺', ativo: true, visivel: true, responsavel: { id: 3, nome: 'Grazy' }, criado_em: '2024-01-02T00:00:00.000Z' },
+        ],
+      },
+      { id: 2, nome: 'Emerson', criado_em: '2024-01-03T00:00:00.000Z', redes: [] },
     ]);
 
     const res = await request(app)
-      .get('/api/ranking/redes')
+      .get('/api/ranking/diretores')
       .set('Authorization', `Bearer ${tokenFor()}`);
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(2);
-    expect(res.body[0]).toHaveProperty('visivel', true);
-    expect(res.body[0].responsavel).toEqual({ id: 3, nome: 'Fulano' });
-    expect(res.body[1]).toHaveProperty('visivel', false);
-    expect(res.body[1].responsavel).toBeNull();
+    expect(res.body[0].redes[0]).toHaveProperty('visivel', true);
+    expect(res.body[0].redes[0].responsavel).toEqual({ id: 3, nome: 'Grazy' });
+    expect(res.body[1].redes).toEqual([]);
   });
 
   it('500 quando o model lança erro (ex: coluna/dependência de banco indisponível)', async () => {
-    rankingModel.listRedesComLojas.mockRejectedValue(new Error('falha de conexão simulada'));
+    rankingModel.listDiretoresComRedes.mockRejectedValue(new Error('falha de conexão simulada'));
 
     const res = await request(app)
-      .get('/api/ranking/redes')
+      .get('/api/ranking/diretores')
       .set('Authorization', `Bearer ${tokenFor()}`);
 
     expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: 'Erro interno ao listar redes.' });
+    expect(res.body).toEqual({ error: 'Erro interno ao listar diretores.' });
+  });
+});
+
+describe('POST /api/ranking/diretores', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).post('/api/ranking/diretores').send({ nome: 'Novo Diretor' });
+    expect(res.status).toBe(401);
+  });
+
+  it('400 quando nome está ausente/vazio', async () => {
+    const res = await request(app)
+      .post('/api/ranking/diretores')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ nome: '   ' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Campo "nome" é obrigatório e não pode ser vazio.' });
+  });
+
+  it('409 quando já existe um diretor com esse nome', async () => {
+    rankingModel.existeDiretorComNome.mockResolvedValue(true);
+
+    const res = await request(app)
+      .post('/api/ranking/diretores')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ nome: 'Victor Hugo' });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'Já existe um diretor com esse nome.' });
+  });
+
+  it('201 — cria o diretor e retorna com redes: []', async () => {
+    rankingModel.existeDiretorComNome.mockResolvedValue(false);
+    rankingModel.insertDiretor.mockResolvedValue({
+      id: 4, nome: 'Novo Diretor', criado_em: '2026-07-27T14:00:00.000Z',
+    });
+
+    const res = await request(app)
+      .post('/api/ranking/diretores')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ nome: 'Novo Diretor' });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      id: 4, nome: 'Novo Diretor', criado_em: '2026-07-27T14:00:00.000Z', redes: [],
+    });
+  });
+
+  it('500 quando o model lança erro', async () => {
+    rankingModel.existeDiretorComNome.mockRejectedValue(new Error('falha simulada'));
+
+    const res = await request(app)
+      .post('/api/ranking/diretores')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ nome: 'Novo Diretor' });
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao criar diretor.' });
+  });
+});
+
+describe('PUT /api/ranking/diretores/:id', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).put('/api/ranking/diretores/1').send({ nome: 'X' });
+    expect(res.status).toBe(401);
+  });
+
+  it('400 quando :id não é inteiro positivo', async () => {
+    const res = await request(app)
+      .put('/api/ranking/diretores/abc')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ nome: 'X' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Parâmetro "id" deve ser um número inteiro positivo.' });
+  });
+
+  it('400 quando nome está ausente/vazio', async () => {
+    const res = await request(app)
+      .put('/api/ranking/diretores/1')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ nome: '' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Campo "nome" é obrigatório e não pode ser vazio.' });
+  });
+
+  it('404 quando o diretor não existe', async () => {
+    rankingModel.findDiretorById.mockResolvedValue(undefined);
+
+    const res = await request(app)
+      .put('/api/ranking/diretores/999')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ nome: 'Novo Nome' });
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Diretor não encontrado.' });
+  });
+
+  it('409 quando o novo nome já pertence a outro diretor', async () => {
+    rankingModel.findDiretorById.mockResolvedValue({ id: 1, nome: 'Atual', criado_em: '2024-01-01T00:00:00.000Z' });
+    rankingModel.existeDiretorComNome.mockResolvedValue(true);
+
+    const res = await request(app)
+      .put('/api/ranking/diretores/1')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ nome: 'Nome Duplicado' });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'Já existe um diretor com esse nome.' });
+  });
+
+  it('200 — atualiza e retorna o objeto completo (com redes[])', async () => {
+    rankingModel.findDiretorById.mockResolvedValue({ id: 1, nome: 'Antigo', criado_em: '2024-01-01T00:00:00.000Z' });
+    rankingModel.existeDiretorComNome.mockResolvedValue(false);
+    rankingModel.updateDiretor.mockResolvedValue(undefined);
+    rankingModel.getDiretorComRedesById.mockResolvedValue({
+      id: 1, nome: 'Novo Nome', criado_em: '2024-01-01T00:00:00.000Z', redes: [],
+    });
+
+    const res = await request(app)
+      .put('/api/ranking/diretores/1')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ nome: 'Novo Nome' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.nome).toBe('Novo Nome');
+    expect(rankingModel.existeDiretorComNome).toHaveBeenCalledWith('Novo Nome', 1);
+    expect(rankingModel.updateDiretor).toHaveBeenCalledWith(1, { nome: 'Novo Nome' });
+  });
+});
+
+describe('DELETE /api/ranking/diretores/:id', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).delete('/api/ranking/diretores/1');
+    expect(res.status).toBe(401);
+  });
+
+  it('400 quando :id não é inteiro positivo', async () => {
+    const res = await request(app)
+      .delete('/api/ranking/diretores/abc')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Parâmetro "id" deve ser um número inteiro positivo.' });
+  });
+
+  it('404 quando o diretor não existe', async () => {
+    rankingModel.deleteDiretorIfNoRedes.mockResolvedValue('not_found');
+
+    const res = await request(app)
+      .delete('/api/ranking/diretores/999')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Diretor não encontrado.' });
+  });
+
+  it('409 quando há redes vinculadas ao diretor', async () => {
+    rankingModel.deleteDiretorIfNoRedes.mockResolvedValue('has_redes');
+
+    const res = await request(app)
+      .delete('/api/ranking/diretores/1')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: 'Não é possível excluir este diretor pois existem redes vinculadas a ele. Remova as redes primeiro.',
+    });
+  });
+
+  it('204 — exclui com sucesso quando não há redes vinculadas', async () => {
+    rankingModel.deleteDiretorIfNoRedes.mockResolvedValue('deleted');
+
+    const res = await request(app)
+      .delete('/api/ranking/diretores/1')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(204);
+    expect(res.body).toEqual({});
+  });
+
+  it('500 quando o model lança erro', async () => {
+    rankingModel.deleteDiretorIfNoRedes.mockRejectedValue(new Error('falha simulada'));
+
+    const res = await request(app)
+      .delete('/api/ranking/diretores/1')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao excluir diretor.' });
+  });
+});
+
+describe('POST /api/ranking/redes', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).post('/api/ranking/redes').send({ diretorId: 1, nome: 'Delta' });
+    expect(res.status).toBe(401);
+  });
+
+  it('400 quando diretorId está ausente/inválido', async () => {
+    const res = await request(app)
+      .post('/api/ranking/redes')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ nome: 'Delta' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "diretorId" é obrigatório e deve ser um número inteiro positivo.',
+    });
+  });
+
+  it('400 quando nome está ausente/vazio', async () => {
+    const res = await request(app)
+      .post('/api/ranking/redes')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ diretorId: 1, nome: '  ' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Campo "nome" é obrigatório e não pode ser vazio.' });
+  });
+
+  it('400 quando diretorId informado não existe', async () => {
+    rankingModel.findDiretorById.mockResolvedValue(undefined);
+
+    const res = await request(app)
+      .post('/api/ranking/redes')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ diretorId: 999, nome: 'Delta' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Diretor informado não existe.' });
+  });
+
+  it('409 quando já existe uma rede com esse nome no mesmo diretor', async () => {
+    rankingModel.findDiretorById.mockResolvedValue({ id: 1, nome: 'Victor Hugo' });
+    rankingModel.existeRedeComNomeNoDiretor.mockResolvedValue(true);
+
+    const res = await request(app)
+      .post('/api/ranking/redes')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ diretorId: 1, nome: 'Delta' });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'Já existe uma rede com esse nome neste diretor.' });
+  });
+
+  it('201 — cria a rede sem responsável (campo não é mais aceito no POST)', async () => {
+    rankingModel.findDiretorById.mockResolvedValue({ id: 1, nome: 'Victor Hugo' });
+    rankingModel.existeRedeComNomeNoDiretor.mockResolvedValue(false);
+    rankingModel.insertRede.mockResolvedValue({
+      id: 12, diretor_id: 1, nome: 'Nova Rede', emoji: '🆕',
+      ativo: true, visivel: true, responsavel: null, criado_em: '2026-07-27T14:10:00.000Z',
+    });
+
+    const res = await request(app)
+      .post('/api/ranking/redes')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ diretorId: 1, nome: 'Nova Rede', emoji: '🆕' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.responsavel).toBeNull();
+    expect(rankingModel.insertRede).toHaveBeenCalledWith({ diretorId: 1, nome: 'Nova Rede', emoji: '🆕' });
+  });
+
+  it('500 quando o model lança erro', async () => {
+    rankingModel.findDiretorById.mockRejectedValue(new Error('falha simulada'));
+
+    const res = await request(app)
+      .post('/api/ranking/redes')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ diretorId: 1, nome: 'Delta' });
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao criar rede.' });
   });
 });
 
 describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
   it('aceita visivel:false e repassa ao model junto com o restante do fluxo', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: null, visivel: true });
+    rankingModel.findRedeById.mockResolvedValue({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: true });
     rankingModel.updateRede.mockResolvedValue(undefined);
-    rankingModel.getRedeComLojasById.mockResolvedValue({
-      id: 5, nome: 'Rede X', responsavel: null, visivel: false, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
-    });
+    rankingModel.findRedeById
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: true })
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: false, criado_em: '2024-01-01T00:00:00.000Z' });
 
     const res = await request(app)
       .put('/api/ranking/redes/5')
@@ -118,17 +401,18 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.visivel).toBe(false);
-    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: undefined, responsavelId: undefined, visivel: false });
+    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, {
+      nome: undefined, emoji: undefined, responsavelId: undefined, ativo: undefined, visivel: false,
+    });
     // nome não foi enviado, então a checagem de duplicidade não deve rodar
-    expect(rankingModel.existeRedeComNome).not.toHaveBeenCalled();
+    expect(rankingModel.existeRedeComNomeNoDiretor).not.toHaveBeenCalled();
   });
 
   it('aceita visivel:true e repassa ao model', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: null, visivel: false });
+    rankingModel.findRedeById
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: false })
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: true, criado_em: '2024-01-01T00:00:00.000Z' });
     rankingModel.updateRede.mockResolvedValue(undefined);
-    rankingModel.getRedeComLojasById.mockResolvedValue({
-      id: 5, nome: 'Rede X', responsavel: null, visivel: true, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
-    });
 
     const res = await request(app)
       .put('/api/ranking/redes/5')
@@ -137,7 +421,6 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.visivel).toBe(true);
-    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: undefined, responsavelId: undefined, visivel: true });
   });
 
   it.each([
@@ -157,7 +440,7 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
     });
   });
 
-  it('400 — corpo vazio (nenhum de nome/responsavelId/visivel), mensagem atualizada', async () => {
+  it('400 — corpo vazio (nenhum campo), mensagem atualizada para incluir "emoji"/"ativo"', async () => {
     const res = await request(app)
       .put('/api/ranking/redes/5')
       .set('Authorization', `Bearer ${tokenFor()}`)
@@ -165,7 +448,7 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
 
     expect(res.status).toBe(400);
     expect(res.body).toEqual({
-      error: 'Informe ao menos um campo ("nome", "responsavelId" ou "visivel") para atualizar.',
+      error: 'Informe ao menos um campo ("nome", "emoji", "responsavelId", "ativo" ou "visivel") para atualizar.',
     });
   });
 
@@ -195,13 +478,12 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
   // em RankingPage.jsx quando isAdmin é false). Um usuário autenticado
   // comum, chamando a API diretamente, consegue ocultar/mostrar qualquer
   // rede. Este teste documenta o comportamento ATUAL (não o desejado) —
-  // ver veredito final.
+  // ver veredito final. Comportamento inalterado pela migração v2.
   it('[ACHADO DE QA] usuário autenticado NÃO-admin também consegue alterar "visivel" (sem 403)', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: null, visivel: true });
+    rankingModel.findRedeById
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: true })
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: false, criado_em: '2024-01-01T00:00:00.000Z' });
     rankingModel.updateRede.mockResolvedValue(undefined);
-    rankingModel.getRedeComLojasById.mockResolvedValue({
-      id: 5, nome: 'Rede X', responsavel: null, visivel: false, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
-    });
 
     const res = await request(app)
       .put('/api/ranking/redes/5')
@@ -214,13 +496,12 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
   });
 
   // --- regressão: nome continua funcionando como antes ---
-  it('regressão: continua aceitando atualizar somente "nome"', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Antigo', responsavel: null, visivel: true });
-    rankingModel.existeRedeComNome.mockResolvedValue(false);
+  it('regressão: continua aceitando atualizar somente "nome" (checa duplicidade dentro do mesmo diretor)', async () => {
+    rankingModel.findRedeById
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Antigo', responsavel: null, visivel: true })
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Novo Nome', responsavel: null, visivel: true, criado_em: '2024-01-01T00:00:00.000Z' });
+    rankingModel.existeRedeComNomeNoDiretor.mockResolvedValue(false);
     rankingModel.updateRede.mockResolvedValue(undefined);
-    rankingModel.getRedeComLojasById.mockResolvedValue({
-      id: 5, nome: 'Novo Nome', responsavel: null, visivel: true, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
-    });
 
     const res = await request(app)
       .put('/api/ranking/redes/5')
@@ -229,13 +510,17 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.nome).toBe('Novo Nome');
-    expect(rankingModel.existeRedeComNome).toHaveBeenCalledWith('Novo Nome', 5);
-    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: 'Novo Nome', responsavelId: undefined, visivel: undefined });
+    expect(rankingModel.existeRedeComNomeNoDiretor).toHaveBeenCalledWith({
+      nome: 'Novo Nome', diretorId: 1, excludeId: 5,
+    });
+    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, {
+      nome: 'Novo Nome', emoji: undefined, responsavelId: undefined, ativo: undefined, visivel: undefined,
+    });
   });
 
-  it('regressão: 409 quando o novo nome já existe em outra rede', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Antigo', responsavel: null, visivel: true });
-    rankingModel.existeRedeComNome.mockResolvedValue(true);
+  it('regressão: 409 quando o novo nome já existe em outra rede do mesmo diretor', async () => {
+    rankingModel.findRedeById.mockResolvedValue({ id: 5, diretor_id: 1, nome: 'Antigo', responsavel: null, visivel: true });
+    rankingModel.existeRedeComNomeNoDiretor.mockResolvedValue(true);
 
     const res = await request(app)
       .put('/api/ranking/redes/5')
@@ -243,7 +528,7 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
       .send({ nome: 'Nome Duplicado' });
 
     expect(res.status).toBe(409);
-    expect(res.body).toEqual({ error: 'Já existe uma rede com esse nome.' });
+    expect(res.body).toEqual({ error: 'Já existe uma rede com esse nome neste diretor.' });
   });
 
   it('regressão: 400 quando nome enviado é string vazia/só espaços', async () => {
@@ -255,17 +540,46 @@ describe('PUT /api/ranking/redes/:id — campo "visivel"', () => {
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: 'Campo "nome", quando enviado, não pode ser vazio.' });
   });
+
+  it('aceita ativo:false (soft-delete) e repassa ao model', async () => {
+    rankingModel.findRedeById
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: true, ativo: true })
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: true, ativo: false, criado_em: '2024-01-01T00:00:00.000Z' });
+    rankingModel.updateRede.mockResolvedValue(undefined);
+
+    const res = await request(app)
+      .put('/api/ranking/redes/5')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ ativo: false });
+
+    expect(res.status).toBe(200);
+    expect(res.body.ativo).toBe(false);
+    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, {
+      nome: undefined, emoji: undefined, responsavelId: undefined, ativo: false, visivel: undefined,
+    });
+  });
+
+  it('400 quando ativo não é booleano estrito', async () => {
+    const res = await request(app)
+      .put('/api/ranking/redes/5')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ ativo: 'false' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Campo "ativo", quando enviado, deve ser "true" ou "false".' });
+  });
 });
 
 describe('PUT /api/ranking/redes/:id — campo "responsavelId"', () => {
   it('aceita responsavelId numérico e repassa ao model, retornando responsavel como objeto', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: null, visivel: true });
+    rankingModel.findRedeById
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: true })
+      .mockResolvedValueOnce({
+        id: 5, diretor_id: 1, nome: 'Rede X', responsavel: { id: 4, nome: 'Ciclana da Silva' }, visivel: true,
+        criado_em: '2024-01-01T00:00:00.000Z',
+      });
     rankingModel.existeResponsavel.mockResolvedValue(true);
     rankingModel.updateRede.mockResolvedValue(undefined);
-    rankingModel.getRedeComLojasById.mockResolvedValue({
-      id: 5, nome: 'Rede X', responsavel: { id: 4, nome: 'Ciclana da Silva' }, visivel: true,
-      criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
-    });
 
     const res = await request(app)
       .put('/api/ranking/redes/5')
@@ -275,15 +589,16 @@ describe('PUT /api/ranking/redes/:id — campo "responsavelId"', () => {
     expect(res.status).toBe(200);
     expect(res.body.responsavel).toEqual({ id: 4, nome: 'Ciclana da Silva' });
     expect(rankingModel.existeResponsavel).toHaveBeenCalledWith(4);
-    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: undefined, responsavelId: 4, visivel: undefined });
+    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, {
+      nome: undefined, emoji: undefined, responsavelId: 4, ativo: undefined, visivel: undefined,
+    });
   });
 
   it('aceita responsavelId: null para remover a atribuição (não checa existência)', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: { id: 4, nome: 'Ciclana' }, visivel: true });
+    rankingModel.findRedeById
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: { id: 4, nome: 'Ciclana' }, visivel: true })
+      .mockResolvedValueOnce({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: true, criado_em: '2024-01-01T00:00:00.000Z' });
     rankingModel.updateRede.mockResolvedValue(undefined);
-    rankingModel.getRedeComLojasById.mockResolvedValue({
-      id: 5, nome: 'Rede X', responsavel: null, visivel: true, criado_em: '2024-01-01T00:00:00.000Z', lojas: [],
-    });
 
     const res = await request(app)
       .put('/api/ranking/redes/5')
@@ -293,7 +608,9 @@ describe('PUT /api/ranking/redes/:id — campo "responsavelId"', () => {
     expect(res.status).toBe(200);
     expect(res.body.responsavel).toBeNull();
     expect(rankingModel.existeResponsavel).not.toHaveBeenCalled();
-    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, { nome: undefined, responsavelId: null, visivel: undefined });
+    expect(rankingModel.updateRede).toHaveBeenCalledWith(5, {
+      nome: undefined, emoji: undefined, responsavelId: null, ativo: undefined, visivel: undefined,
+    });
   });
 
   it.each([
@@ -314,7 +631,7 @@ describe('PUT /api/ranking/redes/:id — campo "responsavelId"', () => {
   });
 
   it('400 quando responsavelId é inteiro positivo mas não existe em Responsaveis', async () => {
-    rankingModel.findRedeById.mockResolvedValue({ id: 5, nome: 'Rede X', responsavel: null, visivel: true });
+    rankingModel.findRedeById.mockResolvedValue({ id: 5, diretor_id: 1, nome: 'Rede X', responsavel: null, visivel: true });
     rankingModel.existeResponsavel.mockResolvedValue(false);
 
     const res = await request(app)
@@ -325,6 +642,175 @@ describe('PUT /api/ranking/redes/:id — campo "responsavelId"', () => {
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: 'Responsável informado não existe.' });
     expect(rankingModel.updateRede).not.toHaveBeenCalled();
+  });
+});
+
+describe('DELETE /api/ranking/redes/:id', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).delete('/api/ranking/redes/5');
+    expect(res.status).toBe(401);
+  });
+
+  it('400 quando :id não é inteiro positivo', async () => {
+    const res = await request(app)
+      .delete('/api/ranking/redes/abc')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Parâmetro "id" deve ser um número inteiro positivo.' });
+  });
+
+  it('404 quando a rede não existe', async () => {
+    rankingModel.deleteRedeIfNoEntradas.mockResolvedValue('not_found');
+
+    const res = await request(app)
+      .delete('/api/ranking/redes/999')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Rede não encontrada.' });
+  });
+
+  it('409 quando há entradas (lançamentos) vinculadas à rede', async () => {
+    rankingModel.deleteRedeIfNoEntradas.mockResolvedValue('has_entradas');
+
+    const res = await request(app)
+      .delete('/api/ranking/redes/5')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: 'Não é possível excluir esta rede pois existem lançamentos vinculados a ela. Utilize a atualização (PUT) com ativo=false para desativá-la sem perder o histórico.',
+    });
+  });
+
+  it('204 — exclui com sucesso quando não há entradas vinculadas', async () => {
+    rankingModel.deleteRedeIfNoEntradas.mockResolvedValue('deleted');
+
+    const res = await request(app)
+      .delete('/api/ranking/redes/5')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(204);
+    expect(res.body).toEqual({});
+  });
+});
+
+describe('GET /api/ranking/entradas — campo "redeId"', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).get('/api/ranking/entradas?data=2026-07-27&categoriaId=1');
+    expect(res.status).toBe(401);
+  });
+
+  it('200 — retorna entradas com rede_id no shape', async () => {
+    rankingModel.listEntradas.mockResolvedValue([
+      { id: 101, data_ref: '2026-07-17T00:00:00.000Z', categoria_id: 1, rede_id: 5, valor: 15230.5, atualizado_em: '2026-07-17T14:22:01.000Z', rede_nome: 'Delta', rede_emoji: '🔺', diretor_id: 1 },
+    ]);
+
+    const res = await request(app)
+      .get('/api/ranking/entradas?data=2026-07-17&categoriaId=1')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body[0]).toHaveProperty('rede_id', 5);
+    expect(rankingModel.listEntradas).toHaveBeenCalledWith({ data: '2026-07-17', categoriaId: 1 });
+  });
+
+  it('400 quando data está no formato errado', async () => {
+    const res = await request(app)
+      .get('/api/ranking/entradas?data=17-07-2026&categoriaId=1')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Parâmetro "data" é obrigatório e deve estar no formato YYYY-MM-DD.',
+    });
+  });
+
+  it('400 quando categoriaId está ausente/inválido', async () => {
+    const res = await request(app)
+      .get('/api/ranking/entradas?data=2026-07-17')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Parâmetro "categoriaId" é obrigatório e deve ser um número inteiro positivo.',
+    });
+  });
+});
+
+describe('POST /api/ranking/entradas — campo "redeId" (upsert)', () => {
+  it('401 sem token', async () => {
+    const res = await request(app)
+      .post('/api/ranking/entradas')
+      .send({ data: '2026-07-27', categoriaId: 1, redeId: 5, valor: 100 });
+    expect(res.status).toBe(401);
+  });
+
+  it('400 quando data está ausente/no formato errado', async () => {
+    const res = await request(app)
+      .post('/api/ranking/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ categoriaId: 1, redeId: 5, valor: 100 });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "data" é obrigatório e deve estar no formato YYYY-MM-DD.',
+    });
+  });
+
+  it('400 quando categoriaId está ausente/inválido', async () => {
+    const res = await request(app)
+      .post('/api/ranking/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ data: '2026-07-27', redeId: 5, valor: 100 });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "categoriaId" é obrigatório e deve ser um número inteiro positivo.',
+    });
+  });
+
+  it('400 quando redeId está ausente/inválido (era "lojaId" no contrato antigo)', async () => {
+    const res = await request(app)
+      .post('/api/ranking/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ data: '2026-07-27', categoriaId: 1, valor: 100 });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "redeId" é obrigatório e deve ser um número inteiro positivo.',
+    });
+  });
+
+  it('400 quando valor está ausente/negativo', async () => {
+    const res = await request(app)
+      .post('/api/ranking/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ data: '2026-07-27', categoriaId: 1, redeId: 5, valor: -10 });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "valor" é obrigatório e deve ser um número maior ou igual a zero.',
+    });
+  });
+
+  it('200 — upsert bem-sucedido repassa redeId ao service/model', async () => {
+    rankingModel.upsertEntrada.mockResolvedValue({
+      acao: 'INSERT', id: 101, data_ref: '2026-07-17T00:00:00.000Z',
+      categoria_id: 1, rede_id: 5, valor: 15230.5, atualizado_em: '2026-07-17T14:22:01.000Z',
+    });
+
+    const res = await request(app)
+      .post('/api/ranking/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ data: '2026-07-17', categoriaId: 1, redeId: 5, valor: 15230.5 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.rede_id).toBe(5);
+    expect(rankingModel.upsertEntrada).toHaveBeenCalledWith({
+      data: '2026-07-17', categoriaId: 1, redeId: 5, valor: 15230.5,
+    });
   });
 });
 
@@ -416,7 +902,7 @@ describe('POST /api/ranking/responsaveis', () => {
   });
 });
 
-describe('DELETE /api/ranking/responsaveis/:id', () => {
+describe('DELETE /api/ranking/responsaveis/:id — vínculo agora é com Rede, não Diretor', () => {
   it('401 sem token', async () => {
     const res = await request(app).delete('/api/ranking/responsaveis/5');
     expect(res.status).toBe(401);

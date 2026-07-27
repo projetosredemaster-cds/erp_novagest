@@ -2,15 +2,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
-  fetchRedes, fetchCategorias, fetchEntradas, salvarEntrada,
-  criarRede, atualizarRede, removerRede, criarLoja, removerLoja, atualizarLoja,
+  fetchDiretores, fetchCategorias, fetchEntradas, salvarEntrada,
+  criarDiretor, atualizarDiretor, removerDiretor,
+  criarRede, atualizarRede, removerRede,
   enviarRelatorioPorEmail,
   fetchResponsaveis, criarResponsavel, removerResponsavel,
 } from './rankingApi';
 import { useAuth } from '../../app/AuthContext.jsx';
 
-// estado inicial vazio: redes/categorias agora vêm da API (ver useEffect de carga em RankingPage)
-const emptyState = () => ({ redes: [], categorias: [] });
+// estado inicial vazio: diretores/categorias agora vêm da API (ver useEffect de carga em RankingPage)
+// hierarquia: Diretor -> Rede (o Ranking não opera no nível Loja física, ver CLAUDE.md/CONTRATO-RANKING-API.md)
+const emptyState = () => ({ diretores: [], categorias: [] });
 
 function uid(p) { return p + '_' + Math.random().toString(36).slice(2, 9); }
 function toBRL(n) {
@@ -85,20 +87,20 @@ function fetchAllEntradas(date, categorias) {
   );
 }
 // funde o resultado de fetchAllEntradas no estado `entries` existente. `protect`
-// (opcional, { catId, lojaId }) evita sobrescrever, na categoria indicada, o valor da
-// loja indicada — usado só pelo polling em background pra não sobrescrever o input que
+// (opcional, { catId, redeId }) evita sobrescrever, na categoria indicada, o valor da
+// rede indicada — usado só pelo polling em background pra não sobrescrever o input que
 // o usuário está editando neste exato momento; o fetch inicial ao trocar de data não
 // passa `protect` e sobrescreve tudo, como sempre fez.
 function mergeEntradasResults(prev, results, date, protect) {
   const next = { ...prev };
   results.forEach(({ catId, lista }) => {
     const vals = {};
-    (lista || []).forEach(e => { vals[e.loja_id] = e.valor; });
+    (lista || []).forEach(e => { vals[e.rede_id] = e.valor; });
     const key = dataKey(date, catId);
-    if (protect && protect.lojaId != null && protect.catId === catId) {
+    if (protect && protect.redeId != null && protect.catId === catId) {
       const localVals = prev[key] || {};
-      if (Object.prototype.hasOwnProperty.call(localVals, protect.lojaId)) {
-        vals[protect.lojaId] = localVals[protect.lojaId];
+      if (Object.prototype.hasOwnProperty.call(localVals, protect.redeId)) {
+        vals[protect.redeId] = localVals[protect.redeId];
       }
     }
     next[key] = vals;
@@ -126,10 +128,13 @@ function sanitizeSheetName(nome) {
   const cleaned = String(nome).replace(/[/\\?*[\]:]/g, '').trim();
   return (cleaned || 'Categoria').slice(0, 31);
 }
-function rankLoja(values, lojas) {
-  const withVal = lojas.map(l => ({ ...l, valor: Number(values[l.id]) || 0 }));
+// ordena as redes (Delta, Lendários...) de um diretor por valor lançado e atribui
+// posição/medalha — mesma lógica de antes (quando operava sobre lojas de uma rede),
+// só que agora opera um nível acima na hierarquia Diretor -> Rede.
+function rankRede(values, redes) {
+  const withVal = redes.map(r => ({ ...r, valor: Number(values[r.id]) || 0 }));
   withVal.sort((a, b) => b.valor - a.valor);
-  return withVal.map((l, i) => ({ ...l, pos: i, medal: i === 0 ? '🥇' : (i === 1 ? '🥈' : '🍍') }));
+  return withVal.map((r, i) => ({ ...r, pos: i, medal: i === 0 ? '🥇' : (i === 1 ? '🥈' : '🍍') }));
 }
 
 // classes reaproveitadas (evita repetição, mesma filosofia de variável CSS do protótipo original)
@@ -159,9 +164,9 @@ export default function RankingPage() {
 
   // dispara o fetch em si; não reseta loading/error (isso é feito por quem chama, fora do efeito)
   function runLoadConfig() {
-    Promise.all([fetchRedes(), fetchCategorias()])
-      .then(([redes, categorias]) => {
-        setConfig({ redes: redes || [], categorias: categorias || [] });
+    Promise.all([fetchDiretores(), fetchCategorias()])
+      .then(([diretores, categorias]) => {
+        setConfig({ diretores: diretores || [], categorias: categorias || [] });
       })
       .catch(err => {
         setConfigError(err.message || 'Erro ao carregar dados do servidor.');
@@ -218,11 +223,11 @@ export default function RankingPage() {
   // refs para acessar sempre os valores mais recentes de dentro do setInterval sem precisar
   // reiniciar o intervalo a cada mudança de aba/foco (o efeito abaixo só depende de
   // currentDate/config.categorias/currentView, conforme pedido).
-  const [focusedLojaId, setFocusedLojaId] = useState(null);
+  const [focusedRedeId, setFocusedRedeId] = useState(null);
   const catRef = useRef(cat);
   useEffect(() => { catRef.current = cat; }, [cat]);
-  const focusedLojaIdRef = useRef(focusedLojaId);
-  useEffect(() => { focusedLojaIdRef.current = focusedLojaId; }, [focusedLojaId]);
+  const focusedRedeIdRef = useRef(focusedRedeId);
+  useEffect(() => { focusedRedeIdRef.current = focusedRedeId; }, [focusedRedeId]);
 
   useEffect(() => {
     if (currentView !== 'report' || !config.categorias.length) return;
@@ -234,7 +239,7 @@ export default function RankingPage() {
         .then(results => {
           setEntries(prev => mergeEntradasResults(prev, results, currentDate, {
             catId: catRef.current?.id,
-            lojaId: focusedLojaIdRef.current,
+            redeId: focusedRedeIdRef.current,
           }));
         })
         .catch(() => {
@@ -277,29 +282,30 @@ export default function RankingPage() {
 
   const values = cat ? (entries[dataKey(currentDate, cat.id)] || {}) : {};
 
-  function setValue(lojaId, val) {
+  function setValue(redeId, val) {
     if (!cat) return;
     const k = dataKey(currentDate, cat.id);
-    setEntries(prev => ({ ...prev, [k]: { ...(prev[k] || {}), [lojaId]: val } }));
+    setEntries(prev => ({ ...prev, [k]: { ...(prev[k] || {}), [redeId]: val } }));
   }
 
-  function onBlurSave(lojaId) {
+  function onBlurSave(redeId) {
     if (!cat) return;
-    const valor = parseValorBR(values[lojaId]);
-    setValue(lojaId, valor);
-    salvarEntrada({ data: currentDate, categoriaId: cat.id, lojaId, valor })
+    const valor = parseValorBR(values[redeId]);
+    setValue(redeId, valor);
+    if (valor === 0) return;
+    salvarEntrada({ data: currentDate, categoriaId: cat.id, redeId, valor })
       .then(() => flash('Salvo'))
       .catch(err => flash(err.message || 'Erro ao salvar', 'error'));
   }
 
-  // marca/desmarca qual loja está com o input focado — usado pelo polling de sincronização
+  // marca/desmarca qual rede está com o input focado — usado pelo polling de sincronização
   // acima pra não sobrescrever, a cada 5s, o valor que o usuário está digitando agora mesmo.
-  function handleValueFocus(lojaId) {
-    setFocusedLojaId(lojaId);
+  function handleValueFocus(redeId) {
+    setFocusedRedeId(redeId);
   }
-  function handleValueBlur(lojaId) {
-    onBlurSave(lojaId);
-    setFocusedLojaId(null);
+  function handleValueBlur(redeId) {
+    onBlurSave(redeId);
+    setFocusedRedeId(null);
   }
 
   function addCategoria() {
@@ -319,7 +325,6 @@ export default function RankingPage() {
   }
 
   function buildFullReport() {
-    const redesVisiveis = config.redes.filter(r => r.visivel !== false);
     const parts = [];
     // cópia ordenada (não muta config.categorias): Receita Bruta, Correção, Acessórios
     // primeiro, nessa ordem, seguidas de qualquer categoria extra na ordem de criação —
@@ -333,18 +338,23 @@ export default function RankingPage() {
       .map(({ c }) => c);
     for (const c of categoriasOrdenadas) {
       const vals = entries[dataKey(currentDate, c.id)] || {};
-      const hasAny = redesVisiveis.some(r => r.lojas.some(l => l.ativo !== false && vals[l.id] !== undefined && vals[l.id] !== ''));
+      // `visivel` (antes filtro de Diretor) e `ativo` (antes filtro de Loja) agora são
+      // ambos campos de Rede — uma rede oculta/inativa nunca aparece no relatório.
+      const hasAny = config.diretores.some(d => d.redes.some(r => r.ativo !== false && r.visivel !== false && vals[r.id] !== undefined && vals[r.id] !== ''));
       if (!hasAny) continue;
       const titulo = `*RELATÓRIO ${c.nome.toUpperCase()} — ${formatDatePt(currentDate)}*`;
       const lines = [titulo, ''];
-      redesVisiveis.forEach(rede => {
-        const lojasPreenchidas = rede.lojas.filter(l => l.ativo !== false && vals[l.id] !== undefined && vals[l.id] !== '');
-        if (!lojasPreenchidas.length) return;
-        const ranked = rankLoja(vals, lojasPreenchidas);
-        const total = ranked.reduce((s, l) => s + l.valor, 0);
-        lines.push(`*${rede.nome}*   ${toBRL(total)}`);
+      const diretoresComTotal = config.diretores.map(diretor => {
+        const redesVisiveis = diretor.redes.filter(r => r.ativo !== false && r.visivel !== false);
+        const ranked = rankRede(vals, redesVisiveis);
+        const total = ranked.reduce((s, r) => s + r.valor, 0);
+        return { diretor, ranked, total };
+      });
+      diretoresComTotal.sort((a, b) => b.total - a.total);
+      diretoresComTotal.forEach(({ diretor, ranked, total }) => {
+        lines.push(`*${diretor.nome}*   ${toBRL(total)}`);
         lines.push('');
-        ranked.forEach(l => lines.push(`${l.medal} ${l.nome} ${l.emoji || ''}   ${toBRL(l.valor)}`));
+        ranked.forEach(r => lines.push(`${r.medal} ${r.nome} ${r.emoji || ''}   ${toBRL(r.valor)}`));
         lines.push('');
       });
       parts.push(lines.join('\n'));
@@ -364,20 +374,21 @@ export default function RankingPage() {
       .finally(() => setSendingEmail(false));
   }
 
-  // gera uma aba por categoria (config.categorias), com todas as redes empilhadas
-  // na mesma tabela (Rede | Posição | Loja | Valor) e uma linha de total por rede —
-  // mesmo total já exibido no total-pill do card daquela rede na tela.
+  // gera uma aba por categoria (config.categorias), com todas as redes de cada diretor
+  // empilhadas na mesma tabela (Diretor | Posição | Rede | Valor) e uma linha de total por
+  // diretor — mesmo total já exibido no total-pill do card daquele diretor na tela.
+  // Sem filtro por ativo/visivel, igual ao comportamento anterior (exporta tudo).
   function buildWorkbook() {
     const wb = XLSX.utils.book_new();
     const usedNames = new Set();
     config.categorias.forEach(c => {
       const vals = entries[dataKey(currentDate, c.id)] || {};
-      const rows = [['Rede', 'Posição', 'Loja', 'Valor']];
-      config.redes.forEach(rede => {
-        const ranked = rankLoja(vals, rede.lojas);
-        ranked.forEach(l => rows.push([rede.nome, l.pos + 1, l.nome, l.valor]));
-        const total = ranked.reduce((s, l) => s + l.valor, 0);
-        rows.push([rede.nome, '', `Total ${rede.nome}`, total]);
+      const rows = [['Diretor', 'Posição', 'Rede', 'Valor']];
+      config.diretores.forEach(diretor => {
+        const ranked = rankRede(vals, diretor.redes);
+        ranked.forEach(r => rows.push([diretor.nome, r.pos + 1, r.nome, r.valor]));
+        const total = ranked.reduce((s, r) => s + r.valor, 0);
+        rows.push([diretor.nome, '', `Total ${diretor.nome}`, total]);
       });
       const ws = XLSX.utils.aoa_to_sheet(rows);
       // coluna D (Valor) como número em formato de moeda BRL, pulando o cabeçalho
@@ -410,77 +421,101 @@ export default function RankingPage() {
     copyTimer.current = setTimeout(() => setCopyShown(false), 1500);
   }
 
-  // ocultar/mostrar rede no grid principal e no relatório — segue a mesma filosofia
-  // de onBlurSaveRede: nunca otimista, só troca o estado local depois que a API confirma.
-  function toggleRedeVisivel(redeId, novoValor) {
-    atualizarRede(redeId, { visivel: novoValor })
+  // ---------- mutações de Rede (Delta, Lendários...) ----------
+  // helper genérico: `visivel` e `ativo` moraram no Diretor/Loja do modelo antigo e agora
+  // são ambos campos de Rede — todos os toggles/edições de Rede passam por aqui, seguindo
+  // a mesma filosofia não-otimista de sempre: só troca o estado local depois que a API
+  // confirma, substituindo a rede pelo objeto real retornado (usa `diretor_id` da resposta
+  // para achar o diretor-pai, já que quem chama nem sempre tem esse id à mão).
+  function updateRedeCampo(redeId, patch, fallbackMsg = 'Erro ao atualizar rede') {
+    atualizarRede(redeId, patch)
       .then(redeAtualizada => {
-        setConfig(prev => ({ ...prev, redes: prev.redes.map(r => r.id === redeId ? redeAtualizada : r) }));
-      })
-      .catch(err => flash(err.message || 'Erro ao atualizar visibilidade da rede', 'error'));
-  }
-
-  // atribui/desatribui o responsável de uma rede via <select> (ConfigView) —
-  // mesma filosofia não-otimista de toggleRedeVisivel: só atualiza o estado
-  // local depois que a API confirma. `responsavelId` já vem convertido para
-  // number ou null por quem chama (a opção "Nenhum" do <select> vira null).
-  function updateRedeResponsavel(redeId, responsavelId) {
-    atualizarRede(redeId, { responsavelId })
-      .then(redeAtualizada => {
-        setConfig(prev => ({ ...prev, redes: prev.redes.map(r => r.id === redeId ? redeAtualizada : r) }));
-      })
-      .catch(err => flash(err.message || 'Erro ao atualizar responsável da rede', 'error'));
-  }
-
-  // ocultar/mostrar loja individualmente no grid principal e no relatório — mesma
-  // filosofia não-otimista de toggleRedeVisivel: só troca o estado local depois
-  // que a API confirma, substituindo a loja pelo objeto real retornado pela API.
-  function toggleLojaAtivo(redeId, lojaId, novoValor) {
-    atualizarLoja(lojaId, { ativo: novoValor })
-      .then(lojaAtualizada => {
         setConfig(prev => ({
           ...prev,
-          redes: prev.redes.map(r => r.id === redeId
-            ? { ...r, lojas: r.lojas.map(l => l.id === lojaId ? lojaAtualizada : l) }
-            : r),
+          diretores: prev.diretores.map(d => d.id === redeAtualizada.diretor_id
+            ? { ...d, redes: d.redes.map(r => r.id === redeId ? redeAtualizada : r) }
+            : d),
         }));
       })
-      .catch(err => flash(err.message || 'Erro ao atualizar visibilidade da loja', 'error'));
+      .catch(err => flash(err.message || fallbackMsg, 'error'));
   }
 
-  function removeRede(redeId) {
-    if (!confirm('Remover esta rede e todas as lojas dela?')) return;
+  // ocultar/mostrar rede no grid principal e no relatório (campo `visivel`).
+  function toggleRedeVisivel(redeId, novoValor) {
+    updateRedeCampo(redeId, { visivel: novoValor }, 'Erro ao atualizar visibilidade da rede');
+  }
+
+  // ativar/desativar rede (soft-delete, campo `ativo`) — ação separada de `visivel`,
+  // ver decisão de UX documentada no topo de ConfigView.
+  function toggleRedeAtivo(redeId, novoValor) {
+    updateRedeCampo(redeId, { ativo: novoValor }, 'Erro ao atualizar status da rede');
+  }
+
+  // atribui/desatribui o GG (responsável) de uma rede via <select> (ConfigView).
+  // `responsavelId` já vem convertido para number ou null por quem chama (a opção
+  // "Nenhum" do <select> vira null).
+  function updateRedeResponsavel(redeId, responsavelId) {
+    updateRedeCampo(redeId, { responsavelId }, 'Erro ao atualizar GG da rede');
+  }
+
+  function updateRedeNome(redeId, nome) {
+    if (!nome.trim()) return;
+    updateRedeCampo(redeId, { nome: nome.trim() }, 'Erro ao atualizar nome da rede');
+  }
+
+  function updateRedeEmoji(redeId, emoji) {
+    updateRedeCampo(redeId, { emoji: emoji.trim() }, 'Erro ao atualizar emoji da rede');
+  }
+
+  function removeRede(diretorId, redeId) {
     removerRede(redeId)
       .then(() => {
-        setConfig(prev => ({ ...prev, redes: prev.redes.filter(r => r.id !== redeId) }));
+        setConfig(prev => ({
+          ...prev,
+          diretores: prev.diretores.map(d => d.id === diretorId ? { ...d, redes: d.redes.filter(r => r.id !== redeId) } : d),
+        }));
       })
       .catch(err => flash(err.message || 'Erro ao remover rede', 'error'));
   }
 
-  function removeLoja(redeId, lojaId) {
-    removerLoja(lojaId)
-      .then(() => {
-        setConfig(prev => ({ ...prev, redes: prev.redes.map(r => r.id === redeId ? { ...r, lojas: r.lojas.filter(l => l.id !== lojaId) } : r) }));
-      })
-      .catch(err => flash(err.message || 'Erro ao remover loja', 'error'));
-  }
-
-  function addLoja(redeId, emoji, nome) {
-    if (!nome.trim()) return;
-    criarLoja({ redeId, nome: nome.trim(), emoji: emoji.trim() })
-      .then(lojaCriada => {
-        setConfig(prev => ({ ...prev, redes: prev.redes.map(r => r.id === redeId ? { ...r, lojas: [...r.lojas, lojaCriada] } : r) }));
-      })
-      .catch(err => flash(err.message || 'Erro ao criar loja', 'error'));
-  }
-
-  function addRede(nome) {
-    if (!nome.trim()) return;
-    criarRede({ nome: nome.trim() })
+  function addRede(diretorId, emoji, nome) {
+    if (!nome.trim() || !diretorId) return;
+    criarRede({ diretorId: Number(diretorId), nome: nome.trim(), emoji: emoji.trim() })
       .then(redeCriada => {
-        setConfig(prev => ({ ...prev, redes: [...prev.redes, redeCriada] }));
+        setConfig(prev => ({
+          ...prev,
+          diretores: prev.diretores.map(d => d.id === redeCriada.diretor_id ? { ...d, redes: [...d.redes, redeCriada] } : d),
+        }));
       })
       .catch(err => flash(err.message || 'Erro ao criar rede', 'error'));
+  }
+
+  // ---------- mutações de Diretor ----------
+  function updateDiretorNome(diretorId, nome) {
+    if (!nome.trim()) return;
+    atualizarDiretor(diretorId, { nome: nome.trim() })
+      .then(diretorAtualizado => {
+        setConfig(prev => ({ ...prev, diretores: prev.diretores.map(d => d.id === diretorId ? diretorAtualizado : d) }));
+      })
+      .catch(err => flash(err.message || 'Erro ao atualizar diretor', 'error'));
+  }
+
+  function removeDiretor(diretorId) {
+    if (!confirm('Remover este diretor e todas as redes dele?')) return;
+    removerDiretor(diretorId)
+      .then(() => {
+        setConfig(prev => ({ ...prev, diretores: prev.diretores.filter(d => d.id !== diretorId) }));
+      })
+      .catch(err => flash(err.message || 'Erro ao remover diretor', 'error'));
+  }
+
+  function addDiretor(nome) {
+    if (!nome.trim()) return;
+    criarDiretor({ nome: nome.trim() })
+      .then(diretorCriado => {
+        setConfig(prev => ({ ...prev, diretores: [...prev.diretores, diretorCriado] }));
+      })
+      .catch(err => flash(err.message || 'Erro ao criar diretor', 'error'));
   }
 
   return (
@@ -500,7 +535,7 @@ export default function RankingPage() {
             />
             {isAdmin ? (
               <button className={btnGhost} onClick={() => setCurrentView(v => v === 'config' ? 'report' : 'config')}>
-                {currentView === 'config' ? '← Voltar ao relatório' : '⚙ Configurar redes/lojas'}
+                {currentView === 'config' ? '← Voltar ao relatório' : '⚙ Configurar diretores/redes'}
               </button>
             ) : null}
           </div>
@@ -523,7 +558,17 @@ export default function RankingPage() {
               </div>
             )}
             {currentView === 'config'
-              ? <ConfigView config={config} removeRede={removeRede} removeLoja={removeLoja} addLoja={addLoja} addRede={addRede} removeCategoria={removeCategoria} isAdmin={isAdmin} toggleRedeVisivel={toggleRedeVisivel} updateRedeResponsavel={updateRedeResponsavel} toggleLojaAtivo={toggleLojaAtivo} />
+              ? (
+                <ConfigView
+                  config={config}
+                  removeDiretor={removeDiretor} addDiretor={addDiretor} updateDiretorNome={updateDiretorNome}
+                  removeRede={removeRede} addRede={addRede}
+                  updateRedeNome={updateRedeNome} updateRedeEmoji={updateRedeEmoji}
+                  removeCategoria={removeCategoria} isAdmin={isAdmin}
+                  toggleRedeVisivel={toggleRedeVisivel} toggleRedeAtivo={toggleRedeAtivo}
+                  updateRedeResponsavel={updateRedeResponsavel}
+                />
+              )
               : (
                 <ReportView
                   config={config} cat={cat} values={values} setValue={setValue} onBlurSave={handleValueBlur}
@@ -555,7 +600,6 @@ export default function RankingPage() {
 }
 
 function ReportView({ config, cat, values, setValue, onBlurSave, onFocusValue, setCurrentCatId, addCategoria, currentDate, handleGenReport, handleCopyReport, reportText, copyShown, handleExportExcel, handleSendEmail, sendingEmail, isAdmin, toggleRedeVisivel }) {
-  const redesVisiveis = config.redes.filter(r => r.visivel !== false);
   return (
     <div>
       <div className="flex gap-1.5 mb-5 flex-wrap items-center">
@@ -582,66 +626,67 @@ function ReportView({ config, cat, values, setValue, onBlurSave, onFocusValue, s
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-[18px]">
-        {redesVisiveis.map(rede => {
-          const lojasAtivas = rede.lojas.filter(l => l.ativo !== false);
-          const ranked = rankLoja(values, lojasAtivas);
-          const total = ranked.reduce((s, l) => s + l.valor, 0);
+        {config.diretores.map(diretor => {
+          // uma rede oculta (visivel=false) ou inativa (ativo=false) não aparece ranqueada
+          // aqui nem no relatório — mesmo filtro que antes existia em dois níveis diferentes,
+          // agora unificado no nível Rede (ver buildFullReport/CLAUDE.md).
+          const redesRankeaveis = diretor.redes.filter(r => r.ativo !== false && r.visivel !== false);
+          const ranked = rankRede(values, redesRankeaveis);
+          const total = ranked.reduce((s, r) => s + r.valor, 0);
           return (
-            <div className={card} key={rede.id}>
+            <div className={card} key={diretor.id}>
               <div className="flex justify-between items-baseline mb-3.5">
-                <h2 className="font-display text-[22px] font-bold m-0">{`Rede ${rede.responsavel?.nome ?? 'sem responsável'}`}</h2>
-                <div className="flex items-center gap-2">
-                  <div className="text-xl font-bold text-[var(--teal)] bg-[var(--teal)]/10 px-3.5 py-1 rounded-lg">{toBRL(total)}</div>
-                  {isAdmin ? (
-                    <button
-                      className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3 py-1.5 text-[12px] font-bold cursor-pointer hover:brightness-110"
-                      onClick={() => toggleRedeVisivel(rede.id, false)}
-                    >
-                      Ocultar
-                    </button>
-                  ) : null}
-                </div>
+                <h2 className="font-display text-[22px] font-bold m-0">{diretor.nome}</h2>
+                <div className="text-xl font-bold text-[var(--teal)] bg-[var(--teal)]/10 px-3.5 py-1 rounded-lg">{toBRL(total)}</div>
               </div>
               {ranked.length
-                ? ranked.map(l => (
+                ? ranked.map(r => (
                   <div
-                    key={l.id}
+                    key={r.id}
                     className={`flex items-center gap-3 px-2.5 py-2.5 rounded-[9px] mb-1.5 ${
-                      l.pos === 0
+                      r.pos === 0
                         ? 'bg-gradient-to-r from-[var(--gold)]/[.16] to-[var(--gold)]/[.03]'
-                        : l.pos === 1
+                        : r.pos === 1
                           ? 'bg-gradient-to-r from-[var(--silver)]/[.14] to-[var(--silver)]/[.03]'
                           : 'bg-[var(--panel-alt)]'
                     }`}
                   >
-                    <div className={`font-display w-[30px] text-center text-xl font-bold flex-shrink-0 ${l.pos === 0 ? 'text-[var(--gold)]' : l.pos === 1 ? 'text-[var(--silver)]' : 'text-[var(--muted)]'}`}>{l.pos + 1}</div>
-                    <div className="text-base w-[22px] text-center flex-shrink-0">{l.medal}</div>
-                    <div className="text-base w-5 text-center flex-shrink-0">{l.emoji || ''}</div>
-                    <div className="flex-1 text-[14.5px] font-semibold">{l.nome}</div>
+                    <div className={`font-display w-[30px] text-center text-xl font-bold flex-shrink-0 ${r.pos === 0 ? 'text-[var(--gold)]' : r.pos === 1 ? 'text-[var(--silver)]' : 'text-[var(--muted)]'}`}>{r.pos + 1}</div>
+                    <div className="text-base w-[22px] text-center flex-shrink-0">{r.medal}</div>
+                    <div className="text-base w-5 text-center flex-shrink-0">{r.emoji || ''}</div>
+                    <div className="flex-1 text-[14.5px] font-semibold">{r.nome}</div>
                     <input
-                      type="text" inputMode="decimal" value={formatarDigitosBR(valorParaDigitos(values[l.id]))} placeholder="0,00"
+                      type="text" inputMode="decimal" value={formatarDigitosBR(valorParaDigitos(values[r.id]))} placeholder="0,00"
                       onChange={e => {
-                        setValue(l.id, digitosParaValor(extrairDigitos(e.target.value)));
+                        setValue(r.id, digitosParaValor(extrairDigitos(e.target.value)));
                         moveCaretToEnd(e.target);
                       }}
                       onKeyDown={e => {
                         if (e.key !== 'Backspace' && e.key !== 'Delete') return;
                         e.preventDefault();
-                        const digitos = valorParaDigitos(values[l.id]);
-                        setValue(l.id, digitosParaValor(digitos.slice(0, -1)));
+                        const digitos = valorParaDigitos(values[r.id]);
+                        setValue(r.id, digitosParaValor(digitos.slice(0, -1)));
                         moveCaretToEnd(e.target);
                       }}
                       onPaste={e => {
                         e.preventDefault();
-                        setValue(l.id, parseValorBR(e.clipboardData.getData('text')));
+                        setValue(r.id, parseValorBR(e.clipboardData.getData('text')));
                         moveCaretToEnd(e.target);
                       }}
-                      onFocus={() => onFocusValue(l.id)} onBlur={() => onBlurSave(l.id)}
+                      onFocus={() => onFocusValue(r.id)} onBlur={() => onBlurSave(r.id)}
                       className="font-display w-[130px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-base text-right font-semibold focus:outline-none focus:border-[var(--teal)]"
                     />
+                    {isAdmin ? (
+                      <button
+                        className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-2.5 py-1.5 text-[12px] font-bold cursor-pointer hover:brightness-110 flex-shrink-0"
+                        onClick={() => toggleRedeVisivel(r.id, false)}
+                      >
+                        Ocultar
+                      </button>
+                    ) : null}
                   </div>
                 ))
-                : <div className="text-[var(--muted)] text-[13px] px-1 py-2">Nenhuma loja cadastrada nesta rede ainda.</div>
+                : <div className="text-[var(--muted)] text-[13px] px-1 py-2">Nenhuma rede cadastrada neste diretor ainda.</div>
               }
             </div>
           );
@@ -672,13 +717,26 @@ function ReportView({ config, cat, values, setValue, onBlurSave, onFocusValue, s
   );
 }
 
-function ConfigView({ config, removeRede, removeLoja, addLoja, addRede, removeCategoria, isAdmin, toggleRedeVisivel, updateRedeResponsavel, toggleLojaAtivo }) {
-  const [newRedeNome, setNewRedeNome] = useState('');
-  const [lojaDrafts, setLojaDrafts] = useState({});
-  const draftFor = (redeId) => lojaDrafts[redeId] || { emoji: '', nome: '' };
-  const setDraft = (redeId, field, val) => setLojaDrafts(prev => ({ ...prev, [redeId]: { ...draftFor(redeId), [field]: val } }));
+// Decisão de UX (visivel vs ativo na Rede, ver resumo final): mantidos como DOIS controles
+// separados e explícitos ("Ocultar"/"Mostrar" para `visivel`, "Desativar"/"Reativar" para
+// `ativo`) em vez de combinados num único botão — são conceitos com efeitos diferentes
+// (visivel: some do relatório/ranking mas continua "ativa" pro resto do sistema; ativo:
+// soft-delete de verdade, é o que o backend olha antes de permitir excluir a rede) e um
+// admin pode querer, por exemplo, desativar uma rede que fechou sem tirá-la do relatório
+// do dia em que ainda havia lançamento, ou ocultar temporariamente uma rede ainda ativa.
+function ConfigView({
+  config,
+  removeDiretor, addDiretor, updateDiretorNome,
+  removeRede, addRede, updateRedeNome, updateRedeEmoji,
+  removeCategoria, isAdmin,
+  toggleRedeVisivel, toggleRedeAtivo, updateRedeResponsavel,
+}) {
+  const [newDiretorNome, setNewDiretorNome] = useState('');
+  const [novaRedeDiretorId, setNovaRedeDiretorId] = useState('');
+  const [novaRedeEmoji, setNovaRedeEmoji] = useState('');
+  const [novaRedeNome, setNovaRedeNome] = useState('');
 
-  // ---------- responsáveis: lista carregada uma vez ao entrar na ConfigView ----------
+  // ---------- GGs (responsáveis): lista carregada uma vez ao entrar na ConfigView ----------
   const [responsaveis, setResponsaveis] = useState([]);
   const [loadingResponsaveis, setLoadingResponsaveis] = useState(true);
   const [responsaveisError, setResponsaveisError] = useState(null);
@@ -688,14 +746,14 @@ function ConfigView({ config, removeRede, removeLoja, addLoja, addRede, removeCa
   useEffect(() => {
     fetchResponsaveis()
       .then(lista => setResponsaveis(lista || []))
-      .catch(err => setResponsaveisError(err.message || 'Erro ao carregar responsáveis.'))
+      .catch(err => setResponsaveisError(err.message || 'Erro ao carregar GGs.'))
       .finally(() => setLoadingResponsaveis(false));
   }, []);
 
   function handleAddResponsavel() {
     const nome = novoResponsavelNome.trim();
     if (!nome) {
-      setResponsavelFormError('Informe um nome para o responsável.');
+      setResponsavelFormError('Informe um nome para o GG.');
       return;
     }
     setResponsavelFormError(null);
@@ -704,104 +762,158 @@ function ConfigView({ config, removeRede, removeLoja, addLoja, addRede, removeCa
         setResponsaveis(prev => [...prev, responsavelCriado]);
         setNovoResponsavelNome('');
       })
-      .catch(err => setResponsavelFormError(err.message || 'Erro ao criar responsável'));
+      .catch(err => setResponsavelFormError(err.message || 'Erro ao criar GG'));
   }
 
   function handleRemoveResponsavel(id) {
     setResponsavelFormError(null);
     removerResponsavel(id)
       .then(() => setResponsaveis(prev => prev.filter(r => r.id !== id)))
-      .catch(err => setResponsavelFormError(err.message || 'Erro ao remover responsável'));
+      .catch(err => setResponsavelFormError(err.message || 'Erro ao remover GG'));
   }
 
   return (
     <div>
       <div className="mb-[22px]">
-        <h3 className="font-display text-[19px] mb-3 font-bold">Redes e lojas</h3>
-        {config.redes.map(rede => (
-          <div key={rede.id} className="border border-[var(--border)] rounded-xl px-4 py-3.5 mb-3 bg-[var(--panel-alt)]">
+        <h3 className="font-display text-[19px] mb-3 font-bold">Diretores e redes</h3>
+        {config.diretores.map(diretor => (
+          <div key={diretor.id} className="border border-[var(--border)] rounded-xl px-4 py-3.5 mb-3 bg-[var(--panel-alt)]">
             <div className="flex gap-2.5 items-center mb-2.5">
-              <span className="font-display text-[var(--text)] text-[19px] font-bold px-1 py-0.5 flex-1">
-                {`Rede ${rede.responsavel?.nome ?? 'sem responsável'}`}
-              </span>
-              {isAdmin ? (
-                <select
-                  aria-label={`Responsável por ${rede.nome}`}
-                  value={rede.responsavel?.id ?? ''}
-                  onChange={e => updateRedeResponsavel(rede.id, e.target.value === '' ? null : Number(e.target.value))}
-                  className="text-[12.5px] font-medium text-[var(--muted)] flex-none w-40 bg-transparent border border-[var(--border)] rounded-lg px-2 py-1 focus:outline-none focus:border-[var(--teal)]"
-                >
-                  <option value="">Nenhum</option>
-                  {responsaveis.map(r => (
-                    <option key={r.id} value={r.id}>{r.nome}</option>
-                  ))}
-                </select>
-              ) : (
-                <span className="text-[12.5px] font-medium text-[var(--muted)] flex-none w-40 text-right">
-                  {rede.responsavel?.nome ?? 'Nenhum'}
-                </span>
-              )}
-              {rede.visivel === false ? <span className="text-[12px] text-[var(--muted)] font-semibold">(oculta do relatório)</span> : null}
+              <input
+                key={`diretor-nome-${diretor.id}`}
+                defaultValue={diretor.nome}
+                aria-label={`Nome do diretor ${diretor.nome}`}
+                readOnly={!isAdmin}
+                onBlur={e => updateDiretorNome(diretor.id, e.target.value)}
+                className="font-display text-[var(--text)] text-[19px] font-bold px-1 py-0.5 flex-1 bg-transparent border border-transparent rounded-lg focus:outline-none focus:border-[var(--teal)] focus:bg-[#12151b]"
+              />
               {isAdmin ? (
                 <button
-                  className={btnGhost + ' ml-auto'}
-                  onClick={() => toggleRedeVisivel(rede.id, rede.visivel === false ? true : false)}
+                  className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110"
+                  onClick={() => removeDiretor(diretor.id)}
                 >
-                  {rede.visivel === false ? 'Mostrar' : 'Ocultar'}
+                  Remover diretor
                 </button>
               ) : null}
-              <button className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110" onClick={() => removeRede(rede.id)}>Remover rede</button>
             </div>
 
-            <div className="flex flex-wrap">
-              {rede.lojas.length
-                ? rede.lojas.map(l => (
-                  <span
-                    key={l.id}
-                    className={`inline-flex items-center gap-1.5 bg-[#12151b] border border-[var(--border)] rounded-full pl-3 pr-1.5 py-1 mr-1 mb-1 text-[13px] ${l.ativo === false ? 'opacity-50' : ''}`}
+            <div className="flex flex-wrap gap-1.5">
+              {diretor.redes.length
+                ? diretor.redes.map(r => (
+                  <div
+                    key={r.id}
+                    className={`flex items-center gap-1.5 bg-[#12151b] border border-[var(--border)] rounded-lg pl-2 pr-1.5 py-1.5 text-[13px] ${r.ativo === false ? 'opacity-50' : ''}`}
                   >
-                    {l.emoji || ''} {l.nome}
-                    {l.ativo === false ? <span className="text-[11px] text-[var(--muted)] font-semibold">(oculta)</span> : null}
+                    <input
+                      key={`rede-emoji-${r.id}`}
+                      defaultValue={r.emoji || ''}
+                      maxLength={2}
+                      aria-label={`Emoji da rede ${r.nome}`}
+                      readOnly={!isAdmin}
+                      onBlur={e => updateRedeEmoji(r.id, e.target.value)}
+                      className="w-9 text-center bg-transparent border border-transparent rounded px-1 py-0.5 focus:outline-none focus:border-[var(--teal)]"
+                    />
+                    <input
+                      key={`rede-nome-${r.id}`}
+                      defaultValue={r.nome}
+                      aria-label={`Nome da rede ${r.nome}`}
+                      readOnly={!isAdmin}
+                      onBlur={e => updateRedeNome(r.id, e.target.value)}
+                      className="w-[120px] bg-transparent border border-transparent rounded px-1 py-0.5 focus:outline-none focus:border-[var(--teal)]"
+                    />
                     {isAdmin ? (
-                      <button
-                        onClick={() => toggleLojaAtivo(rede.id, l.id, l.ativo === false ? true : false)}
-                        aria-label={`${l.ativo === false ? 'Mostrar' : 'Ocultar'} loja ${l.nome}`}
-                        className="bg-transparent border border-[var(--border)] text-[var(--text)] rounded-full px-2 py-0.5 text-[11px] font-bold cursor-pointer hover:brightness-110"
+                      <select
+                        aria-label={`GG da rede ${r.nome}`}
+                        value={r.responsavel?.id ?? ''}
+                        onChange={e => updateRedeResponsavel(r.id, e.target.value === '' ? null : Number(e.target.value))}
+                        className="text-[12px] font-medium text-[var(--muted)] flex-none w-28 bg-transparent border border-[var(--border)] rounded-lg px-1.5 py-1 focus:outline-none focus:border-[var(--teal)]"
                       >
-                        {l.ativo === false ? 'Mostrar' : 'Ocultar'}
-                      </button>
+                        <option value="">Nenhum</option>
+                        {responsaveis.map(resp => (
+                          <option key={resp.id} value={resp.id}>{resp.nome}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-[12px] font-medium text-[var(--muted)] flex-none">
+                        {r.responsavel?.nome ?? 'sem GG'}
+                      </span>
+                    )}
+                    {r.visivel === false ? <span className="text-[11px] text-[var(--muted)] font-semibold">(oculta)</span> : null}
+                    {r.ativo === false ? <span className="text-[11px] text-[var(--muted)] font-semibold">(inativa)</span> : null}
+                    {isAdmin ? (
+                      <>
+                        <button
+                          onClick={() => toggleRedeVisivel(r.id, r.visivel === false ? true : false)}
+                          aria-label={`${r.visivel === false ? 'Mostrar' : 'Ocultar'} rede ${r.nome} no relatório`}
+                          className="bg-transparent border border-[var(--border)] text-[var(--text)] rounded-full px-2 py-0.5 text-[11px] font-bold cursor-pointer hover:brightness-110"
+                        >
+                          {r.visivel === false ? 'Mostrar' : 'Ocultar'}
+                        </button>
+                        <button
+                          onClick={() => toggleRedeAtivo(r.id, r.ativo === false ? true : false)}
+                          aria-label={`${r.ativo === false ? 'Reativar' : 'Desativar'} rede ${r.nome}`}
+                          className="bg-transparent border border-[var(--border)] text-[var(--text)] rounded-full px-2 py-0.5 text-[11px] font-bold cursor-pointer hover:brightness-110"
+                        >
+                          {r.ativo === false ? 'Reativar' : 'Desativar'}
+                        </button>
+                      </>
                     ) : null}
-                    <button onClick={() => removeLoja(rede.id, l.id)} className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-full w-[18px] h-[18px] text-[11px] cursor-pointer leading-none">✕</button>
-                  </span>
+                    <button
+                      onClick={() => removeRede(diretor.id, r.id)}
+                      aria-label={`Remover rede ${r.nome}`}
+                      className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-full w-[18px] h-[18px] text-[11px] cursor-pointer leading-none"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 ))
-                : <span className="text-[var(--muted)] text-[13px]">Nenhuma loja ainda</span>
+                : <span className="text-[var(--muted)] text-[13px]">Nenhuma rede ainda</span>
               }
-            </div>
-
-            <div className="flex gap-1.5 mt-2 flex-wrap">
-              <input
-                placeholder="🏆" maxLength={2} value={draftFor(rede.id).emoji} onChange={e => setDraft(rede.id, 'emoji', e.target.value)}
-                className="w-11 text-center bg-[#12151b] border border-[var(--border)] text-[var(--text)] rounded-lg px-2.5 py-1.5 text-[13px]"
-              />
-              <input
-                placeholder="Nome da loja" value={draftFor(rede.id).nome} onChange={e => setDraft(rede.id, 'nome', e.target.value)}
-                className="w-[130px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] rounded-lg px-2.5 py-1.5 text-[13px]"
-              />
-              <button
-                className={btn}
-                onClick={() => { const d = draftFor(rede.id); addLoja(rede.id, d.emoji, d.nome); setLojaDrafts(prev => ({ ...prev, [rede.id]: { emoji: '', nome: '' } })); }}
-              >
-                Adicionar loja
-              </button>
             </div>
           </div>
         ))}
 
-        <div className="flex gap-2 mt-1">
-          <input placeholder="Nome da rede (ex: Rede Fulano)" value={newRedeNome} onChange={e => setNewRedeNome(e.target.value)}
-            className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm" />
-          <button className={btn} onClick={() => { addRede(newRedeNome); setNewRedeNome(''); }}>Adicionar rede</button>
-        </div>
+        {isAdmin ? (
+          <div className="flex gap-2 mt-1 flex-wrap items-center">
+            <select
+              aria-label="Diretor pai da nova rede"
+              value={novaRedeDiretorId}
+              onChange={e => setNovaRedeDiretorId(e.target.value)}
+              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
+            >
+              <option value="">Selecione o diretor...</option>
+              {config.diretores.map(d => (
+                <option key={d.id} value={d.id}>{d.nome}</option>
+              ))}
+            </select>
+            <input
+              placeholder="🏆" maxLength={2} value={novaRedeEmoji} onChange={e => setNovaRedeEmoji(e.target.value)}
+              className="w-11 text-center bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-2.5 py-2 text-sm"
+            />
+            <input
+              placeholder="Nome da rede (ex: Delta)" value={novaRedeNome} onChange={e => setNovaRedeNome(e.target.value)}
+              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
+            />
+            <button
+              className={btn}
+              onClick={() => {
+                addRede(novaRedeDiretorId, novaRedeEmoji, novaRedeNome);
+                setNovaRedeEmoji('');
+                setNovaRedeNome('');
+              }}
+            >
+              Adicionar rede
+            </button>
+          </div>
+        ) : null}
+
+        {isAdmin ? (
+          <div className="flex gap-2 mt-2.5">
+            <input placeholder="Nome do diretor (ex: Victor Hugo)" value={newDiretorNome} onChange={e => setNewDiretorNome(e.target.value)}
+              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm" />
+            <button className={btn} onClick={() => { addDiretor(newDiretorNome); setNewDiretorNome(''); }}>Adicionar diretor</button>
+          </div>
+        ) : null}
       </div>
 
       <div>
@@ -818,9 +930,9 @@ function ConfigView({ config, removeRede, removeLoja, addLoja, addRede, removeCa
 
       {isAdmin ? (
         <div className="mt-[22px]">
-          <h3 className="font-display text-[19px] mb-3 font-bold">Responsáveis</h3>
+          <h3 className="font-display text-[19px] mb-3 font-bold">GGs</h3>
           {loadingResponsaveis ? (
-            <div className="text-[var(--muted)] text-sm">Carregando responsáveis...</div>
+            <div className="text-[var(--muted)] text-sm">Carregando GGs...</div>
           ) : responsaveisError ? (
             <div className="text-[var(--danger)] text-[13px] mb-2">{responsaveisError}</div>
           ) : (
@@ -831,24 +943,24 @@ function ConfigView({ config, removeRede, removeLoja, addLoja, addRede, removeCa
                     {r.nome}
                     <button
                       onClick={() => handleRemoveResponsavel(r.id)}
-                      aria-label={`Remover responsável ${r.nome}`}
+                      aria-label={`Remover GG ${r.nome}`}
                       className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-full w-[18px] h-[18px] text-[11px] cursor-pointer leading-none"
                     >
                       ✕
                     </button>
                   </span>
                 ))
-                : <span className="text-[var(--muted)] text-[13px]">Nenhum responsável cadastrado ainda</span>
+                : <span className="text-[var(--muted)] text-[13px]">Nenhum GG cadastrado ainda</span>
               }
             </div>
           )}
           <div className="flex gap-2 items-center flex-wrap">
             <input
-              placeholder="Nome do responsável" value={novoResponsavelNome}
+              placeholder="Nome do GG" value={novoResponsavelNome}
               onChange={e => setNovoResponsavelNome(e.target.value)}
               className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
             />
-            <button className={btn} onClick={handleAddResponsavel}>Adicionar responsável</button>
+            <button className={btn} onClick={handleAddResponsavel}>Adicionar GG</button>
             {responsavelFormError ? <span className="text-[var(--danger)] text-[13px]">{responsavelFormError}</span> : null}
           </div>
         </div>

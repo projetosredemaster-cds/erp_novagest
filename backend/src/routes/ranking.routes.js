@@ -7,29 +7,29 @@ const router = express.Router();
 // GET  /api/ranking/entradas?data=YYYY-MM-DD&categoriaId=X
 router.get('/entradas', rankingController.listarEntradas);
 
-// POST /api/ranking/entradas  (upsert por data + categoriaId + lojaId)
+// POST /api/ranking/entradas  (upsert por data + categoriaId + redeId)
 router.post('/entradas', rankingController.criarOuAtualizarEntrada);
 
-// GET  /api/ranking/redes  (redes com lojas aninhadas)
-router.get('/redes', rankingController.listarRedes);
+// GET  /api/ranking/diretores  (diretores com redes aninhadas)
+router.get('/diretores', rankingController.listarDiretores);
+
+// POST /api/ranking/diretores
+router.post('/diretores', rankingController.criarDiretor);
+
+// PUT  /api/ranking/diretores/:id
+router.put('/diretores/:id', rankingController.atualizarDiretor);
+
+// DELETE /api/ranking/diretores/:id  (bloqueia com 409 se houver redes vinculadas)
+router.delete('/diretores/:id', rankingController.excluirDiretor);
 
 // POST /api/ranking/redes
 router.post('/redes', rankingController.criarRede);
 
-// PUT  /api/ranking/redes/:id
+// PUT  /api/ranking/redes/:id  (usado também para soft-delete via ativo=false, e para ocultar via visivel=false)
 router.put('/redes/:id', rankingController.atualizarRede);
 
-// DELETE /api/ranking/redes/:id  (bloqueia com 409 se houver lojas vinculadas)
+// DELETE /api/ranking/redes/:id  (bloqueia com 409 se houver entradas vinculadas)
 router.delete('/redes/:id', rankingController.excluirRede);
-
-// POST /api/ranking/lojas
-router.post('/lojas', rankingController.criarLoja);
-
-// PUT  /api/ranking/lojas/:id  (usado também para soft-delete via ativo=false)
-router.put('/lojas/:id', rankingController.atualizarLoja);
-
-// DELETE /api/ranking/lojas/:id  (bloqueia com 409 se houver entradas vinculadas)
-router.delete('/lojas/:id', rankingController.excluirLoja);
 
 // GET  /api/ranking/categorias
 router.get('/categorias', rankingController.listarCategorias);

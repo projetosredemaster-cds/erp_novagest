@@ -1,16 +1,35 @@
-// Testes de componente (Vitest + React Testing Library) da feature "ocultar
-// rede" em RankingPage.jsx. `rankingApi.js` e `AuthContext.jsx` são
-// totalmente mockados — nenhuma chamada de rede real acontece aqui.
+// Testes de componente (Vitest + React Testing Library) de RankingPage.jsx
+// na hierarquia v2 (Diretor -> Rede, ver CONTRATO-RANKING-API.md). Migrado
+// do contrato antigo de 2 níveis (Rede -> Loja): `rankingApi.js` e
+// `AuthContext.jsx` continuam totalmente mockados — nenhuma chamada de rede
+// real acontece aqui.
+//
+// Mapa de renomeação usado nesta migração:
+//   - fetchRedes        -> fetchDiretores  (topo agora é Diretor, com .redes[] aninhado)
+//   - criarLoja/removerLoja/atualizarLoja -> criarRede/removerRede/atualizarRede
+//   - loja_id (entradas) -> rede_id
+//   - lojaId (salvarEntrada) -> redeId
+//   - rótulo visível "Responsável" -> "GG" (texto apenas; responsavelId/fetchResponsaveis
+//     continuam iguais)
+//   - cabeçalho do card = diretor.nome puro (antes era "Rede " + responsavel.nome)
+//   - "loja oculta" (Lojas.ativo) não existe mais no nível operado pelo Ranking;
+//     equivalente agora é "rede inativa" (Redes.ativo), um nível acima
 //
 // Cobre:
-//  - uma rede com visivel:false não aparece no grid principal (nó ausente
-//    do DOM, não escondido via CSS);
-//  - "Gerar relatório do dia" não inclui o nome da rede oculta;
-//  - isAdmin:false esconde o botão Ocultar/Mostrar em todos os lugares;
+//  - uma rede com visivel:false não aparece como linha no card do diretor
+//    (grid principal), a rede visível aparece;
+//  - "Gerar relatório do dia" não inclui a rede oculta;
+//  - isAdmin:false esconde o botão Ocultar (report view) e a navegação para
+//    ConfigView em todos os lugares;
 //  - isAdmin:true: clicar em "Ocultar" chama atualizarRede com
 //    { visivel: false } e só atualiza o estado local após a promise
 //    resolver; se a promise rejeitar, o estado local não muda e o flash de
-//    erro aparece.
+//    erro aparece;
+//  - ConfigView "Diretores e redes": toggles de visivel/ativo, GG (select),
+//    CRUD de GGs, criação de rede sem campo responsavel;
+//  - ordenação fixa de categorias no relatório e parsing de valor BR
+//    (ambos sem mudança de comportamento, só de nome de campo);
+//  - polling de sincronização multi-usuário (rede_id em vez de loja_id).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
@@ -18,16 +37,16 @@ import userEvent from '@testing-library/user-event';
 import RankingPage from './RankingPage.jsx';
 
 vi.mock('./rankingApi', () => ({
-  fetchRedes: vi.fn(),
+  fetchDiretores: vi.fn(),
   fetchCategorias: vi.fn(),
   fetchEntradas: vi.fn(),
   salvarEntrada: vi.fn(),
+  criarDiretor: vi.fn(),
+  atualizarDiretor: vi.fn(),
+  removerDiretor: vi.fn(),
   criarRede: vi.fn(),
   atualizarRede: vi.fn(),
   removerRede: vi.fn(),
-  criarLoja: vi.fn(),
-  removerLoja: vi.fn(),
-  atualizarLoja: vi.fn(),
   enviarRelatorioPorEmail: vi.fn(),
   fetchResponsaveis: vi.fn(),
   criarResponsavel: vi.fn(),
@@ -46,56 +65,71 @@ const CATEGORIA_PRINCIPAL = { id: 1, nome: 'Vendas', principal: true };
 function redeVisivel() {
   return {
     id: 10,
-    nome: 'Rede Visível',
-    responsavel: { id: 1, nome: 'Ana' },
+    diretor_id: 1,
+    nome: 'Delta',
+    emoji: '🏆',
+    ativo: true,
     visivel: true,
-    lojas: [{ id: 100, nome: 'Loja A', emoji: '🏆' }],
+    responsavel: { id: 1, nome: 'Ana' },
+    criado_em: '2024-01-01T00:00:00.000Z',
   };
 }
 
 function redeOculta() {
   return {
     id: 20,
-    nome: 'Rede Oculta',
-    responsavel: null,
+    diretor_id: 1,
+    nome: 'Lendários',
+    emoji: '🥈',
+    ativo: true,
     visivel: false,
-    lojas: [{ id: 200, nome: 'Loja B', emoji: '🥈' }],
-  };
-}
-
-// rede visível com uma loja ativa e uma loja oculta (Lojas.ativo:false) — usada
-// para cobrir a feature "ocultar/mostrar loja individualmente".
-function redeComLojaOculta() {
-  return {
-    id: 30,
-    nome: 'Rede Mista',
     responsavel: null,
-    visivel: true,
-    lojas: [
-      { id: 300, nome: 'Loja Ativa', emoji: '🏆', ativo: true },
-      { id: 301, nome: 'Loja Escondida', emoji: '🥈', ativo: false },
-    ],
+    criado_em: '2024-01-02T00:00:00.000Z',
   };
 }
 
-function mockDadosLojaOculta({ valores } = {}) {
-  rankingApi.fetchRedes.mockResolvedValue([redeComLojaOculta()]);
+function diretor1({ redes } = {}) {
+  return {
+    id: 1,
+    nome: 'Victor Hugo',
+    criado_em: '2024-01-01T00:00:00.000Z',
+    redes: redes || [redeVisivel(), redeOculta()],
+  };
+}
+
+// diretor com uma rede ativa e uma rede inativa (Redes.ativo:false) — usado
+// para cobrir a feature "ocultar/mostrar rede individualmente" (equivalente,
+// um nível acima na hierarquia, ao antigo "ocultar loja").
+function redeAtiva() {
+  return {
+    id: 300, diretor_id: 5, nome: 'Rede Ativa', emoji: '🏆', ativo: true, visivel: true, responsavel: null,
+  };
+}
+function redeInativa() {
+  return {
+    id: 301, diretor_id: 5, nome: 'Rede Escondida', emoji: '🥈', ativo: false, visivel: true, responsavel: null,
+  };
+}
+function diretorMisto() {
+  return { id: 5, nome: 'Diretor Misto', criado_em: '2024-01-01T00:00:00.000Z', redes: [redeAtiva(), redeInativa()] };
+}
+
+function mockDadosRedeInativa({ valores } = {}) {
+  rankingApi.fetchDiretores.mockResolvedValue([diretorMisto()]);
   rankingApi.fetchCategorias.mockResolvedValue([CATEGORIA_PRINCIPAL]);
   rankingApi.fetchEntradas.mockResolvedValue(
     valores || [
-      { loja_id: 300, valor: 50 },
-      { loja_id: 301, valor: 999 },
+      { rede_id: 300, valor: 50 },
+      { rede_id: 301, valor: 999 },
     ]
   );
   rankingApi.fetchResponsaveis.mockResolvedValue([]);
 }
 
-function mockDadosIniciais({ redes, responsaveis }) {
-  rankingApi.fetchRedes.mockResolvedValue(redes);
+function mockDadosIniciais({ diretores, responsaveis, entradas }) {
+  rankingApi.fetchDiretores.mockResolvedValue(diretores);
   rankingApi.fetchCategorias.mockResolvedValue([CATEGORIA_PRINCIPAL]);
-  rankingApi.fetchEntradas.mockResolvedValue([
-    { loja_id: 100, valor: 50 },
-  ]);
+  rankingApi.fetchEntradas.mockResolvedValue(entradas || [{ rede_id: 10, valor: 50 }]);
   rankingApi.fetchResponsaveis.mockResolvedValue(responsaveis || []);
 }
 
@@ -111,30 +145,21 @@ beforeEach(() => {
 });
 
 describe('RankingPage — ocultar rede (grid principal)', () => {
-  it('uma rede com visivel:false não tem nenhum nó no grid principal; a rede visível aparece normalmente', async () => {
+  it('uma rede com visivel:false não tem nenhuma linha no card do diretor; a rede visível aparece normalmente', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosIniciais({ redes: [redeVisivel(), redeOculta()] });
+    mockDadosIniciais({ diretores: [diretor1()] });
 
     await renderPage();
 
-    // título do card é sempre "Rede " + responsavel.nome (não mais rede.nome estático)
-    expect(await screen.findByText('Rede Ana')).toBeInTheDocument();
-    expect(screen.queryByText('Rede Oculta')).not.toBeInTheDocument();
-    expect(screen.queryByText('Loja B')).not.toBeInTheDocument();
-  });
-
-  it('rede visível sem responsável atribuído mostra o título "Rede sem responsável"', async () => {
-    useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosLojaOculta(); // redeComLojaOculta(): visivel:true, responsavel:null
-
-    await renderPage();
-
-    expect(await screen.findByText('Rede sem responsável')).toBeInTheDocument();
+    // título do card agora é o nome do PRÓPRIO diretor (não mais "Rede " + responsavel.nome)
+    expect(await screen.findByText('Victor Hugo')).toBeInTheDocument();
+    expect(screen.getByText('Delta')).toBeInTheDocument();
+    expect(screen.queryByText('Lendários')).not.toBeInTheDocument();
   });
 
   it('"Gerar relatório do dia" não inclui o nome da rede oculta', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosIniciais({ redes: [redeVisivel(), redeOculta()] });
+    mockDadosIniciais({ diretores: [diretor1()] });
 
     const user = userEvent.setup();
     await renderPage();
@@ -142,31 +167,31 @@ describe('RankingPage — ocultar rede (grid principal)', () => {
     await user.click(screen.getByRole('button', { name: 'Gerar relatório do dia' }));
 
     const textarea = screen.getByPlaceholderText(/Clique em "Gerar relatório do dia"/);
-    expect(textarea.value).toContain('Rede Visível');
-    expect(textarea.value).not.toContain('Rede Oculta');
+    expect(textarea.value).toContain('Delta');
+    expect(textarea.value).not.toContain('Lendários');
   });
 });
 
 describe('RankingPage — controle de admin do botão Ocultar/Mostrar', () => {
   it('isAdmin:false — o botão Ocultar não aparece no card do grid principal', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosIniciais({ redes: [redeVisivel()] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
 
     await renderPage();
 
-    expect(await screen.findByText('Rede Ana')).toBeInTheDocument();
+    expect(await screen.findByText('Delta')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Ocultar' })).not.toBeInTheDocument();
     // a ConfigView também não é acessível: sem o botão de navegação para admin
-    expect(screen.queryByRole('button', { name: /Configurar redes\/lojas/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Configurar diretores\/redes/ })).not.toBeInTheDocument();
   });
 
   it('isAdmin:true — o botão Ocultar aparece no card do grid principal', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel()] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
 
     await renderPage();
 
-    expect(await screen.findByText('Rede Ana')).toBeInTheDocument();
+    expect(await screen.findByText('Delta')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ocultar' })).toBeInTheDocument();
   });
 });
@@ -174,7 +199,7 @@ describe('RankingPage — controle de admin do botão Ocultar/Mostrar', () => {
 describe('RankingPage — toggleRedeVisivel (clique em Ocultar, isAdmin:true)', () => {
   it('clicar em "Ocultar" chama atualizarRede com { visivel: false } e só atualiza o estado local após a promise resolver', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel()] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
 
     let resolvePromise;
     rankingApi.atualizarRede.mockImplementation(
@@ -188,16 +213,16 @@ describe('RankingPage — toggleRedeVisivel (clique em Ocultar, isAdmin:true)', 
 
     expect(rankingApi.atualizarRede).toHaveBeenCalledWith(10, { visivel: false });
     // ainda não resolveu: a rede continua visível no grid
-    expect(screen.getByText('Rede Ana')).toBeInTheDocument();
+    expect(screen.getByText('Delta')).toBeInTheDocument();
 
     resolvePromise({ ...redeVisivel(), visivel: false });
 
-    await waitFor(() => expect(screen.queryByText('Rede Ana')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('Delta')).not.toBeInTheDocument());
   });
 
   it('se a promise rejeitar, o estado local NÃO muda e o flash de erro aparece', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel()] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
     rankingApi.atualizarRede.mockRejectedValue(new Error('Falha simulada ao atualizar rede'));
 
     const user = userEvent.setup();
@@ -207,26 +232,26 @@ describe('RankingPage — toggleRedeVisivel (clique em Ocultar, isAdmin:true)', 
 
     await waitFor(() => expect(screen.getByText('Falha simulada ao atualizar rede')).toBeInTheDocument());
     // a rede continua visível no grid — estado local não mudou
-    expect(screen.getByText('Rede Ana')).toBeInTheDocument();
+    expect(screen.getByText('Delta')).toBeInTheDocument();
   });
 });
 
-describe('RankingPage — ConfigView (tela "⚙ Configurar redes/lojas")', () => {
-  it('isAdmin:true — rede oculta mostra o texto "(oculta do relatório)" e o botão "Mostrar"; clicar chama atualizarRede com { visivel: true }', async () => {
+describe('RankingPage — ConfigView (tela "⚙ Configurar diretores/redes")', () => {
+  it('isAdmin:true — rede oculta mostra "(oculta)" e o botão "Mostrar rede ... no relatório"; clicar chama atualizarRede com { visivel: true }', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel(), redeOculta()] });
+    mockDadosIniciais({ diretores: [diretor1()] });
     rankingApi.atualizarRede.mockResolvedValue({ ...redeOculta(), visivel: true });
 
     const user = userEvent.setup();
     await renderPage();
 
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
-    expect(screen.getByText('(oculta do relatório)')).toBeInTheDocument();
-    const mostrarBtn = screen.getByRole('button', { name: 'Mostrar' });
+    expect(screen.getByText('(oculta)')).toBeInTheDocument();
+    const mostrarBtn = screen.getByRole('button', { name: 'Mostrar rede Lendários no relatório' });
     expect(mostrarBtn).toBeInTheDocument();
-    // a rede visível, na mesma tela, mostra "Ocultar" (não "Mostrar")
-    expect(screen.getByRole('button', { name: 'Ocultar' })).toBeInTheDocument();
+    // a rede visível, na mesma tela, mostra "Ocultar rede ... no relatório" (não "Mostrar")
+    expect(screen.getByRole('button', { name: 'Ocultar rede Delta no relatório' })).toBeInTheDocument();
 
     await user.click(mostrarBtn);
 
@@ -235,49 +260,49 @@ describe('RankingPage — ConfigView (tela "⚙ Configurar redes/lojas")', () =>
 
   it('isAdmin:false — a ConfigView não é acessível (sem botão de navegação) e nenhum botão Ocultar/Mostrar existe em nenhum lugar', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosIniciais({ redes: [redeVisivel(), redeOculta()] });
+    mockDadosIniciais({ diretores: [diretor1()] });
 
     await renderPage();
 
-    expect(screen.queryByRole('button', { name: /Configurar redes\/lojas/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Configurar diretores\/redes/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Ocultar' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Mostrar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Mostrar rede/ })).not.toBeInTheDocument();
   });
 });
 
-describe('RankingPage — responsável de rede (formato aninhado { id, nome })', () => {
-  it('isAdmin:true — mostra um <select> com o responsável atual selecionado e a lista de responsáveis cadastrados', async () => {
+describe('RankingPage — GG de rede (formato aninhado { id, nome }, rótulo visível trocado de "Responsável" para "GG")', () => {
+  it('isAdmin:true — mostra um <select> com o GG atual selecionado e a lista de GGs cadastrados', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
     mockDadosIniciais({
-      redes: [redeVisivel(), redeOculta()],
+      diretores: [diretor1()],
       responsaveis: [{ id: 1, nome: 'Ana' }, { id: 2, nome: 'Beto' }],
     });
 
     const user = userEvent.setup();
     await renderPage();
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
-    const selectAna = await screen.findByLabelText('Responsável por Rede Visível');
+    const selectAna = await screen.findByLabelText('GG da rede Delta');
     expect(selectAna.tagName).toBe('SELECT');
     expect(selectAna.value).toBe('1'); // rede.responsavel = { id: 1, nome: 'Ana' }
 
-    const selectOculta = screen.getByLabelText('Responsável por Rede Oculta');
+    const selectOculta = screen.getByLabelText('GG da rede Lendários');
     expect(selectOculta.value).toBe(''); // rede.responsavel = null -> opção "Nenhum"
   });
 
   it('isAdmin:true — trocar a seleção do <select> chama atualizarRede com { responsavelId } (number ou null)', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
     mockDadosIniciais({
-      redes: [redeVisivel()],
+      diretores: [diretor1({ redes: [redeVisivel()] })],
       responsaveis: [{ id: 1, nome: 'Ana' }, { id: 2, nome: 'Beto' }],
     });
     rankingApi.atualizarRede.mockResolvedValue({ ...redeVisivel(), responsavel: { id: 2, nome: 'Beto' } });
 
     const user = userEvent.setup();
     await renderPage();
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
-    const select = await screen.findByLabelText('Responsável por Rede Visível');
+    const select = await screen.findByLabelText('GG da rede Delta');
     await user.selectOptions(select, '2');
 
     expect(rankingApi.atualizarRede).toHaveBeenCalledWith(10, { responsavelId: 2 });
@@ -286,128 +311,132 @@ describe('RankingPage — responsável de rede (formato aninhado { id, nome })',
   it('isAdmin:true — selecionar "Nenhum" chama atualizarRede com { responsavelId: null }', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
     mockDadosIniciais({
-      redes: [redeVisivel()],
+      diretores: [diretor1({ redes: [redeVisivel()] })],
       responsaveis: [{ id: 1, nome: 'Ana' }],
     });
     rankingApi.atualizarRede.mockResolvedValue({ ...redeVisivel(), responsavel: null });
 
     const user = userEvent.setup();
     await renderPage();
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
-    const select = await screen.findByLabelText('Responsável por Rede Visível');
+    const select = await screen.findByLabelText('GG da rede Delta');
     await user.selectOptions(select, '');
 
     expect(rankingApi.atualizarRede).toHaveBeenCalledWith(10, { responsavelId: null });
   });
 
-  it('isAdmin:false — a ConfigView não é acessível, então nenhum <select> de responsável nem texto de responsável aparecem fora dela', async () => {
+  it('isAdmin:false — a ConfigView não é acessível, então nenhum <select> de GG aparece fora dela', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosIniciais({ redes: [redeVisivel()], responsaveis: [{ id: 1, nome: 'Ana' }] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })], responsaveis: [{ id: 1, nome: 'Ana' }] });
 
     await renderPage();
 
-    expect(screen.queryByLabelText('Responsável por Rede Visível')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('GG da rede Delta')).not.toBeInTheDocument();
   });
 });
 
-describe('RankingPage — cadastro/remoção de Responsáveis (seção "Responsáveis" da ConfigView)', () => {
-  it('isAdmin:true — lista os responsáveis cadastrados e permite cadastrar um novo', async () => {
+describe('RankingPage — cadastro/remoção de GGs (seção "GGs" da ConfigView)', () => {
+  it('isAdmin:true — lista os GGs cadastrados e permite cadastrar um novo', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel()], responsaveis: [{ id: 1, nome: 'Ana' }] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })], responsaveis: [{ id: 1, nome: 'Ana' }] });
     rankingApi.criarResponsavel.mockResolvedValue({ id: 2, nome: 'Beto' });
 
     const user = userEvent.setup();
     await renderPage();
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
-    expect(await screen.findByRole('button', { name: 'Remover responsável Ana' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Remover GG Ana' })).toBeInTheDocument();
 
-    await user.type(screen.getByPlaceholderText('Nome do responsável'), 'Beto');
-    await user.click(screen.getByRole('button', { name: 'Adicionar responsável' }));
+    await user.type(screen.getByPlaceholderText('Nome do GG'), 'Beto');
+    await user.click(screen.getByRole('button', { name: 'Adicionar GG' }));
 
     expect(rankingApi.criarResponsavel).toHaveBeenCalledWith({ nome: 'Beto' });
-    expect(await screen.findByRole('button', { name: 'Remover responsável Beto' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Remover GG Beto' })).toBeInTheDocument();
   });
 
   it('isAdmin:true — não chama a API se o nome estiver vazio (validação no cliente)', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel()], responsaveis: [] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })], responsaveis: [] });
 
     const user = userEvent.setup();
     await renderPage();
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
-    await screen.findByText('Nenhum responsável cadastrado ainda');
-    await user.click(screen.getByRole('button', { name: 'Adicionar responsável' }));
+    await screen.findByText('Nenhum GG cadastrado ainda');
+    await user.click(screen.getByRole('button', { name: 'Adicionar GG' }));
 
     expect(rankingApi.criarResponsavel).not.toHaveBeenCalled();
-    expect(screen.getByText('Informe um nome para o responsável.')).toBeInTheDocument();
+    expect(screen.getByText('Informe um nome para o GG.')).toBeInTheDocument();
   });
 
-  it('isAdmin:true — remover um responsável vinculado a uma rede (409) mostra a mensagem de erro da API e não some da lista', async () => {
+  it('isAdmin:true — remover um GG vinculado a uma rede (409) mostra a mensagem de erro da API e não some da lista', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel()], responsaveis: [{ id: 1, nome: 'Ana' }] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })], responsaveis: [{ id: 1, nome: 'Ana' }] });
     rankingApi.removerResponsavel.mockRejectedValue(
       new Error('Não é possível excluir este responsável pois há redes vinculadas a ele. Remova a atribuição primeiro.')
     );
 
     const user = userEvent.setup();
     await renderPage();
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
-    await screen.findByRole('button', { name: 'Remover responsável Ana' });
-    await user.click(screen.getByRole('button', { name: 'Remover responsável Ana' }));
+    await screen.findByRole('button', { name: 'Remover GG Ana' });
+    await user.click(screen.getByRole('button', { name: 'Remover GG Ana' }));
 
     expect(await screen.findByText(
       'Não é possível excluir este responsável pois há redes vinculadas a ele. Remova a atribuição primeiro.'
     )).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Remover responsável Ana' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remover GG Ana' })).toBeInTheDocument();
   });
 
-  it('isAdmin:true — remover um responsável sem vínculo remove da lista sem esperar reload da página', async () => {
+  it('isAdmin:true — remover um GG sem vínculo remove da lista sem esperar reload da página', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel()], responsaveis: [{ id: 1, nome: 'Ana' }] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })], responsaveis: [{ id: 1, nome: 'Ana' }] });
     rankingApi.removerResponsavel.mockResolvedValue(undefined);
 
     const user = userEvent.setup();
     await renderPage();
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
-    await screen.findByRole('button', { name: 'Remover responsável Ana' });
-    await user.click(screen.getByRole('button', { name: 'Remover responsável Ana' }));
+    await screen.findByRole('button', { name: 'Remover GG Ana' });
+    await user.click(screen.getByRole('button', { name: 'Remover GG Ana' }));
 
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Remover responsável Ana' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Remover GG Ana' })).not.toBeInTheDocument());
     expect(rankingApi.removerResponsavel).toHaveBeenCalledWith(1);
   });
 
-  it('isAdmin:false — a seção "Responsáveis" não é renderizada', async () => {
+  it('isAdmin:false — a seção "GGs" não é renderizada', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosIniciais({ redes: [redeVisivel()], responsaveis: [{ id: 1, nome: 'Ana' }] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })], responsaveis: [{ id: 1, nome: 'Ana' }] });
 
     await renderPage();
 
-    expect(screen.queryByText('Responsáveis')).not.toBeInTheDocument();
-    expect(screen.queryByPlaceholderText('Nome do responsável')).not.toBeInTheDocument();
+    expect(screen.queryByText('GGs')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Nome do GG')).not.toBeInTheDocument();
   });
 });
 
-describe('RankingPage — POST /redes não envia mais responsavel', () => {
-  it('addRede chama criarRede só com { nome }, sem campo de responsável no formulário de criação', async () => {
+describe('RankingPage — POST /redes não envia responsavel (nasce sempre sem GG atribuído)', () => {
+  it('addRede chama criarRede com { diretorId, nome, emoji }, sem campo de responsável no formulário de criação', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [], responsaveis: [] });
-    rankingApi.criarRede.mockResolvedValue({ id: 30, nome: 'Rede Nova', responsavel: null, visivel: true, lojas: [] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [] })], responsaveis: [] });
+    rankingApi.criarRede.mockResolvedValue({
+      id: 30, diretor_id: 1, nome: 'Rede Nova', emoji: '', ativo: true, visivel: true, responsavel: null,
+    });
 
     const user = userEvent.setup();
     await renderPage();
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
     expect(screen.queryByPlaceholderText('Responsável')).not.toBeInTheDocument();
 
-    await user.type(screen.getByPlaceholderText('Nome da rede (ex: Rede Fulano)'), 'Rede Nova');
+    const selectDiretor = screen.getByLabelText('Diretor pai da nova rede');
+    await user.selectOptions(selectDiretor, '1');
+    await user.type(screen.getByPlaceholderText('Nome da rede (ex: Delta)'), 'Rede Nova');
     await user.click(screen.getByRole('button', { name: 'Adicionar rede' }));
 
-    expect(rankingApi.criarRede).toHaveBeenCalledWith({ nome: 'Rede Nova' });
+    expect(rankingApi.criarRede).toHaveBeenCalledWith({ diretorId: 1, nome: 'Rede Nova', emoji: '' });
   });
 });
 
@@ -420,7 +449,7 @@ describe('RankingPage — ordem fixa de categorias no relatório gerado (buildFu
   const CATEGORIA_RECEITA_BRUTA = { id: 1, nome: 'Receita Bruta', principal: true };
 
   function mockDadosOrdenacao({ categorias, valoresPorCategoria }) {
-    rankingApi.fetchRedes.mockResolvedValue([redeVisivel()]);
+    rankingApi.fetchDiretores.mockResolvedValue([diretor1({ redes: [redeVisivel()] })]);
     rankingApi.fetchCategorias.mockResolvedValue(categorias);
     rankingApi.fetchEntradas.mockImplementation((_data, catId) =>
       Promise.resolve(valoresPorCategoria[catId] || [])
@@ -435,8 +464,8 @@ describe('RankingPage — ordem fixa de categorias no relatório gerado (buildFu
       categorias: [CATEGORIA_ACESSORIOS, CATEGORIA_CORRECAO, CATEGORIA_RECEITA_BRUTA],
       valoresPorCategoria: {
         // lançado em Acessórios primeiro (proposital), depois em Receita Bruta
-        [CATEGORIA_ACESSORIOS.id]: [{ loja_id: 100, valor: 30 }],
-        [CATEGORIA_RECEITA_BRUTA.id]: [{ loja_id: 100, valor: 10 }],
+        [CATEGORIA_ACESSORIOS.id]: [{ rede_id: 10, valor: 30 }],
+        [CATEGORIA_RECEITA_BRUTA.id]: [{ rede_id: 10, valor: 10 }],
         // Correção sem nenhum valor lançado -> seção omitida (comportamento já existente)
       },
     });
@@ -460,10 +489,10 @@ describe('RankingPage — ordem fixa de categorias no relatório gerado (buildFu
     mockDadosOrdenacao({
       categorias: [CATEGORIA_RECEITA_BRUTA, CATEGORIA_CORRECAO, CATEGORIA_ACESSORIOS, CATEGORIA_SEGUROS],
       valoresPorCategoria: {
-        [CATEGORIA_RECEITA_BRUTA.id]: [{ loja_id: 100, valor: 10 }],
-        [CATEGORIA_CORRECAO.id]: [{ loja_id: 100, valor: 20 }],
-        [CATEGORIA_ACESSORIOS.id]: [{ loja_id: 100, valor: 30 }],
-        [CATEGORIA_SEGUROS.id]: [{ loja_id: 100, valor: 40 }],
+        [CATEGORIA_RECEITA_BRUTA.id]: [{ rede_id: 10, valor: 10 }],
+        [CATEGORIA_CORRECAO.id]: [{ rede_id: 10, valor: 20 }],
+        [CATEGORIA_ACESSORIOS.id]: [{ rede_id: 10, valor: 30 }],
+        [CATEGORIA_SEGUROS.id]: [{ rede_id: 10, valor: 40 }],
       },
     });
 
@@ -489,23 +518,23 @@ describe('RankingPage — ordem fixa de categorias no relatório gerado (buildFu
   });
 });
 
-describe('RankingPage — ocultar loja individualmente (Lojas.ativo, grid principal)', () => {
-  it('uma loja com ativo:false não aparece no grid nem conta no total da rede', async () => {
+describe('RankingPage — ocultar/desativar rede individualmente (Redes.ativo, grid principal)', () => {
+  it('uma rede com ativo:false não aparece no grid nem conta no total do diretor', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosLojaOculta();
+    mockDadosRedeInativa();
 
     await renderPage();
 
-    expect(await screen.findByText('Loja Ativa')).toBeInTheDocument();
-    expect(screen.queryByText('Loja Escondida')).not.toBeInTheDocument();
-    // total da rede deve refletir só a loja ativa (50), não a soma com a oculta (999)
+    expect(await screen.findByText('Rede Ativa')).toBeInTheDocument();
+    expect(screen.queryByText('Rede Escondida')).not.toBeInTheDocument();
+    // total do diretor deve refletir só a rede ativa (50), não a soma com a inativa (999)
     expect(screen.getByText('R$ 50,00')).toBeInTheDocument();
     expect(screen.queryByText('R$ 1.049,00')).not.toBeInTheDocument();
   });
 
-  it('"Gerar relatório do dia" não inclui a loja oculta mesmo com valor lançado', async () => {
+  it('"Gerar relatório do dia" não inclui a rede inativa mesmo com valor lançado', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosLojaOculta();
+    mockDadosRedeInativa();
 
     const user = userEvent.setup();
     await renderPage();
@@ -513,13 +542,13 @@ describe('RankingPage — ocultar loja individualmente (Lojas.ativo, grid princi
     await user.click(screen.getByRole('button', { name: 'Gerar relatório do dia' }));
 
     const textarea = screen.getByPlaceholderText(/Clique em "Gerar relatório do dia"/);
-    expect(textarea.value).toContain('Loja Ativa');
-    expect(textarea.value).not.toContain('Loja Escondida');
+    expect(textarea.value).toContain('Rede Ativa');
+    expect(textarea.value).not.toContain('Rede Escondida');
   });
 
-  it('categoria fica de fora do relatório quando só a loja oculta tem valor lançado (loja oculta não conta como "preenchida")', async () => {
+  it('categoria fica de fora do relatório quando só a rede inativa tem valor lançado (rede inativa não conta como "preenchida")', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosLojaOculta({ valores: [{ loja_id: 301, valor: 999 }] }); // só a loja oculta tem valor
+    mockDadosRedeInativa({ valores: [{ rede_id: 301, valor: 999 }] }); // só a rede inativa tem valor
 
     const user = userEvent.setup();
     await renderPage();
@@ -534,7 +563,7 @@ describe('RankingPage — ocultar loja individualmente (Lojas.ativo, grid princi
 describe('RankingPage — parsing de valor BR no input de lançamento (parseValorBR)', () => {
   it('colar "1.730,00" (formato BR com milhar) soma o total corretamente como R$ 1.730,00, não R$ 1,73', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosIniciais({ redes: [redeVisivel()] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
     rankingApi.salvarEntrada.mockResolvedValue(undefined);
 
     const user = userEvent.setup();
@@ -546,14 +575,14 @@ describe('RankingPage — parsing de valor BR no input de lançamento (parseValo
     await user.tab();
 
     await waitFor(() => expect(rankingApi.salvarEntrada).toHaveBeenCalledWith(
-      expect.objectContaining({ lojaId: 100, valor: 1730 })
+      expect.objectContaining({ redeId: 10, valor: 1730 })
     ));
     expect(await screen.findByText('R$ 1.730,00')).toBeInTheDocument();
   });
 
   it('digitar manualmente "1730,50" continua funcionando (vírgula decimal sem separador de milhar)', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosIniciais({ redes: [redeVisivel()] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
     rankingApi.salvarEntrada.mockResolvedValue(undefined);
 
     const user = userEvent.setup();
@@ -565,14 +594,14 @@ describe('RankingPage — parsing de valor BR no input de lançamento (parseValo
     await user.tab();
 
     await waitFor(() => expect(rankingApi.salvarEntrada).toHaveBeenCalledWith(
-      expect.objectContaining({ lojaId: 100, valor: 1730.5 })
+      expect.objectContaining({ redeId: 10, valor: 1730.5 })
     ));
     expect(await screen.findByText('R$ 1.730,50')).toBeInTheDocument();
   });
 
   it('colar um valor simples sem separador de milhar ("500,00") continua funcionando', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosIniciais({ redes: [redeVisivel()] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
     rankingApi.salvarEntrada.mockResolvedValue(undefined);
 
     const user = userEvent.setup();
@@ -584,74 +613,74 @@ describe('RankingPage — parsing de valor BR no input de lançamento (parseValo
     await user.tab();
 
     await waitFor(() => expect(rankingApi.salvarEntrada).toHaveBeenCalledWith(
-      expect.objectContaining({ lojaId: 100, valor: 500 })
+      expect.objectContaining({ redeId: 10, valor: 500 })
     ));
     expect(await screen.findByText('R$ 500,00')).toBeInTheDocument();
   });
 });
 
-describe('RankingPage — ConfigView: botão Ocultar/Mostrar loja (Lojas.ativo)', () => {
-  it('isAdmin:false — nenhum botão Ocultar/Mostrar loja existe em lugar nenhum', async () => {
+describe('RankingPage — ConfigView: botão Desativar/Reativar rede (Redes.ativo)', () => {
+  it('isAdmin:false — nenhum botão Desativar/Reativar rede existe em lugar nenhum', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosLojaOculta();
+    mockDadosRedeInativa();
 
     await renderPage();
 
-    expect(screen.queryByRole('button', { name: /Ocultar loja/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Mostrar loja/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Desativar rede/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Reativar rede/ })).not.toBeInTheDocument();
   });
 
-  it('isAdmin:true — a loja oculta mostra o texto "(oculta)" e o botão "Mostrar loja"', async () => {
+  it('isAdmin:true — a rede inativa mostra o texto "(inativa)" e o botão "Reativar rede ..."', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosLojaOculta();
+    mockDadosRedeInativa();
 
     const user = userEvent.setup();
     await renderPage();
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
-    expect(screen.getByText('(oculta)')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Mostrar loja Loja Escondida' })).toBeInTheDocument();
-    // a loja ativa, na mesma rede, mostra "Ocultar loja ..." (não "Mostrar loja ...")
-    expect(screen.getByRole('button', { name: 'Ocultar loja Loja Ativa' })).toBeInTheDocument();
+    expect(screen.getByText('(inativa)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reativar rede Rede Escondida' })).toBeInTheDocument();
+    // a rede ativa, no mesmo diretor, mostra "Desativar rede ..." (não "Reativar")
+    expect(screen.getByRole('button', { name: 'Desativar rede Rede Ativa' })).toBeInTheDocument();
   });
 
-  it('isAdmin:true — clicar em "Ocultar loja" chama atualizarLoja com { ativo: false } e só atualiza o estado local após a promise resolver', async () => {
+  it('isAdmin:true — clicar em "Desativar rede ..." chama atualizarRede com { ativo: false } e só atualiza o estado local após a promise resolver', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosLojaOculta();
+    mockDadosRedeInativa();
 
     let resolvePromise;
-    rankingApi.atualizarLoja.mockImplementation(
+    rankingApi.atualizarRede.mockImplementation(
       () => new Promise((resolve) => { resolvePromise = resolve; })
     );
 
     const user = userEvent.setup();
     await renderPage();
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
-    await user.click(screen.getByRole('button', { name: 'Ocultar loja Loja Ativa' }));
+    await user.click(screen.getByRole('button', { name: 'Desativar rede Rede Ativa' }));
 
-    expect(rankingApi.atualizarLoja).toHaveBeenCalledWith(300, { ativo: false });
-    // ainda não resolveu: o botão continua no estado "Ocultar loja"
-    expect(screen.getByRole('button', { name: 'Ocultar loja Loja Ativa' })).toBeInTheDocument();
+    expect(rankingApi.atualizarRede).toHaveBeenCalledWith(300, { ativo: false });
+    // ainda não resolveu: o botão continua no estado "Desativar"
+    expect(screen.getByRole('button', { name: 'Desativar rede Rede Ativa' })).toBeInTheDocument();
 
-    resolvePromise({ id: 300, nome: 'Loja Ativa', emoji: '🏆', ativo: false });
+    resolvePromise({ ...redeAtiva(), ativo: false });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Mostrar loja Loja Ativa' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reativar rede Rede Ativa' })).toBeInTheDocument());
   });
 
   it('se a promise rejeitar, o estado local NÃO muda e o flash de erro aparece', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosLojaOculta();
-    rankingApi.atualizarLoja.mockRejectedValue(new Error('Falha simulada ao atualizar loja'));
+    mockDadosRedeInativa();
+    rankingApi.atualizarRede.mockRejectedValue(new Error('Falha simulada ao atualizar rede'));
 
     const user = userEvent.setup();
     await renderPage();
-    await user.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    await user.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
 
-    await user.click(screen.getByRole('button', { name: 'Ocultar loja Loja Ativa' }));
+    await user.click(screen.getByRole('button', { name: 'Desativar rede Rede Ativa' }));
 
-    await waitFor(() => expect(screen.getByText('Falha simulada ao atualizar loja')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Ocultar loja Loja Ativa' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Falha simulada ao atualizar rede')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Desativar rede Rede Ativa' })).toBeInTheDocument();
   });
 });
 
@@ -665,7 +694,7 @@ describe('RankingPage — polling automático de sincronização multi-usuário 
   // real antigo e recriar um novo já sob os timers fake — sem isso o teste não
   // conseguiria "adiantar" o polling.
   function armPolling() {
-    fireEvent.click(screen.getByRole('button', { name: /Configurar redes\/lojas/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
     fireEvent.click(screen.getByRole('button', { name: /Voltar ao relatório/ }));
   }
 
@@ -673,9 +702,9 @@ describe('RankingPage — polling automático de sincronização multi-usuário 
     vi.useRealTimers();
   });
 
-  it('atualiza o valor de uma loja não focada depois de ~5s quando o polling (fetchEntradas) retorna um valor novo', async () => {
+  it('atualiza o valor de uma rede não focada depois de ~5s quando o polling (fetchEntradas) retorna um valor novo', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel()] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
 
     await renderPage();
     expect(await screen.findByPlaceholderText('0,00')).toHaveValue('50,00');
@@ -683,7 +712,7 @@ describe('RankingPage — polling automático de sincronização multi-usuário 
     vi.useFakeTimers();
     armPolling();
 
-    rankingApi.fetchEntradas.mockResolvedValue([{ loja_id: 100, valor: 777 }]);
+    rankingApi.fetchEntradas.mockResolvedValue([{ rede_id: 10, valor: 777 }]);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
@@ -694,7 +723,7 @@ describe('RankingPage — polling automático de sincronização multi-usuário 
 
   it('NÃO sobrescreve o valor do input atualmente focado, mesmo que o polling retorne um valor diferente do servidor', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel()] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
 
     await renderPage();
     const input = await screen.findByPlaceholderText('0,00');
@@ -705,7 +734,7 @@ describe('RankingPage — polling automático de sincronização multi-usuário 
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: '123' } });
 
-    rankingApi.fetchEntradas.mockResolvedValue([{ loja_id: 100, valor: 999 }]);
+    rankingApi.fetchEntradas.mockResolvedValue([{ rede_id: 10, valor: 999 }]);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
@@ -716,7 +745,7 @@ describe('RankingPage — polling automático de sincronização multi-usuário 
 
   it('pausa o polling quando a aba fica oculta (document.hidden) e retoma quando ela volta a ficar visível', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel()] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
 
     await renderPage();
 
@@ -743,7 +772,7 @@ describe('RankingPage — polling automático de sincronização multi-usuário 
 
   it('limpa o interval ao desmontar o componente (nenhuma chamada de polling depois do unmount)', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
-    mockDadosIniciais({ redes: [redeVisivel()] });
+    mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
 
     const { unmount } = await renderPage();
 

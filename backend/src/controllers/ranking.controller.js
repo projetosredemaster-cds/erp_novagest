@@ -6,6 +6,10 @@ function isPositiveInteger(value) {
   return Number.isInteger(value) && value > 0;
 }
 
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 /**
  * GET /api/ranking/entradas?data=YYYY-MM-DD&categoriaId=X
  */
@@ -36,12 +40,12 @@ async function listarEntradas(req, res) {
 
 /**
  * POST /api/ranking/entradas
- * Body: { data: 'YYYY-MM-DD', categoriaId: number, lojaId: number, valor: number }
- * Cria ou atualiza (upsert) a entrada correspondente a (data, categoriaId, lojaId).
+ * Body: { data: 'YYYY-MM-DD', categoriaId: number, redeId: number, valor: number }
+ * Cria ou atualiza (upsert) a entrada correspondente a (data, categoriaId, redeId).
  */
 async function criarOuAtualizarEntrada(req, res) {
   const body = req.body || {};
-  const { data, categoriaId, lojaId, valor } = body;
+  const { data, categoriaId, redeId, valor } = body;
 
   if (!data || !DATE_REGEX.test(data)) {
     return res.status(400).json({
@@ -56,10 +60,10 @@ async function criarOuAtualizarEntrada(req, res) {
     });
   }
 
-  const lojaIdNum = Number(lojaId);
-  if (!isPositiveInteger(lojaIdNum)) {
+  const redeIdNum = Number(redeId);
+  if (!isPositiveInteger(redeIdNum)) {
     return res.status(400).json({
-      error: 'Campo "lojaId" é obrigatório e deve ser um número inteiro positivo.',
+      error: 'Campo "redeId" é obrigatório e deve ser um número inteiro positivo.',
     });
   }
 
@@ -74,7 +78,7 @@ async function criarOuAtualizarEntrada(req, res) {
     const entrada = await rankingService.salvarEntrada({
       data,
       categoriaId: categoriaIdNum,
-      lojaId: lojaIdNum,
+      redeId: redeIdNum,
       valor: valorNum,
     });
     return res.status(200).json(entrada);
@@ -85,15 +89,15 @@ async function criarOuAtualizarEntrada(req, res) {
 }
 
 /**
- * GET /api/ranking/redes
+ * GET /api/ranking/diretores
  */
-async function listarRedes(req, res) {
+async function listarDiretores(req, res) {
   try {
-    const redes = await rankingService.getRedesComLojas();
-    return res.json(redes);
+    const diretores = await rankingService.getDiretoresComRedes();
+    return res.json(diretores);
   } catch (err) {
-    console.error('[ranking.controller] Erro ao listar redes:', err);
-    return res.status(500).json({ error: 'Erro interno ao listar redes.' });
+    console.error('[ranking.controller] Erro ao listar diretores:', err);
+    return res.status(500).json({ error: 'Erro interno ao listar diretores.' });
   }
 }
 
@@ -110,17 +114,11 @@ async function listarCategorias(req, res) {
   }
 }
 
-function isNonEmptyString(value) {
-  return typeof value === 'string' && value.trim().length > 0;
-}
-
 /**
- * POST /api/ranking/redes
+ * POST /api/ranking/diretores
  * Body: { nome: string }
- * Não aceita mais `responsavel`/`responsavelId` — toda rede é criada sem
- * responsável atribuído; a atribuição é feita depois via PUT /redes/:id.
  */
-async function criarRede(req, res) {
+async function criarDiretor(req, res) {
   const body = req.body || {};
   const { nome } = body;
 
@@ -131,10 +129,121 @@ async function criarRede(req, res) {
   }
 
   try {
-    const resultado = await rankingService.criarRede({ nome });
+    const resultado = await rankingService.criarDiretor({ nome });
 
     if (resultado === 'nome_duplicado') {
-      return res.status(409).json({ error: 'Já existe uma rede com esse nome.' });
+      return res.status(409).json({ error: 'Já existe um diretor com esse nome.' });
+    }
+
+    return res.status(201).json(resultado);
+  } catch (err) {
+    console.error('[ranking.controller] Erro ao criar diretor:', err);
+    return res.status(500).json({ error: 'Erro interno ao criar diretor.' });
+  }
+}
+
+/**
+ * PUT /api/ranking/diretores/:id
+ * Body: { nome: string } — atualização parcial, mas só `nome` existe neste
+ * nível, então é obrigatório.
+ */
+async function atualizarDiretor(req, res) {
+  const idNum = Number(req.params.id);
+  if (!isPositiveInteger(idNum)) {
+    return res.status(400).json({
+      error: 'Parâmetro "id" deve ser um número inteiro positivo.',
+    });
+  }
+
+  const body = req.body || {};
+  const { nome } = body;
+
+  if (!isNonEmptyString(nome)) {
+    return res.status(400).json({
+      error: 'Campo "nome" é obrigatório e não pode ser vazio.',
+    });
+  }
+
+  try {
+    const resultado = await rankingService.atualizarDiretor(idNum, { nome });
+
+    if (resultado === null) {
+      return res.status(404).json({ error: 'Diretor não encontrado.' });
+    }
+
+    if (resultado === 'nome_duplicado') {
+      return res.status(409).json({ error: 'Já existe um diretor com esse nome.' });
+    }
+
+    return res.status(200).json(resultado);
+  } catch (err) {
+    console.error('[ranking.controller] Erro ao atualizar diretor:', err);
+    return res.status(500).json({ error: 'Erro interno ao atualizar diretor.' });
+  }
+}
+
+/**
+ * DELETE /api/ranking/diretores/:id
+ */
+async function excluirDiretor(req, res) {
+  const idNum = Number(req.params.id);
+  if (!isPositiveInteger(idNum)) {
+    return res.status(400).json({
+      error: 'Parâmetro "id" deve ser um número inteiro positivo.',
+    });
+  }
+
+  try {
+    const resultado = await rankingService.excluirDiretor(idNum);
+
+    if (resultado === 'not_found') {
+      return res.status(404).json({ error: 'Diretor não encontrado.' });
+    }
+
+    if (resultado === 'has_redes') {
+      return res.status(409).json({
+        error:
+          'Não é possível excluir este diretor pois existem redes vinculadas a ele. Remova as redes primeiro.',
+      });
+    }
+
+    return res.status(204).send();
+  } catch (err) {
+    console.error('[ranking.controller] Erro ao excluir diretor:', err);
+    return res.status(500).json({ error: 'Erro interno ao excluir diretor.' });
+  }
+}
+
+/**
+ * POST /api/ranking/redes
+ * Body: { diretorId: number, nome: string, emoji?: string }
+ */
+async function criarRede(req, res) {
+  const body = req.body || {};
+  const { diretorId, nome, emoji } = body;
+
+  const diretorIdNum = Number(diretorId);
+  if (!isPositiveInteger(diretorIdNum)) {
+    return res.status(400).json({
+      error: 'Campo "diretorId" é obrigatório e deve ser um número inteiro positivo.',
+    });
+  }
+
+  if (!isNonEmptyString(nome)) {
+    return res.status(400).json({
+      error: 'Campo "nome" é obrigatório e não pode ser vazio.',
+    });
+  }
+
+  try {
+    const resultado = await rankingService.criarRede({ diretorId: diretorIdNum, nome, emoji });
+
+    if (resultado === 'diretor_inexistente') {
+      return res.status(400).json({ error: 'Diretor informado não existe.' });
+    }
+
+    if (resultado === 'nome_duplicado') {
+      return res.status(409).json({ error: 'Já existe uma rede com esse nome neste diretor.' });
     }
 
     return res.status(201).json(resultado);
@@ -146,12 +255,11 @@ async function criarRede(req, res) {
 
 /**
  * PUT /api/ranking/redes/:id
- * Body parcial: { nome?: string, responsavelId?: number|null, visivel?: boolean }
- * `responsavelId` substitui o antigo campo texto livre `responsavel`: number
- * (inteiro positivo, referenciando um `Responsaveis.id` existente) para
- * atribuir, ou `null` explícito para desatribuir. Ausência do campo no corpo
- * preserva o valor atual (mesmo princípio de atualização parcial de
- * `nome`/`visivel`).
+ * Body parcial: { nome?: string, emoji?: string, responsavelId?: number|null,
+ * ativo?: boolean, visivel?: boolean } — ao menos um campo é obrigatório.
+ * `responsavelId` aceita `null` explícito para desatribuir; ausência do
+ * campo no corpo preserva o valor atual (mesmo princípio de `nome`/`emoji`/
+ * `ativo`/`visivel`).
  */
 async function atualizarRede(req, res) {
   const idNum = Number(req.params.id);
@@ -162,11 +270,18 @@ async function atualizarRede(req, res) {
   }
 
   const body = req.body || {};
-  const { nome, responsavelId, visivel } = body;
+  const { nome, emoji, responsavelId, ativo, visivel } = body;
 
-  if (nome === undefined && responsavelId === undefined && visivel === undefined) {
+  if (
+    nome === undefined &&
+    emoji === undefined &&
+    responsavelId === undefined &&
+    ativo === undefined &&
+    visivel === undefined
+  ) {
     return res.status(400).json({
-      error: 'Informe ao menos um campo ("nome", "responsavelId" ou "visivel") para atualizar.',
+      error:
+        'Informe ao menos um campo ("nome", "emoji", "responsavelId", "ativo" ou "visivel") para atualizar.',
     });
   }
 
@@ -187,6 +302,12 @@ async function atualizarRede(req, res) {
     responsavelIdValue = responsavelIdNum;
   }
 
+  if (ativo !== undefined && typeof ativo !== 'boolean') {
+    return res.status(400).json({
+      error: 'Campo "ativo", quando enviado, deve ser "true" ou "false".',
+    });
+  }
+
   if (visivel !== undefined && typeof visivel !== 'boolean') {
     return res.status(400).json({
       error: 'Campo "visivel", quando enviado, deve ser "true" ou "false".',
@@ -196,7 +317,9 @@ async function atualizarRede(req, res) {
   try {
     const resultado = await rankingService.atualizarRede(idNum, {
       nome,
+      emoji,
       responsavelId: responsavelIdValue,
+      ativo,
       visivel,
     });
 
@@ -205,7 +328,7 @@ async function atualizarRede(req, res) {
     }
 
     if (resultado === 'nome_duplicado') {
-      return res.status(409).json({ error: 'Já existe uma rede com esse nome.' });
+      return res.status(409).json({ error: 'Já existe uma rede com esse nome neste diretor.' });
     }
 
     if (resultado === 'responsavel_inexistente') {
@@ -237,10 +360,10 @@ async function excluirRede(req, res) {
       return res.status(404).json({ error: 'Rede não encontrada.' });
     }
 
-    if (resultado === 'has_lojas') {
+    if (resultado === 'has_entradas') {
       return res.status(409).json({
         error:
-          'Não é possível excluir esta rede pois existem lojas vinculadas a ela. Remova as lojas primeiro.',
+          'Não é possível excluir esta rede pois existem lançamentos vinculados a ela. Utilize a atualização (PUT) com ativo=false para desativá-la sem perder o histórico.',
       });
     }
 
@@ -248,128 +371,6 @@ async function excluirRede(req, res) {
   } catch (err) {
     console.error('[ranking.controller] Erro ao excluir rede:', err);
     return res.status(500).json({ error: 'Erro interno ao excluir rede.' });
-  }
-}
-
-/**
- * POST /api/ranking/lojas
- * Body: { redeId: number, nome: string, emoji?: string }
- */
-async function criarLoja(req, res) {
-  const body = req.body || {};
-  const { redeId, nome, emoji } = body;
-
-  const redeIdNum = Number(redeId);
-  if (!isPositiveInteger(redeIdNum)) {
-    return res.status(400).json({
-      error: 'Campo "redeId" é obrigatório e deve ser um número inteiro positivo.',
-    });
-  }
-
-  if (!isNonEmptyString(nome)) {
-    return res.status(400).json({
-      error: 'Campo "nome" é obrigatório e não pode ser vazio.',
-    });
-  }
-
-  try {
-    const resultado = await rankingService.criarLoja({ redeId: redeIdNum, nome, emoji });
-
-    if (resultado === 'rede_inexistente') {
-      return res.status(400).json({ error: 'Rede informada não existe.' });
-    }
-
-    if (resultado === 'nome_duplicado') {
-      return res.status(409).json({ error: 'Já existe uma loja com esse nome nesta rede.' });
-    }
-
-    return res.status(201).json(resultado);
-  } catch (err) {
-    console.error('[ranking.controller] Erro ao criar loja:', err);
-    return res.status(500).json({ error: 'Erro interno ao criar loja.' });
-  }
-}
-
-/**
- * PUT /api/ranking/lojas/:id
- * Body parcial: { nome?: string, emoji?: string, ativo?: boolean }
- */
-async function atualizarLoja(req, res) {
-  const idNum = Number(req.params.id);
-  if (!isPositiveInteger(idNum)) {
-    return res.status(400).json({
-      error: 'Parâmetro "id" deve ser um número inteiro positivo.',
-    });
-  }
-
-  const body = req.body || {};
-  const { nome, emoji, ativo } = body;
-
-  if (nome === undefined && emoji === undefined && ativo === undefined) {
-    return res.status(400).json({
-      error: 'Informe ao menos um campo ("nome", "emoji" ou "ativo") para atualizar.',
-    });
-  }
-
-  if (nome !== undefined && !isNonEmptyString(nome)) {
-    return res.status(400).json({
-      error: 'Campo "nome", quando enviado, não pode ser vazio.',
-    });
-  }
-
-  if (ativo !== undefined && typeof ativo !== 'boolean') {
-    return res.status(400).json({
-      error: 'Campo "ativo", quando enviado, deve ser "true" ou "false".',
-    });
-  }
-
-  try {
-    const resultado = await rankingService.atualizarLoja(idNum, { nome, emoji, ativo });
-
-    if (resultado === null) {
-      return res.status(404).json({ error: 'Loja não encontrada.' });
-    }
-
-    if (resultado === 'nome_duplicado') {
-      return res.status(409).json({ error: 'Já existe uma loja com esse nome nesta rede.' });
-    }
-
-    return res.status(200).json(resultado);
-  } catch (err) {
-    console.error('[ranking.controller] Erro ao atualizar loja:', err);
-    return res.status(500).json({ error: 'Erro interno ao atualizar loja.' });
-  }
-}
-
-/**
- * DELETE /api/ranking/lojas/:id
- */
-async function excluirLoja(req, res) {
-  const idNum = Number(req.params.id);
-  if (!isPositiveInteger(idNum)) {
-    return res.status(400).json({
-      error: 'Parâmetro "id" deve ser um número inteiro positivo.',
-    });
-  }
-
-  try {
-    const resultado = await rankingService.excluirLoja(idNum);
-
-    if (resultado === 'not_found') {
-      return res.status(404).json({ error: 'Loja não encontrada.' });
-    }
-
-    if (resultado === 'has_entradas') {
-      return res.status(409).json({
-        error:
-          'Não é possível excluir esta loja pois existem entradas de vendas vinculadas a ela. Utilize a atualização (PUT) com ativo=false para desativá-la sem perder o histórico.',
-      });
-    }
-
-    return res.status(204).send();
-  } catch (err) {
-    console.error('[ranking.controller] Erro ao excluir loja:', err);
-    return res.status(500).json({ error: 'Erro interno ao excluir loja.' });
   }
 }
 
@@ -484,14 +485,14 @@ async function excluirResponsavel(req, res) {
 module.exports = {
   listarEntradas,
   criarOuAtualizarEntrada,
-  listarRedes,
+  listarDiretores,
   listarCategorias,
+  criarDiretor,
+  atualizarDiretor,
+  excluirDiretor,
   criarRede,
   atualizarRede,
   excluirRede,
-  criarLoja,
-  atualizarLoja,
-  excluirLoja,
   enviarRelatorioEmail,
   listarResponsaveis,
   criarResponsavel,
