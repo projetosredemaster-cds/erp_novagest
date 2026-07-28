@@ -1,12 +1,34 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
 import { moduleRegistry } from './moduleRegistry.js';
 import { useAuth } from './AuthContext.jsx';
 
 export default function Sidebar() {
   const { isAdmin, logout } = useAuth();
-  // itens adminOnly nunca chegam a ser renderizados para usuário comum —
-  // não é só um `hidden` de CSS, o link simplesmente não existe no DOM.
-  const visibleModules = moduleRegistry.filter((mod) => !mod.adminOnly || isAdmin);
+  const [configOpen, setConfigOpen] = useState(false);
+  const configMenuRef = useRef(null);
+
+  // itens adminOnly nunca chegam a ser renderizados para usuário comum — não é só um
+  // `hidden` de CSS, o link simplesmente não existe no DOM. Convenção deste Sidebar:
+  // todo item adminOnly mora dentro do menu "Configurações" (popover abaixo), nunca na
+  // nav principal — hoje são exatamente "usuarios" e "ranking-configuracoes" ("Diretores
+  // e redes"), mas qualquer módulo adminOnly futuro cai automaticamente lá também.
+  const visibleModules = moduleRegistry.filter((mod) => !mod.adminOnly);
+  const configModules = moduleRegistry.filter((mod) => mod.adminOnly);
+
+  // fecha o menu "Configurações" ao clicar fora dele.
+  useEffect(() => {
+    if (!configOpen) return;
+    function handleClickOutside(e) {
+      if (configMenuRef.current && !configMenuRef.current.contains(e.target)) {
+        setConfigOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [configOpen]);
+
+  const configLinkClass = "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--panel)] hover:text-[var(--text)]";
 
   return (
     <aside className="fixed left-0 top-0 z-10 flex h-screen w-56 flex-col border-r border-[var(--border)] bg-[var(--panel)] px-3 py-5">
@@ -34,14 +56,47 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <button
-        type="button"
-        onClick={logout}
-        className="mt-auto flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--panel-alt)] hover:text-[var(--danger)]"
-      >
-        <span className="text-base leading-none">🚪</span>
-        Sair
-      </button>
+      <div className="mt-auto flex flex-col gap-1">
+        {/* menu "Configurações": agrupa os itens adminOnly (hoje: Usuários + Diretores e
+            redes) num só item, expandido como um popover pra cima (o botão fica no canto
+            inferior esquerdo) — o bloco inteiro só renderiza pra admin, e cada link é uma
+            rota real (RequireAdmin também bloqueia acesso direto pela URL). */}
+        {isAdmin && configModules.length ? (
+          <div className="relative" ref={configMenuRef}>
+            {configOpen ? (
+              <div className="absolute bottom-full left-0 mb-1 w-full rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] p-1 shadow-lg">
+                {configModules.map((mod) => (
+                  <Link key={mod.id} to={mod.path} onClick={() => setConfigOpen(false)} className={configLinkClass}>
+                    {mod.icon ? <span className="text-base leading-none">{mod.icon}</span> : null}
+                    {mod.label}
+                  </Link>
+                ))}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setConfigOpen((v) => !v)}
+              aria-expanded={configOpen}
+              aria-haspopup="true"
+              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                configOpen ? 'bg-[var(--panel-alt)] text-[var(--text)]' : 'text-[var(--muted)] hover:bg-[var(--panel-alt)] hover:text-[var(--text)]'
+              }`}
+            >
+              <span className="text-base leading-none">⚙</span>
+              Configurações
+            </button>
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={logout}
+          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--panel-alt)] hover:text-[var(--danger)]"
+        >
+          <span className="text-base leading-none">🚪</span>
+          Sair
+        </button>
+      </div>
     </aside>
   );
 }

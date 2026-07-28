@@ -46,10 +46,10 @@ export function criarRede({ diretorId, nome, emoji }) {
   });
 }
 
-export function atualizarRede(id, { nome, emoji, responsavelId, ativo, visivel }) {
+export function atualizarRede(id, { nome, emoji, responsavelId, ativo, visivel, diretorId }) {
   return request(`/api/cadastros/redes/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ nome, emoji, responsavelId, ativo, visivel }),
+    body: JSON.stringify({ nome, emoji, responsavelId, ativo, visivel, diretorId }),
   });
 }
 
@@ -64,15 +64,13 @@ export function criarLoja({ redeId, nome }) {
   });
 }
 
-export function atualizarLoja(id, { nome, ativo }) {
+// PUT é a única forma de "remover" uma loja da operação (ativo: false) — não existe
+// rota DELETE para Loja (ver CONTRATO-CADASTROS-API.md, seção 11).
+export function atualizarLoja(id, { nome, ativo, redeId }) {
   return request(`/api/cadastros/lojas/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ nome, ativo }),
+    body: JSON.stringify({ nome, ativo, redeId }),
   });
-}
-
-export function removerLoja(id) {
-  return request(`/api/cadastros/lojas/${id}`, { method: 'DELETE' });
 }
 
 export function fetchResponsaveis() {

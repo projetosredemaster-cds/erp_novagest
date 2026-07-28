@@ -20,6 +20,24 @@ export function fetchCategorias() {
   return request('/api/ranking/categorias');
 }
 
+export function criarCategoria({ nome }) {
+  return request('/api/ranking/categorias', {
+    method: 'POST',
+    body: JSON.stringify({ nome }),
+  });
+}
+
+export function atualizarCategoria(id, { nome, visivel }) {
+  return request(`/api/ranking/categorias/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ nome, visivel }),
+  });
+}
+
+export function removerCategoria(id) {
+  return request(`/api/ranking/categorias/${id}`, { method: 'DELETE' });
+}
+
 export function fetchEntradas(data, categoriaId) {
   const params = new URLSearchParams({ data, categoriaId: String(categoriaId) });
   return request(`/api/ranking/entradas?${params.toString()}`);

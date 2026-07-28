@@ -31,11 +31,8 @@ router.delete('/redes/:id', cadastrosController.excluirRede);
 // POST /api/cadastros/lojas
 router.post('/lojas', cadastrosController.criarLoja);
 
-// PUT  /api/cadastros/lojas/:id  (usado também para soft-delete via ativo=false)
+// PUT  /api/cadastros/lojas/:id  (usado também para soft-delete via ativo=false; sem rota DELETE — loja nunca é excluída)
 router.put('/lojas/:id', cadastrosController.atualizarLoja);
-
-// DELETE /api/cadastros/lojas/:id  (bloqueia com 409 se houver lançamentos de margem vinculados)
-router.delete('/lojas/:id', cadastrosController.excluirLoja);
 
 // GET  /api/cadastros/responsaveis  (qualquer usuário autenticado)
 router.get('/responsaveis', cadastrosController.listarResponsaveis);

@@ -11,6 +11,21 @@
 > mudança de comportamento — só o prefixo da rota muda, de `/api/ranking`
 > pra `/api/cadastros`. `Responsaveis` (seções 12–14 da v2 do Ranking)
 > também migrou pra cá pelo mesmo motivo.
+>
+> **`ativo` vs `visivel` — são conceitos diferentes, cada um com seu
+> alcance**:
+> - `ativo = false` = **desativado pro sistema inteiro**: some das opções
+>   selecionáveis em Margens (e qualquer módulo futuro), não pode receber
+>   novo lançamento em lugar nenhum. É o "isto existe e funciona?".
+> - `visivel = false` = só esconde da grade/placar do Ranking (uma
+>   preferência de exibição daquele módulo específico); não afeta Margens
+>   nem nenhum outro módulo.
+> - As rotas `GET` deste módulo (`/diretores`, `/redes`) **retornam tudo**,
+>   ativo ou não, visível ou não — cada módulo consumidor decide o que
+>   filtrar (Margens filtra por `ativo`; a grade do Ranking filtra por
+>   `visivel`; a tela de configuração mostra tudo, pra poder reativar).
+> - **Loja nunca é excluída de verdade** — só `PUT` com `ativo:false`. Não
+>   existe rota `DELETE` de Loja (ver seção 11).
 
 ## Informações gerais
 
@@ -75,11 +90,18 @@ se houver Redes vinculadas.
 
 ## 5. `GET /api/cadastros/redes`
 
-Retorna todas as redes visíveis, cada uma com diretor + responsável (GG) +
-**lojas físicas aninhadas** — combina o que antes era
+Retorna **todas** as redes (ativas/inativas, visíveis/ocultas — sem
+filtro no servidor, ver nota sobre `ativo`/`visivel` no topo do
+documento), cada uma com diretor + responsável (GG) + **lojas físicas
+aninhadas** (também todas, inclusive inativas) — combina o que antes era
 `GET /api/ranking/diretores` (nível rede) com o que era
 `GET /api/margens/redes` (lojas aninhadas), num único endpoint
-reaproveitável pelos dois módulos.
+reaproveitável por Ranking, Margens e módulos futuros.
+
+> Quem consome esta rota filtra o que precisa: Margens ignora tudo com
+> `ativo: false` (rede ou loja) antes de montar seus seletores; o
+> Ranking ignora `visivel: false` na grade; a tela de configuração
+> mostra tudo, com controles pra reativar/mostrar de novo.
 
 ### Query real
 ```sql
@@ -89,7 +111,6 @@ SELECT r.id, r.diretor_id, d.nome AS diretor_nome, r.nome, r.emoji,
 FROM Redes r
 JOIN Diretores d ON d.id = r.diretor_id
 LEFT JOIN Responsaveis resp ON resp.id = r.responsavel_id
-WHERE r.visivel = 1
 ORDER BY r.nome;
 
 SELECT id, rede_id, nome, ativo, criado_em FROM Lojas ORDER BY nome;
@@ -125,8 +146,13 @@ Idêntico à antiga `POST /api/ranking/redes` — body `diretorId`, `nome`,
 
 ## 7. `PUT /api/cadastros/redes/:id`
 
-Idêntico à antiga `PUT /api/ranking/redes/:id` — body parcial
-`nome`/`emoji`/`responsavelId`/`ativo`/`visivel`.
+Body parcial: `nome`/`emoji`/`responsavelId`/`ativo`/`visivel`/**`diretorId`**
+(novo — permite mover a rede pra outro diretor depois de criada, não só
+na criação). Se `diretorId` for enviado, deve referenciar um
+`Diretores.id` existente, senão `400`:
+`{ "error": "Diretor informado não existe." }`. Ao trocar de diretor,
+reaplique a checagem de nome duplicado considerando o **novo** diretor
+(nome único por diretor, não globalmente).
 
 ---
 
@@ -172,17 +198,26 @@ Cria uma loja física, vinculada a uma rede existente. Migrado do antigo
 
 ## 10. `PUT /api/cadastros/lojas/:id`
 
-Atualização parcial (`nome`/`ativo`). Mesmas validações/mensagens do
-antigo `CONTRATO-MARGENS-API.md` seção 3.
+Atualização parcial: `nome`/`ativo`/**`redeId`** (novo — permite mover a
+loja pra outra rede depois de criada). Se `redeId` for enviado, deve
+referenciar uma `Redes.id` existente, senão `400`:
+`{ "error": "Rede informada não existe." }`. Ao trocar de rede, reaplique
+a checagem de nome duplicado considerando a **nova** rede (nome único por
+rede, não globalmente).
+
+`ativo: false` é a única forma de "remover" uma loja — ver seção 11.
 
 ---
 
-## 11. `DELETE /api/cadastros/lojas/:id`
+## 11. Não existe `DELETE /api/cadastros/lojas/:id`
 
-Bloqueia com `409` se houver `MargensEntradas` vinculada:
-```json
-{ "error": "Não é possível excluir esta loja pois existem lançamentos de margem vinculados a ela. Utilize a atualização (PUT) com ativo=false para desativá-la sem perder o histórico." }
-```
+**Decisão de produto**: Loja nunca é excluída fisicamente, nem sem
+nenhum lançamento vinculado — só desativada. Não implemente rota
+`DELETE` pra Loja. Pra "remover" uma loja da operação, use
+`PUT /api/cadastros/lojas/:id` com `{ "ativo": false }` (seção 10) — ela
+some de qualquer seletor do Margens/módulos futuros, mas o histórico de
+`MargensEntradas` continua íntegro e ela pode ser reativada depois com
+`{ "ativo": true }`.
 
 ---
 
@@ -209,11 +244,11 @@ admin, bloqueia com `409` se houver Redes vinculadas.
 
 ## Resumo rápido
 
-| Método | Rota | Vem de |
+| Método | Rota | Observação |
 |---|---|---|
-| GET/POST/PUT/DELETE | `/api/cadastros/diretores` | `/api/ranking/diretores` |
-| GET/POST/PUT/DELETE | `/api/cadastros/redes` | `/api/ranking/redes` (CRUD) + `/api/margens/redes` (GET com lojas) |
-| POST/PUT/DELETE | `/api/cadastros/lojas` | `/api/margens/lojas` |
-| GET/POST/DELETE | `/api/cadastros/responsaveis` | `/api/ranking/responsaveis` |
+| GET/POST/PUT/DELETE | `/api/cadastros/diretores` | — |
+| GET/POST/PUT/DELETE | `/api/cadastros/redes` | `PUT` aceita `diretorId` (reatribuir); `GET` retorna tudo, sem filtro de `ativo`/`visivel` |
+| POST/PUT | `/api/cadastros/lojas` | `PUT` aceita `redeId` (reatribuir); **sem rota DELETE** — só `ativo:false` |
+| GET/POST/DELETE | `/api/cadastros/responsaveis` | — |
 
 Todos os erros seguem `{ "error": "mensagem" }`.

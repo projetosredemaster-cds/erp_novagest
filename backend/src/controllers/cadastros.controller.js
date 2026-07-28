@@ -177,10 +177,11 @@ async function criarRede(req, res) {
 /**
  * PUT /api/cadastros/redes/:id
  * Body parcial: { nome?: string, emoji?: string, responsavelId?: number|null,
- * ativo?: boolean, visivel?: boolean } — ao menos um campo é obrigatório.
- * `responsavelId` aceita `null` explícito para desatribuir; ausência do
- * campo no corpo preserva o valor atual (mesmo princípio de `nome`/`emoji`/
- * `ativo`/`visivel`).
+ * ativo?: boolean, visivel?: boolean, diretorId?: number } — ao menos um
+ * campo é obrigatório. `responsavelId` aceita `null` explícito para
+ * desatribuir; ausência do campo no corpo preserva o valor atual (mesmo
+ * princípio de `nome`/`emoji`/`ativo`/`visivel`). `diretorId` reatribui a
+ * rede a outro diretor.
  */
 async function atualizarRede(req, res) {
   const idNum = Number(req.params.id);
@@ -191,18 +192,19 @@ async function atualizarRede(req, res) {
   }
 
   const body = req.body || {};
-  const { nome, emoji, responsavelId, ativo, visivel } = body;
+  const { nome, emoji, responsavelId, ativo, visivel, diretorId } = body;
 
   if (
     nome === undefined &&
     emoji === undefined &&
     responsavelId === undefined &&
     ativo === undefined &&
-    visivel === undefined
+    visivel === undefined &&
+    diretorId === undefined
   ) {
     return res.status(400).json({
       error:
-        'Informe ao menos um campo ("nome", "emoji", "responsavelId", "ativo" ou "visivel") para atualizar.',
+        'Informe ao menos um campo ("nome", "emoji", "responsavelId", "ativo", "visivel" ou "diretorId") para atualizar.',
     });
   }
 
@@ -235,6 +237,17 @@ async function atualizarRede(req, res) {
     });
   }
 
+  let diretorIdValue = diretorId;
+  if (diretorId !== undefined) {
+    const diretorIdNum = Number(diretorId);
+    if (!isPositiveInteger(diretorIdNum)) {
+      return res.status(400).json({
+        error: 'Campo "diretorId", quando enviado, deve ser um número inteiro positivo.',
+      });
+    }
+    diretorIdValue = diretorIdNum;
+  }
+
   try {
     const resultado = await cadastrosService.atualizarRede(idNum, {
       nome,
@@ -242,6 +255,7 @@ async function atualizarRede(req, res) {
       responsavelId: responsavelIdValue,
       ativo,
       visivel,
+      diretorId: diretorIdValue,
     });
 
     if (resultado === null) {
@@ -254,6 +268,10 @@ async function atualizarRede(req, res) {
 
     if (resultado === 'responsavel_inexistente') {
       return res.status(400).json({ error: 'Responsável informado não existe.' });
+    }
+
+    if (resultado === 'diretor_inexistente') {
+      return res.status(400).json({ error: 'Diretor informado não existe.' });
     }
 
     return res.status(200).json(resultado);
@@ -343,8 +361,8 @@ async function criarLoja(req, res) {
 
 /**
  * PUT /api/cadastros/lojas/:id
- * Body parcial: { nome?: string, ativo?: boolean } — ao menos um campo é
- * obrigatório.
+ * Body parcial: { nome?: string, ativo?: boolean, redeId?: number } — ao
+ * menos um campo é obrigatório. `redeId` reatribui a loja a outra rede.
  */
 async function atualizarLoja(req, res) {
   const idNum = Number(req.params.id);
@@ -355,11 +373,11 @@ async function atualizarLoja(req, res) {
   }
 
   const body = req.body || {};
-  const { nome, ativo } = body;
+  const { nome, ativo, redeId } = body;
 
-  if (nome === undefined && ativo === undefined) {
+  if (nome === undefined && ativo === undefined && redeId === undefined) {
     return res.status(400).json({
-      error: 'Informe ao menos um campo ("nome" ou "ativo") para atualizar.',
+      error: 'Informe ao menos um campo ("nome", "ativo" ou "redeId") para atualizar.',
     });
   }
 
@@ -375,8 +393,19 @@ async function atualizarLoja(req, res) {
     });
   }
 
+  let redeIdValue = redeId;
+  if (redeId !== undefined) {
+    const redeIdNum = Number(redeId);
+    if (!isPositiveInteger(redeIdNum)) {
+      return res.status(400).json({
+        error: 'Campo "redeId", quando enviado, deve ser um número inteiro positivo.',
+      });
+    }
+    redeIdValue = redeIdNum;
+  }
+
   try {
-    const resultado = await cadastrosService.atualizarLoja(idNum, { nome, ativo });
+    const resultado = await cadastrosService.atualizarLoja(idNum, { nome, ativo, redeId: redeIdValue });
 
     if (resultado === null) {
       return res.status(404).json({ error: 'Loja não encontrada.' });
@@ -386,42 +415,14 @@ async function atualizarLoja(req, res) {
       return res.status(409).json({ error: 'Já existe uma loja com esse nome nesta rede.' });
     }
 
+    if (resultado === 'rede_inexistente') {
+      return res.status(400).json({ error: 'Rede informada não existe.' });
+    }
+
     return res.status(200).json(resultado);
   } catch (err) {
     console.error('[cadastros.controller] Erro ao atualizar loja:', err);
     return res.status(500).json({ error: 'Erro interno ao atualizar loja.' });
-  }
-}
-
-/**
- * DELETE /api/cadastros/lojas/:id
- */
-async function excluirLoja(req, res) {
-  const idNum = Number(req.params.id);
-  if (!isPositiveInteger(idNum)) {
-    return res.status(400).json({
-      error: 'Parâmetro "id" deve ser um número inteiro positivo.',
-    });
-  }
-
-  try {
-    const resultado = await cadastrosService.excluirLoja(idNum);
-
-    if (resultado === 'not_found') {
-      return res.status(404).json({ error: 'Loja não encontrada.' });
-    }
-
-    if (resultado === 'has_margens_entradas') {
-      return res.status(409).json({
-        error:
-          'Não é possível excluir esta loja pois existem lançamentos de margem vinculados a ela. Utilize a atualização (PUT) com ativo=false para desativá-la sem perder o histórico.',
-      });
-    }
-
-    return res.status(204).send();
-  } catch (err) {
-    console.error('[cadastros.controller] Erro ao excluir loja:', err);
-    return res.status(500).json({ error: 'Erro interno ao excluir loja.' });
   }
 }
 
@@ -511,7 +512,6 @@ module.exports = {
   excluirRede,
   criarLoja,
   atualizarLoja,
-  excluirLoja,
   listarResponsaveis,
   criarResponsavel,
   excluirResponsavel,

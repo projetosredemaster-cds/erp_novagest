@@ -114,11 +114,139 @@ async function upsertEntrada({ data, categoriaId, redeId, valor }) {
 async function listCategorias() {
   const pool = await getPool();
   const result = await pool.request().query(`
-    SELECT id, nome, principal, criado_em
+    SELECT id, nome, principal, padrao, visivel, criado_em
     FROM Categorias
     ORDER BY nome
   `);
   return result.recordset;
+}
+
+/**
+ * Verifica se já existe uma categoria com o mesmo `nome` (case-insensitive,
+ * ignorando espaços extras no início/fim). Se `excludeId` for informado, a
+ * própria categoria com esse id é excluída da checagem (usado no PUT).
+ */
+async function existeCategoriaComNome(nome, excludeId = null) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('nome', sql.NVarChar, nome)
+    .input('excludeId', sql.Int, excludeId)
+    .query(`
+      SELECT COUNT(*) AS total
+      FROM Categorias
+      WHERE LOWER(LTRIM(RTRIM(nome))) = LOWER(LTRIM(RTRIM(@nome)))
+        AND (@excludeId IS NULL OR id <> @excludeId)
+    `);
+  return result.recordset[0].total > 0;
+}
+
+/**
+ * Insere uma nova categoria. Sempre `padrao = 0`, `principal = 0`,
+ * `visivel = 1` — não existe forma de criar uma categoria já como padrão ou
+ * principal por essa rota.
+ */
+async function insertCategoria({ nome }) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('nome', sql.NVarChar, nome)
+    .query(`
+      INSERT INTO Categorias (nome, principal, padrao, visivel, criado_em)
+      OUTPUT inserted.id, inserted.nome, inserted.principal, inserted.padrao,
+             inserted.visivel, inserted.criado_em
+      VALUES (@nome, 0, 0, 1, SYSUTCDATETIME())
+    `);
+  return result.recordset[0];
+}
+
+/**
+ * Busca uma categoria por id. Retorna `undefined` se não existir.
+ */
+async function findCategoriaById(id) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.Int, id)
+    .query(`
+      SELECT id, nome, principal, padrao, visivel, criado_em
+      FROM Categorias
+      WHERE id = @id
+    `);
+  return result.recordset[0];
+}
+
+/**
+ * Atualização parcial de uma categoria: só `nome`/`visivel` — `padrao` e
+ * `principal` nunca mudam via API.
+ */
+async function updateCategoria(id, { nome, visivel }) {
+  const pool = await getPool();
+  await pool
+    .request()
+    .input('id', sql.Int, id)
+    .input('nome', sql.NVarChar, nome ?? null)
+    .input('visivel', sql.Bit, visivel !== undefined ? visivel : null)
+    .input('visivelInformado', sql.Bit, visivel !== undefined ? 1 : 0)
+    .query(`
+      UPDATE Categorias
+      SET
+        nome = COALESCE(@nome, nome),
+        visivel = CASE WHEN @visivelInformado = 1 THEN @visivel ELSE visivel END
+      WHERE id = @id
+    `);
+}
+
+/**
+ * Verifica existência + bloqueio (padrao, depois lançamentos vinculados) e
+ * exclui a categoria, tudo dentro de uma transação, para evitar condição de
+ * corrida entre os SELECTs de checagem e o DELETE.
+ * Retorna 'not_found' | 'is_padrao' | 'has_entradas' | 'deleted'.
+ */
+async function deleteCategoriaIfAllowed(id) {
+  const pool = await getPool();
+  const transaction = new sql.Transaction(pool);
+
+  await transaction.begin();
+  try {
+    const categoriaRequest = new sql.Request(transaction);
+    categoriaRequest.input('id', sql.Int, id);
+    const categoriaResult = await categoriaRequest.query(
+      'SELECT id, padrao FROM Categorias WHERE id = @id'
+    );
+
+    const categoria = categoriaResult.recordset[0];
+    if (!categoria) {
+      await transaction.rollback();
+      return 'not_found';
+    }
+
+    if (categoria.padrao) {
+      await transaction.rollback();
+      return 'is_padrao';
+    }
+
+    const countRequest = new sql.Request(transaction);
+    countRequest.input('categoriaId', sql.Int, id);
+    const countResult = await countRequest.query(
+      'SELECT COUNT(*) AS total FROM Entradas WHERE categoria_id = @categoriaId'
+    );
+
+    if (countResult.recordset[0].total > 0) {
+      await transaction.rollback();
+      return 'has_entradas';
+    }
+
+    const deleteRequest = new sql.Request(transaction);
+    deleteRequest.input('id', sql.Int, id);
+    await deleteRequest.query('DELETE FROM Categorias WHERE id = @id');
+
+    await transaction.commit();
+    return 'deleted';
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
 }
 
 module.exports = {
@@ -126,4 +254,9 @@ module.exports = {
   upsertEntrada,
   deleteEntrada,
   listCategorias,
+  existeCategoriaComNome,
+  insertCategoria,
+  findCategoriaById,
+  updateCategoria,
+  deleteCategoriaIfAllowed,
 };

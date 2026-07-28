@@ -3,21 +3,21 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   fetchCategorias, fetchEntradas, salvarEntrada, removerEntrada,
+  criarCategoria, atualizarCategoria, removerCategoria,
   enviarRelatorioPorEmail,
 } from './rankingApi';
 import {
   fetchDiretores,
   criarDiretor, atualizarDiretor, removerDiretor,
   criarRede, atualizarRede, removerRede,
-  fetchResponsaveis, criarResponsavel, removerResponsavel,
 } from '../../lib/cadastrosApi';
 import { useAuth } from '../../app/AuthContext.jsx';
+import ConfigView from './ConfigView.jsx';
 
 // estado inicial vazio: diretores/categorias agora vêm da API (ver useEffect de carga em RankingPage)
 // hierarquia: Diretor -> Rede (o Ranking não opera no nível Loja física, ver CLAUDE.md/CONTRATO-RANKING-API.md)
 const emptyState = () => ({ diretores: [], categorias: [] });
 
-function uid(p) { return p + '_' + Math.random().toString(36).slice(2, 9); }
 function toBRL(n) {
   n = Number(n) || 0;
   return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -151,7 +151,18 @@ export default function RankingPage() {
   const [entries, setEntries] = useState({});
   const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [currentCatId, setCurrentCatId] = useState(null);
-  const [currentView, setCurrentView] = useState('report');
+  // RankingPage é montado por DUAS rotas (ver moduleRegistry.js): '/ranking' (placar do
+  // dia) e '/ranking/configuracoes' (ConfigView), rota real e admin-only (RequireAdmin já
+  // bloqueia acesso direto pela URL pra quem não é admin — não precisa duplicar essa
+  // checagem aqui). currentView é derivado do pathname atual a cada render — de propósito
+  // NÃO é useState nem useLocation(): lido direto de window.location.pathname (API do
+  // browser, sem precisar de contexto de Router) pra continuar funcionando nos testes que
+  // renderizam <RankingPage/> sem um <Router> em volta, e ainda assim reagir corretamente
+  // quando o Sidebar navega pra essa rota (React Router re-renderiza o RankingPage já
+  // montado ao trocar de rota-irmã, então este valor fica sempre atualizado). Não existe
+  // mais nenhum jeito de trocar de view por estado interno — o único caminho é navegação
+  // de verdade (link do Sidebar, ou "Ranking" pra voltar).
+  const currentView = window.location.pathname === '/ranking/configuracoes' ? 'config' : 'report';
   const [reportText, setReportText] = useState('');
   const [copyShown, setCopyShown] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
@@ -189,14 +200,22 @@ export default function RankingPage() {
     runLoadConfig();
   }, []);
 
+  // abas do placar do dia mostram só categorias visivel!==false (categorias com
+  // visivel:false só aparecem na ConfigView, pra poder "Mostrar" de novo) — config.categorias
+  // (lista completa) continua sendo usado por buildFullReport/buildWorkbook/ConfigView.
+  const categoriasVisiveis = useMemo(
+    () => config.categorias.filter(c => c.visivel !== false),
+    [config.categorias]
+  );
+
   // enquanto o usuário não escolheu uma aba (currentCatId ainda null, ou aponta
-  // pra uma categoria que não existe mais), cai na principal — valor totalmente
-  // derivado, sem precisar de um efeito só para inicializar/corrigir currentCatId.
+  // pra uma categoria que não existe mais/ficou oculta), cai na principal — valor
+  // totalmente derivado, sem precisar de um efeito só para inicializar/corrigir currentCatId.
   const cat = useMemo(() => (
-    config.categorias.find(c => c.id === currentCatId)
-    || config.categorias.find(c => c.principal)
-    || config.categorias[0]
-  ), [config, currentCatId]);
+    categoriasVisiveis.find(c => c.id === currentCatId)
+    || categoriasVisiveis.find(c => c.principal)
+    || categoriasVisiveis[0]
+  ), [categoriasVisiveis, currentCatId]);
 
   // a tela de configuração é restrita a admins; a única forma de currentView
   // virar 'config' é o clique no botão abaixo, que só é renderizado quando
@@ -316,20 +335,40 @@ export default function RankingPage() {
     setFocusedRedeId(null);
   }
 
-  function addCategoria() {
-    const nome = prompt('Nome da nova categoria (ex: Frete, Trocas...):');
-    if (!nome) return;
-    const novaCat = { id: uid('c'), nome, principal: false };
-    setConfig(prev => ({ ...prev, categorias: [...prev.categorias, novaCat] }));
-    setCurrentCatId(novaCat.id);
+  // `nome` opcional: o "+" da barra de abas chama sem argumento (preserva o prompt() de
+  // sempre); o formulário "Adicionar categoria" da ConfigView chama com o valor do input.
+  function addCategoria(nome) {
+    const nomeFinal = (nome ?? prompt('Nome da nova categoria (ex: Frete, Trocas...):') ?? '').trim();
+    if (!nomeFinal) return;
+    criarCategoria({ nome: nomeFinal })
+      .then(categoriaCriada => {
+        setConfig(prev => ({ ...prev, categorias: [...prev.categorias, categoriaCriada] }));
+        setCurrentCatId(categoriaCriada.id);
+      })
+      .catch(err => flash(err.message || 'Erro ao criar categoria', 'error'));
   }
 
+  // ocultar/mostrar categoria nas abas do placar (campo `visivel`) — categorias padrão
+  // só podem ser ocultadas, nunca excluídas (ver removeCategoria abaixo).
+  function updateCategoriaVisivel(catId, novoValor) {
+    atualizarCategoria(catId, { visivel: novoValor })
+      .then(categoriaAtualizada => {
+        setConfig(prev => ({ ...prev, categorias: prev.categorias.map(c => (c.id === catId ? categoriaAtualizada : c)) }));
+      })
+      .catch(err => flash(err.message || 'Erro ao atualizar categoria', 'error'));
+  }
+
+  // categorias padrão (padrao:true) são bloqueadas com 409 pelo backend, assim como
+  // categorias com lançamentos vinculados — ambos os casos só mostram a mensagem de erro
+  // via flash(), sem tentar forçar (ConfigView já não renderiza o botão de remover pra
+  // categorias padrão, mas o backend é quem garante a regra de verdade).
   function removeCategoria(catId) {
-    setConfig(prev => ({ ...prev, categorias: prev.categorias.filter(c => c.id !== catId) }));
-    if (currentCatId === catId) {
-      const remaining = config.categorias.filter(c => c.id !== catId);
-      setCurrentCatId(remaining.find(c => c.principal)?.id || remaining[0]?.id);
-    }
+    removerCategoria(catId)
+      .then(() => {
+        setConfig(prev => ({ ...prev, categorias: prev.categorias.filter(c => c.id !== catId) }));
+        if (currentCatId === catId) setCurrentCatId(null);
+      })
+      .catch(err => flash(err.message || 'Erro ao remover categoria', 'error'));
   }
 
   function buildFullReport() {
@@ -475,6 +514,27 @@ export default function RankingPage() {
     updateRedeCampo(redeId, { emoji: emoji.trim() }, 'Erro ao atualizar emoji da rede');
   }
 
+  // move a rede pra outro diretor via <select> (ConfigView). Diferente de
+  // updateRedeCampo (que só troca a rede DENTRO do diretor que já a contém),
+  // reatribuição precisa remover a rede do diretor de origem e inseri-la no de
+  // destino — os dois nunca são o mesmo array quando o diretor muda de fato.
+  function updateRedeDiretor(redeId, diretorId) {
+    atualizarRede(redeId, { diretorId })
+      .then(redeAtualizada => {
+        setConfig(prev => ({
+          ...prev,
+          diretores: prev.diretores.map(d => {
+            if (d.id === redeAtualizada.diretor_id) {
+              const jaTinha = d.redes.some(r => r.id === redeId);
+              return { ...d, redes: jaTinha ? d.redes.map(r => (r.id === redeId ? redeAtualizada : r)) : [...d.redes, redeAtualizada] };
+            }
+            return { ...d, redes: d.redes.filter(r => r.id !== redeId) };
+          }),
+        }));
+      })
+      .catch(err => flash(err.message || 'Erro ao mover rede de diretor', 'error'));
+  }
+
   function removeRede(diretorId, redeId) {
     removerRede(redeId)
       .then(() => {
@@ -541,11 +601,6 @@ export default function RankingPage() {
               onChange={e => setCurrentDate(e.target.value)}
               className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] px-3 py-2 rounded-lg text-sm"
             />
-            {isAdmin ? (
-              <button className={btnGhost} onClick={() => setCurrentView(v => v === 'config' ? 'report' : 'config')}>
-                {currentView === 'config' ? '← Voltar ao relatório' : '⚙ Configurar diretores/redes'}
-              </button>
-            ) : null}
           </div>
         </div>
 
@@ -572,14 +627,17 @@ export default function RankingPage() {
                   removeDiretor={removeDiretor} addDiretor={addDiretor} updateDiretorNome={updateDiretorNome}
                   removeRede={removeRede} addRede={addRede}
                   updateRedeNome={updateRedeNome} updateRedeEmoji={updateRedeEmoji}
-                  removeCategoria={removeCategoria} isAdmin={isAdmin}
+                  addCategoria={addCategoria} updateCategoriaVisivel={updateCategoriaVisivel} removeCategoria={removeCategoria}
+                  isAdmin={isAdmin}
                   toggleRedeVisivel={toggleRedeVisivel} toggleRedeAtivo={toggleRedeAtivo}
-                  updateRedeResponsavel={updateRedeResponsavel}
+                  updateRedeResponsavel={updateRedeResponsavel} updateRedeDiretor={updateRedeDiretor}
+                  flash={flash}
                 />
               )
               : (
                 <ReportView
-                  config={config} cat={cat} values={values} setValue={setValue} onBlurSave={handleValueBlur}
+                  config={config} categoriasVisiveis={categoriasVisiveis}
+                  cat={cat} values={values} setValue={setValue} onBlurSave={handleValueBlur}
                   onFocusValue={handleValueFocus}
                   currentCatId={currentCatId} setCurrentCatId={setCurrentCatId} addCategoria={addCategoria}
                   currentDate={currentDate} handleGenReport={handleGenReport} handleCopyReport={handleCopyReport}
@@ -607,11 +665,11 @@ export default function RankingPage() {
   );
 }
 
-function ReportView({ config, cat, values, setValue, onBlurSave, onFocusValue, setCurrentCatId, addCategoria, currentDate, handleGenReport, handleCopyReport, reportText, copyShown, handleExportExcel, handleSendEmail, sendingEmail, isAdmin, toggleRedeVisivel }) {
+function ReportView({ config, categoriasVisiveis, cat, values, setValue, onBlurSave, onFocusValue, setCurrentCatId, addCategoria, currentDate, handleGenReport, handleCopyReport, reportText, copyShown, handleExportExcel, handleSendEmail, sendingEmail, isAdmin, toggleRedeVisivel }) {
   return (
     <div>
       <div className="flex gap-1.5 mb-5 flex-wrap items-center">
-        {config.categorias.map(c => (
+        {categoriasVisiveis.map(c => (
           <div
             key={c.id}
             onClick={() => setCurrentCatId(c.id)}
@@ -625,7 +683,7 @@ function ReportView({ config, cat, values, setValue, onBlurSave, onFocusValue, s
           </div>
         ))}
         <div
-          onClick={addCategoria}
+          onClick={() => addCategoria()}
           title="Nova categoria"
           className="bg-transparent border border-dashed border-[var(--border)] text-[var(--muted)] w-[34px] h-[34px] rounded-full cursor-pointer text-base leading-none flex items-center justify-center hover:text-[var(--text)] hover:border-[var(--teal)]"
         >
@@ -725,254 +783,3 @@ function ReportView({ config, cat, values, setValue, onBlurSave, onFocusValue, s
   );
 }
 
-// Decisão de UX (visivel vs ativo na Rede, ver resumo final): mantidos como DOIS controles
-// separados e explícitos ("Ocultar"/"Mostrar" para `visivel`, "Desativar"/"Reativar" para
-// `ativo`) em vez de combinados num único botão — são conceitos com efeitos diferentes
-// (visivel: some do relatório/ranking mas continua "ativa" pro resto do sistema; ativo:
-// soft-delete de verdade, é o que o backend olha antes de permitir excluir a rede) e um
-// admin pode querer, por exemplo, desativar uma rede que fechou sem tirá-la do relatório
-// do dia em que ainda havia lançamento, ou ocultar temporariamente uma rede ainda ativa.
-function ConfigView({
-  config,
-  removeDiretor, addDiretor, updateDiretorNome,
-  removeRede, addRede, updateRedeNome, updateRedeEmoji,
-  removeCategoria, isAdmin,
-  toggleRedeVisivel, toggleRedeAtivo, updateRedeResponsavel,
-}) {
-  const [newDiretorNome, setNewDiretorNome] = useState('');
-  const [novaRedeDiretorId, setNovaRedeDiretorId] = useState('');
-  const [novaRedeEmoji, setNovaRedeEmoji] = useState('');
-  const [novaRedeNome, setNovaRedeNome] = useState('');
-
-  // ---------- GGs (responsáveis): lista carregada uma vez ao entrar na ConfigView ----------
-  const [responsaveis, setResponsaveis] = useState([]);
-  const [loadingResponsaveis, setLoadingResponsaveis] = useState(true);
-  const [responsaveisError, setResponsaveisError] = useState(null);
-  const [novoResponsavelNome, setNovoResponsavelNome] = useState('');
-  const [responsavelFormError, setResponsavelFormError] = useState(null);
-
-  useEffect(() => {
-    fetchResponsaveis()
-      .then(lista => setResponsaveis(lista || []))
-      .catch(err => setResponsaveisError(err.message || 'Erro ao carregar GGs.'))
-      .finally(() => setLoadingResponsaveis(false));
-  }, []);
-
-  function handleAddResponsavel() {
-    const nome = novoResponsavelNome.trim();
-    if (!nome) {
-      setResponsavelFormError('Informe um nome para o GG.');
-      return;
-    }
-    setResponsavelFormError(null);
-    criarResponsavel({ nome })
-      .then(responsavelCriado => {
-        setResponsaveis(prev => [...prev, responsavelCriado]);
-        setNovoResponsavelNome('');
-      })
-      .catch(err => setResponsavelFormError(err.message || 'Erro ao criar GG'));
-  }
-
-  function handleRemoveResponsavel(id) {
-    setResponsavelFormError(null);
-    removerResponsavel(id)
-      .then(() => setResponsaveis(prev => prev.filter(r => r.id !== id)))
-      .catch(err => setResponsavelFormError(err.message || 'Erro ao remover GG'));
-  }
-
-  return (
-    <div>
-      <div className="mb-[22px]">
-        <h3 className="font-display text-[19px] mb-3 font-bold">Diretores e redes</h3>
-        {config.diretores.map(diretor => (
-          <div key={diretor.id} className="border border-[var(--border)] rounded-xl px-4 py-3.5 mb-3 bg-[var(--panel-alt)]">
-            <div className="flex gap-2.5 items-center mb-2.5">
-              <input
-                key={`diretor-nome-${diretor.id}`}
-                defaultValue={diretor.nome}
-                aria-label={`Nome do diretor ${diretor.nome}`}
-                readOnly={!isAdmin}
-                onBlur={e => updateDiretorNome(diretor.id, e.target.value)}
-                className="font-display text-[var(--text)] text-[19px] font-bold px-1 py-0.5 flex-1 bg-transparent border border-transparent rounded-lg focus:outline-none focus:border-[var(--teal)] focus:bg-[#12151b]"
-              />
-              {isAdmin ? (
-                <button
-                  className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110"
-                  onClick={() => removeDiretor(diretor.id)}
-                >
-                  Remover diretor
-                </button>
-              ) : null}
-            </div>
-
-            <div className="flex flex-wrap gap-1.5">
-              {diretor.redes.length
-                ? diretor.redes.map(r => (
-                  <div
-                    key={r.id}
-                    className={`flex items-center gap-1.5 bg-[#12151b] border border-[var(--border)] rounded-lg pl-2 pr-1.5 py-1.5 text-[13px] ${r.ativo === false ? 'opacity-50' : ''}`}
-                  >
-                    <input
-                      key={`rede-emoji-${r.id}`}
-                      defaultValue={r.emoji || ''}
-                      maxLength={2}
-                      aria-label={`Emoji da rede ${r.nome}`}
-                      readOnly={!isAdmin}
-                      onBlur={e => updateRedeEmoji(r.id, e.target.value)}
-                      className="w-9 text-center bg-transparent border border-transparent rounded px-1 py-0.5 focus:outline-none focus:border-[var(--teal)]"
-                    />
-                    <input
-                      key={`rede-nome-${r.id}`}
-                      defaultValue={r.nome}
-                      aria-label={`Nome da rede ${r.nome}`}
-                      readOnly={!isAdmin}
-                      onBlur={e => updateRedeNome(r.id, e.target.value)}
-                      className="w-[120px] bg-transparent border border-transparent rounded px-1 py-0.5 focus:outline-none focus:border-[var(--teal)]"
-                    />
-                    {isAdmin ? (
-                      <select
-                        aria-label={`GG da rede ${r.nome}`}
-                        value={r.responsavel?.id ?? ''}
-                        onChange={e => updateRedeResponsavel(r.id, e.target.value === '' ? null : Number(e.target.value))}
-                        className="text-[12px] font-medium text-[var(--muted)] flex-none w-28 bg-transparent border border-[var(--border)] rounded-lg px-1.5 py-1 focus:outline-none focus:border-[var(--teal)]"
-                      >
-                        <option value="">Nenhum</option>
-                        {responsaveis.map(resp => (
-                          <option key={resp.id} value={resp.id}>{resp.nome}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="text-[12px] font-medium text-[var(--muted)] flex-none">
-                        {r.responsavel?.nome ?? 'sem GG'}
-                      </span>
-                    )}
-                    {r.visivel === false ? <span className="text-[11px] text-[var(--muted)] font-semibold">(oculta)</span> : null}
-                    {r.ativo === false ? <span className="text-[11px] text-[var(--muted)] font-semibold">(inativa)</span> : null}
-                    {isAdmin ? (
-                      <>
-                        <button
-                          onClick={() => toggleRedeVisivel(r.id, r.visivel === false ? true : false)}
-                          aria-label={`${r.visivel === false ? 'Mostrar' : 'Ocultar'} rede ${r.nome} no relatório`}
-                          className="bg-transparent border border-[var(--border)] text-[var(--text)] rounded-full px-2 py-0.5 text-[11px] font-bold cursor-pointer hover:brightness-110"
-                        >
-                          {r.visivel === false ? 'Mostrar' : 'Ocultar'}
-                        </button>
-                        <button
-                          onClick={() => toggleRedeAtivo(r.id, r.ativo === false ? true : false)}
-                          aria-label={`${r.ativo === false ? 'Reativar' : 'Desativar'} rede ${r.nome}`}
-                          className="bg-transparent border border-[var(--border)] text-[var(--text)] rounded-full px-2 py-0.5 text-[11px] font-bold cursor-pointer hover:brightness-110"
-                        >
-                          {r.ativo === false ? 'Reativar' : 'Desativar'}
-                        </button>
-                      </>
-                    ) : null}
-                    <button
-                      onClick={() => removeRede(diretor.id, r.id)}
-                      aria-label={`Remover rede ${r.nome}`}
-                      className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-full w-[18px] h-[18px] text-[11px] cursor-pointer leading-none"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))
-                : <span className="text-[var(--muted)] text-[13px]">Nenhuma rede ainda</span>
-              }
-            </div>
-          </div>
-        ))}
-
-        {isAdmin ? (
-          <div className="flex gap-2 mt-1 flex-wrap items-center">
-            <select
-              aria-label="Diretor pai da nova rede"
-              value={novaRedeDiretorId}
-              onChange={e => setNovaRedeDiretorId(e.target.value)}
-              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
-            >
-              <option value="">Selecione o diretor...</option>
-              {config.diretores.map(d => (
-                <option key={d.id} value={d.id}>{d.nome}</option>
-              ))}
-            </select>
-            <input
-              placeholder="🏆" maxLength={2} value={novaRedeEmoji} onChange={e => setNovaRedeEmoji(e.target.value)}
-              className="w-11 text-center bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-2.5 py-2 text-sm"
-            />
-            <input
-              placeholder="Nome da rede (ex: Delta)" value={novaRedeNome} onChange={e => setNovaRedeNome(e.target.value)}
-              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
-            />
-            <button
-              className={btn}
-              onClick={() => {
-                addRede(novaRedeDiretorId, novaRedeEmoji, novaRedeNome);
-                setNovaRedeEmoji('');
-                setNovaRedeNome('');
-              }}
-            >
-              Adicionar rede
-            </button>
-          </div>
-        ) : null}
-
-        {isAdmin ? (
-          <div className="flex gap-2 mt-2.5">
-            <input placeholder="Nome do diretor (ex: Victor Hugo)" value={newDiretorNome} onChange={e => setNewDiretorNome(e.target.value)}
-              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm" />
-            <button className={btn} onClick={() => { addDiretor(newDiretorNome); setNewDiretorNome(''); }}>Adicionar diretor</button>
-          </div>
-        ) : null}
-      </div>
-
-      <div>
-        <h3 className="font-display text-[19px] mb-3 font-bold">Categorias de relatório</h3>
-        {config.categorias.map(c => (
-          <div key={c.id} className="inline-flex items-center gap-1.5 bg-[#12151b] border border-[var(--border)] rounded-full pl-4 pr-2 py-2 mr-1 mb-1 text-[13px]">
-            {c.nome} {c.principal ? <span className="text-[var(--teal)] text-[11px]">(principal)</span> : null}
-            {config.categorias.length > 1
-              ? <button onClick={() => removeCategoria(c.id)} className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-full w-[18px] h-[18px] text-[11px] cursor-pointer leading-none">✕</button>
-              : null}
-          </div>
-        ))}
-      </div>
-
-      {isAdmin ? (
-        <div className="mt-[22px]">
-          <h3 className="font-display text-[19px] mb-3 font-bold">GGs</h3>
-          {loadingResponsaveis ? (
-            <div className="text-[var(--muted)] text-sm">Carregando GGs...</div>
-          ) : responsaveisError ? (
-            <div className="text-[var(--danger)] text-[13px] mb-2">{responsaveisError}</div>
-          ) : (
-            <div className="flex flex-wrap mb-2">
-              {responsaveis.length
-                ? responsaveis.map(r => (
-                  <span key={r.id} className="inline-flex items-center gap-1.5 bg-[#12151b] border border-[var(--border)] rounded-full pl-3 pr-1.5 py-1 mr-1 mb-1 text-[13px]">
-                    {r.nome}
-                    <button
-                      onClick={() => handleRemoveResponsavel(r.id)}
-                      aria-label={`Remover GG ${r.nome}`}
-                      className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-full w-[18px] h-[18px] text-[11px] cursor-pointer leading-none"
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))
-                : <span className="text-[var(--muted)] text-[13px]">Nenhum GG cadastrado ainda</span>
-              }
-            </div>
-          )}
-          <div className="flex gap-2 items-center flex-wrap">
-            <input
-              placeholder="Nome do GG" value={novoResponsavelNome}
-              onChange={e => setNovoResponsavelNome(e.target.value)}
-              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
-            />
-            <button className={btn} onClick={handleAddResponsavel}>Adicionar GG</button>
-            {responsavelFormError ? <span className="text-[var(--danger)] text-[13px]">{responsavelFormError}</span> : null}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}

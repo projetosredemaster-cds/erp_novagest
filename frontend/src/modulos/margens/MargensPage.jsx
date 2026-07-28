@@ -417,7 +417,10 @@ function FormularioLancamento({ flash }) {
     fetchRedes()
       .then(redes => {
         if (cancelled) return;
-        setDiretores(agruparRedesPorDiretor(redes || []));
+        // uma rede desativada não pode ser escolhida pra lançamento de margem (ver
+        // CLAUDE.md/CONTRATO-CADASTROS-API.md — `ativo` tem efeito no sistema todo,
+        // não só na tela de configuração, que continua mostrando todas).
+        setDiretores(agruparRedesPorDiretor((redes || []).filter(r => r.ativo !== false)));
         setErrorArvore(null);
       })
       .catch(err => {

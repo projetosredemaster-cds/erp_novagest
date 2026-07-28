@@ -304,9 +304,23 @@ async function existeRede(id) {
 }
 
 /**
- * Lista todas as redes visíveis, cada uma com diretor + responsável (GG) +
- * lojas físicas aninhadas (agrupadas em memória por `rede_id`). Ver
- * CONTRATO-CADASTROS-API.md, seção 5.
+ * Verifica se existe um diretor com o `id` informado. Usada pela validação
+ * de `diretorId` no PUT de Rede (reatribuição de diretor).
+ */
+async function existeDiretor(id) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.Int, id)
+    .query('SELECT 1 AS ok FROM Diretores WHERE id = @id');
+  return result.recordset.length > 0;
+}
+
+/**
+ * Lista todas as redes (ativas/inativas, visíveis/ocultas — sem filtro),
+ * cada uma com diretor + responsável (GG) + lojas físicas aninhadas
+ * (agrupadas em memória por `rede_id`, também todas, inclusive inativas).
+ * Ver CONTRATO-CADASTROS-API.md, seção 5 — quem filtra é o consumidor.
  */
 async function listRedesComDiretorResponsavelLojas() {
   const pool = await getPool();
@@ -318,7 +332,6 @@ async function listRedesComDiretorResponsavelLojas() {
     FROM Redes r
     JOIN Diretores d ON d.id = r.diretor_id
     LEFT JOIN Responsaveis resp ON resp.id = r.responsavel_id
-    WHERE r.visivel = 1
     ORDER BY r.nome
   `);
 
@@ -353,8 +366,9 @@ async function listRedesComDiretorResponsavelLojas() {
  * "parcial com null explícito": quando presente (mesmo `null`), sobrescreve
  * `responsavel_id` (permitindo desatribuir o responsável); só a AUSÊNCIA do
  * campo no corpo preserva o valor atual. Mesma lógica para `emoji`.
+ * `diretorId`, quando informado, reatribui a rede a outro diretor.
  */
-async function updateRede(id, { nome, emoji, responsavelId, ativo, visivel }) {
+async function updateRede(id, { nome, emoji, responsavelId, ativo, visivel, diretorId }) {
   const pool = await getPool();
   await pool
     .request()
@@ -367,6 +381,7 @@ async function updateRede(id, { nome, emoji, responsavelId, ativo, visivel }) {
     .input('ativo', sql.Bit, ativo !== undefined ? ativo : null)
     .input('visivel', sql.Bit, visivel !== undefined ? visivel : null)
     .input('visivelInformado', sql.Bit, visivel !== undefined ? 1 : 0)
+    .input('diretorId', sql.Int, diretorId ?? null)
     .query(`
       UPDATE Redes
       SET
@@ -374,7 +389,8 @@ async function updateRede(id, { nome, emoji, responsavelId, ativo, visivel }) {
         emoji = CASE WHEN @emojiInformado = 1 THEN @emoji ELSE emoji END,
         responsavel_id = CASE WHEN @responsavelIdInformado = 1 THEN @responsavelId ELSE responsavel_id END,
         ativo = COALESCE(@ativo, ativo),
-        visivel = CASE WHEN @visivelInformado = 1 THEN @visivel ELSE visivel END
+        visivel = CASE WHEN @visivelInformado = 1 THEN @visivel ELSE visivel END,
+        diretor_id = COALESCE(@diretorId, diretor_id)
       WHERE id = @id
     `);
 }
@@ -496,69 +512,26 @@ async function findLojaById(id) {
 }
 
 /**
- * Atualização parcial de uma loja: `nome`/`ativo`, ausência de campo
- * preserva o valor atual via COALESCE.
+ * Atualização parcial de uma loja: `nome`/`ativo`/`redeId`, ausência de
+ * campo preserva o valor atual via COALESCE. `redeId`, quando informado,
+ * reatribui a loja a outra rede.
  */
-async function updateLoja(id, { nome, ativo }) {
+async function updateLoja(id, { nome, ativo, redeId }) {
   const pool = await getPool();
   await pool
     .request()
     .input('id', sql.Int, id)
     .input('nome', sql.NVarChar, nome ?? null)
     .input('ativo', sql.Bit, ativo !== undefined ? ativo : null)
+    .input('redeId', sql.Int, redeId ?? null)
     .query(`
       UPDATE Lojas
       SET
         nome = COALESCE(@nome, nome),
-        ativo = COALESCE(@ativo, ativo)
+        ativo = COALESCE(@ativo, ativo),
+        rede_id = COALESCE(@redeId, rede_id)
       WHERE id = @id
     `);
-}
-
-/**
- * Verifica existência + bloqueio de vínculo (lançamentos de margem) e exclui
- * a loja, tudo dentro de uma transação, para evitar condição de corrida
- * entre o SELECT de checagem e o DELETE.
- * Retorna 'not_found' | 'has_margens_entradas' | 'deleted'.
- */
-async function deleteLojaIfNoMargensEntradas(id) {
-  const pool = await getPool();
-  const transaction = new sql.Transaction(pool);
-
-  await transaction.begin();
-  try {
-    const lojaRequest = new sql.Request(transaction);
-    lojaRequest.input('id', sql.Int, id);
-    const lojaResult = await lojaRequest.query(
-      'SELECT id FROM Lojas WHERE id = @id'
-    );
-
-    if (!lojaResult.recordset[0]) {
-      await transaction.rollback();
-      return 'not_found';
-    }
-
-    const countRequest = new sql.Request(transaction);
-    countRequest.input('lojaId', sql.Int, id);
-    const countResult = await countRequest.query(
-      'SELECT COUNT(*) AS total FROM MargensEntradas WHERE loja_id = @lojaId'
-    );
-
-    if (countResult.recordset[0].total > 0) {
-      await transaction.rollback();
-      return 'has_margens_entradas';
-    }
-
-    const deleteRequest = new sql.Request(transaction);
-    deleteRequest.input('id', sql.Int, id);
-    await deleteRequest.query('DELETE FROM Lojas WHERE id = @id');
-
-    await transaction.commit();
-    return 'deleted';
-  } catch (err) {
-    await transaction.rollback();
-    throw err;
-  }
 }
 
 /**
@@ -679,6 +652,7 @@ module.exports = {
   insertRede,
   findRedeById,
   existeRede,
+  existeDiretor,
   listRedesComDiretorResponsavelLojas,
   updateRede,
   existeRedeComNomeNoDiretor,
@@ -687,7 +661,6 @@ module.exports = {
   insertLoja,
   findLojaById,
   updateLoja,
-  deleteLojaIfNoMargensEntradas,
   existeResponsavel,
   listResponsaveis,
   existeResponsavelComNome,

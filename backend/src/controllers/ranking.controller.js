@@ -143,6 +143,119 @@ async function listarCategorias(req, res) {
 }
 
 /**
+ * POST /api/ranking/categorias
+ * Body: { nome: string }
+ */
+async function criarCategoria(req, res) {
+  const body = req.body || {};
+  const { nome } = body;
+
+  if (!isNonEmptyString(nome)) {
+    return res.status(400).json({
+      error: 'Campo "nome" é obrigatório e não pode ser vazio.',
+    });
+  }
+
+  try {
+    const resultado = await rankingService.criarCategoria({ nome });
+
+    if (resultado === 'nome_duplicado') {
+      return res.status(409).json({ error: 'Já existe uma categoria com esse nome.' });
+    }
+
+    return res.status(201).json(resultado);
+  } catch (err) {
+    console.error('[ranking.controller] Erro ao criar categoria:', err);
+    return res.status(500).json({ error: 'Erro interno ao criar categoria.' });
+  }
+}
+
+/**
+ * PUT /api/ranking/categorias/:id
+ * Body parcial: { nome?: string, visivel?: boolean } — ignora silenciosamente
+ * `padrao`/`principal`, caso enviados.
+ */
+async function atualizarCategoria(req, res) {
+  const idNum = Number(req.params.id);
+  if (!isPositiveInteger(idNum)) {
+    return res.status(400).json({
+      error: 'Parâmetro "id" deve ser um número inteiro positivo.',
+    });
+  }
+
+  const body = req.body || {};
+  const { nome, visivel } = body;
+
+  if (nome !== undefined && !isNonEmptyString(nome)) {
+    return res.status(400).json({
+      error: 'Campo "nome", quando enviado, não pode ser vazio.',
+    });
+  }
+
+  if (visivel !== undefined && typeof visivel !== 'boolean') {
+    return res.status(400).json({
+      error: 'Campo "visivel", quando enviado, deve ser "true" ou "false".',
+    });
+  }
+
+  try {
+    const resultado = await rankingService.atualizarCategoria(idNum, { nome, visivel });
+
+    if (resultado === null) {
+      return res.status(404).json({ error: 'Categoria não encontrada.' });
+    }
+
+    if (resultado === 'nome_duplicado') {
+      return res.status(409).json({ error: 'Já existe uma categoria com esse nome.' });
+    }
+
+    return res.status(200).json(resultado);
+  } catch (err) {
+    console.error('[ranking.controller] Erro ao atualizar categoria:', err);
+    return res.status(500).json({ error: 'Erro interno ao atualizar categoria.' });
+  }
+}
+
+/**
+ * DELETE /api/ranking/categorias/:id
+ */
+async function excluirCategoria(req, res) {
+  const idNum = Number(req.params.id);
+  if (!isPositiveInteger(idNum)) {
+    return res.status(400).json({
+      error: 'Parâmetro "id" deve ser um número inteiro positivo.',
+    });
+  }
+
+  try {
+    const resultado = await rankingService.excluirCategoria(idNum);
+
+    if (resultado === 'not_found') {
+      return res.status(404).json({ error: 'Categoria não encontrada.' });
+    }
+
+    if (resultado === 'is_padrao') {
+      return res.status(409).json({
+        error:
+          'Não é possível excluir uma categoria padrão do sistema. Utilize a opção de ocultar.',
+      });
+    }
+
+    if (resultado === 'has_entradas') {
+      return res.status(409).json({
+        error:
+          'Não é possível excluir esta categoria pois existem lançamentos vinculados a ela.',
+      });
+    }
+
+    return res.status(204).send();
+  } catch (err) {
+    console.error('[ranking.controller] Erro ao excluir categoria:', err);
+    return res.status(500).json({ error: 'Erro interno ao excluir categoria.' });
+  }
+}
+
+/**
  * POST /api/ranking/relatorio/email
  * Body: { texto: string, assunto?: string }
  * Envia o texto do relatório (já montado no frontend) por e-mail via Brevo.
@@ -180,5 +293,8 @@ module.exports = {
   criarOuAtualizarEntrada,
   excluirEntrada,
   listarCategorias,
+  criarCategoria,
+  atualizarCategoria,
+  excluirCategoria,
   enviarRelatorioEmail,
 };

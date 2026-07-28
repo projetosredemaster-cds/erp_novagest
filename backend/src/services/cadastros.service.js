@@ -91,22 +91,32 @@ async function getRedesComDiretorResponsavelLojas() {
 /**
  * Atualiza parcialmente uma rede existente e retorna o objeto completo,
  * `null` se a rede não existir, 'nome_duplicado' se o novo nome já
- * pertencer a outra rede do mesmo diretor (case-insensitive, ignorando
- * espaços extras), ou 'responsavel_inexistente' se `responsavelId` for
- * informado (não nulo) mas não corresponder a nenhum `Responsaveis.id`
- * existente. Esta rota não permite trocar a rede de diretor, então a
- * comparação de nome usa o `diretor_id` atual da rede.
+ * pertencer a outra rede do mesmo diretor de destino (case-insensitive,
+ * ignorando espaços extras), 'responsavel_inexistente' se `responsavelId`
+ * for informado (não nulo) mas não corresponder a nenhum `Responsaveis.id`
+ * existente, ou 'diretor_inexistente' se `diretorId` for informado mas não
+ * corresponder a nenhum `Diretores.id` existente. Quando `diretorId` é
+ * informado (reatribuição), a checagem de nome duplicado usa o diretor de
+ * destino, não o de origem.
  */
-async function atualizarRede(id, { nome, emoji, responsavelId, ativo, visivel }) {
+async function atualizarRede(id, { nome, emoji, responsavelId, ativo, visivel, diretorId }) {
   const existente = await cadastrosModel.findRedeById(id);
   if (!existente) {
     return null;
   }
 
+  if (diretorId !== undefined) {
+    const diretorExiste = await cadastrosModel.existeDiretor(diretorId);
+    if (!diretorExiste) {
+      return 'diretor_inexistente';
+    }
+  }
+
   if (nome !== undefined) {
+    const diretorIdParaChecagem = diretorId !== undefined ? diretorId : existente.diretor_id;
     const duplicado = await cadastrosModel.existeRedeComNomeNoDiretor({
       nome,
-      diretorId: existente.diretor_id,
+      diretorId: diretorIdParaChecagem,
       excludeId: id,
     });
     if (duplicado) {
@@ -121,7 +131,7 @@ async function atualizarRede(id, { nome, emoji, responsavelId, ativo, visivel })
     }
   }
 
-  await cadastrosModel.updateRede(id, { nome, emoji, responsavelId, ativo, visivel });
+  await cadastrosModel.updateRede(id, { nome, emoji, responsavelId, ativo, visivel, diretorId });
   return cadastrosModel.findRedeById(id);
 }
 
@@ -153,20 +163,32 @@ async function criarLoja({ redeId, nome }) {
 }
 
 /**
- * Atualiza parcialmente uma loja existente (`nome`/`ativo`) e retorna o
- * objeto completo, `null` se a loja não existir, ou 'nome_duplicado' se o
- * novo nome já pertencer a outra loja da mesma rede.
+ * Atualiza parcialmente uma loja existente (`nome`/`ativo`/`redeId`) e
+ * retorna o objeto completo, `null` se a loja não existir,
+ * 'nome_duplicado' se o novo nome já pertencer a outra loja da rede de
+ * destino, ou 'rede_inexistente' se `redeId` for informado mas não
+ * corresponder a nenhum `Redes.id` existente. Quando `redeId` é informado
+ * (reatribuição), a checagem de nome duplicado usa a rede de destino, não
+ * a de origem.
  */
-async function atualizarLoja(id, { nome, ativo }) {
+async function atualizarLoja(id, { nome, ativo, redeId }) {
   const existente = await cadastrosModel.findLojaById(id);
   if (!existente) {
     return null;
   }
 
+  if (redeId !== undefined) {
+    const redeExiste = await cadastrosModel.existeRede(redeId);
+    if (!redeExiste) {
+      return 'rede_inexistente';
+    }
+  }
+
   if (nome !== undefined) {
+    const redeIdParaChecagem = redeId !== undefined ? redeId : existente.rede_id;
     const duplicado = await cadastrosModel.existeLojaComNomeNaRede({
       nome,
-      redeId: existente.rede_id,
+      redeId: redeIdParaChecagem,
       excludeId: id,
     });
     if (duplicado) {
@@ -174,17 +196,8 @@ async function atualizarLoja(id, { nome, ativo }) {
     }
   }
 
-  await cadastrosModel.updateLoja(id, { nome, ativo });
+  await cadastrosModel.updateLoja(id, { nome, ativo, redeId });
   return cadastrosModel.findLojaById(id);
-}
-
-/**
- * Exclui uma loja, bloqueando com conflito se houver qualquer lançamento de
- * margem vinculado.
- * Retorna 'not_found' | 'has_margens_entradas' | 'deleted'.
- */
-async function excluirLoja(id) {
-  return cadastrosModel.deleteLojaIfNoMargensEntradas(id);
 }
 
 /**
@@ -227,7 +240,6 @@ module.exports = {
   excluirRede,
   criarLoja,
   atualizarLoja,
-  excluirLoja,
   getResponsaveis,
   criarResponsavel,
   excluirResponsavel,
