@@ -11,10 +11,39 @@ const margensModel = require('../models/margens.model');
  */
 
 /**
- * Lista os lançamentos de margem de uma data específica.
+ * Arredonda para 2 casas decimais, evitando erro de ponto flutuante (ex:
+ * 44.440000000000005) nos campos calculados.
+ */
+function round2(value) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * lucro/percentualMargem de uma linha (fórmulas em CONTRATO-MARGENS-API.md,
+ * seção 1/3): `lucro = faturamento - custoProduto - totalTar`;
+ * `percentualMargem = lucro / faturamento * 100`, 0 quando `faturamento` é 0
+ * (evita divisão por zero).
+ */
+function calcularLucroEPercentual({ faturamento, custoProduto, totalTar }) {
+  const fat = Number(faturamento) || 0;
+  const custo = Number(custoProduto) || 0;
+  const tar = Number(totalTar) || 0;
+  const lucro = fat - custo - tar;
+  const percentualMargem = fat !== 0 ? (lucro / fat) * 100 : 0;
+  return { lucro: round2(lucro), percentualMargem: round2(percentualMargem) };
+}
+
+/**
+ * Lista os lançamentos já confirmados numa data específica, cada um já com
+ * `lucro`/`percentualMargem` calculados a partir do snapshot gravado (ver
+ * CONTRATO-MARGENS-API.md, seção 1).
  */
 async function getEntradasDoDia(data) {
-  return margensModel.listEntradasPorData(data);
+  const entradas = await margensModel.listEntradasPorData(data);
+  return entradas.map(e => ({
+    ...e,
+    ...calcularLucroEPercentual(e),
+  }));
 }
 
 /**
@@ -27,44 +56,30 @@ async function lojaExiste(lojaId) {
 }
 
 /**
- * Cria ou atualiza (upsert) uma entrada de margem para (data, lojaId).
- * Assume que a existência de `lojaId` já foi validada pelo chamador (ver
- * `lojaExiste`) — não repete a checagem aqui.
+ * Cria ou atualiza (upsert) uma entrada de margem para (data, lojaId),
+ * gravando o totalTar da loja junto com um snapshot do faturamento/
+ * custoProduto consolidados usados neste momento. Assume que a existência
+ * de `lojaId` já foi validada pelo chamador (ver `lojaExiste`) — não repete
+ * a checagem aqui.
  */
-async function salvarEntrada({ data, lojaId, faturamento, franquia, custos, cartoes, despesas }) {
-  return margensModel.upsertEntrada({ data, lojaId, faturamento, franquia, custos, cartoes, despesas });
-}
-
-/**
- * Arredonda para 2 casas decimais, evitando erro de ponto flutuante (ex:
- * 44.440000000000005) nos campos calculados do relatório.
- */
-function round2(value) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+async function salvarEntrada({ data, lojaId, faturamento, custoProduto, totalTar }) {
+  return margensModel.upsertEntrada({ data, lojaId, faturamento, custoProduto, totalTar });
 }
 
 /**
  * Calcula os campos de margem de uma loja a partir dos totais somados no
- * período (ver fórmulas em CONTRATO-MARGENS-API.md, seção 3). Retorna `null`
- * quando `fatSemFranquia` é 0 — a loja deve ser omitida do relatório.
+ * período (fórmulas em CONTRATO-MARGENS-API.md, seção 3):
+ *   lucro            = SUM(faturamento) - SUM(custoProduto) - SUM(totalTar)
+ *   percentualMargem = lucro / SUM(faturamento) * 100
+ *   cor: >= 41 verde, >= 40 amarelo, senão vermelho
  */
 function calcularMargemLoja(linha) {
   const faturamento = Number(linha.faturamento) || 0;
-  const franquia = Number(linha.franquia) || 0;
-  const custos = Number(linha.custos) || 0;
-  const cartoes = Number(linha.cartoes) || 0;
-  const despesas = Number(linha.despesas) || 0;
+  const custoProduto = Number(linha.custoProduto) || 0;
+  const totalTar = Number(linha.totalTar) || 0;
 
-  const fatSemFranquia = faturamento - franquia;
-  if (fatSemFranquia === 0) {
-    return null;
-  }
-
-  const lucroBruto = fatSemFranquia - custos - cartoes;
-  const lucroLiquido = lucroBruto - despesas;
-  const percentualLucroBruto = (lucroBruto / fatSemFranquia) * 100;
-  const percentualLucroLiquido = (lucroLiquido / fatSemFranquia) * 100;
-  const cor = percentualLucroBruto >= 41 ? 'verde' : percentualLucroBruto >= 40 ? 'amarelo' : 'vermelho';
+  const { lucro, percentualMargem } = calcularLucroEPercentual({ faturamento, custoProduto, totalTar });
+  const cor = percentualMargem >= 41 ? 'verde' : percentualMargem >= 40 ? 'amarelo' : 'vermelho';
 
   return {
     diretor: { id: linha.diretor_id, nome: linha.diretor_nome },
@@ -79,11 +94,10 @@ function calcularMargemLoja(linha) {
       id: linha.loja_id,
       nome: linha.loja_nome,
       faturamento: round2(faturamento),
-      fatSemFranquia: round2(fatSemFranquia),
-      lucroBruto: round2(lucroBruto),
-      lucroLiquido: round2(lucroLiquido),
-      percentualLucroBruto: round2(percentualLucroBruto),
-      percentualLucroLiquido: round2(percentualLucroLiquido),
+      custoProduto: round2(custoProduto),
+      totalTar: round2(totalTar),
+      lucro,
+      percentualMargem,
       cor,
     },
   };
@@ -109,17 +123,13 @@ function agruparPorDiretorERede(lojasCalculadas) {
 
 /**
  * Monta o relatório de margem do período [dataInicio, dataFim], agrupado
- * por Diretor -> Rede -> Lojas[], já com os campos calculados e omitindo
- * lojas sem lançamento efetivo no período (`fatSemFranquia` teórico 0).
+ * por Diretor -> Rede -> Lojas[], já com os campos calculados. Lojas sem
+ * nenhum lançamento no período já vêm de fora do resultado (INNER JOIN no
+ * model), então não há filtragem adicional aqui.
  */
 async function getRelatorio({ dataInicio, dataFim }) {
   const linhas = await margensModel.getSomasPorLojaNoPeriodo({ dataInicio, dataFim });
-
-  const lojasCalculadas = linhas
-    .map(calcularMargemLoja)
-    .filter((loja) => loja !== null);
-
-  return agruparPorDiretorERede(lojasCalculadas);
+  return agruparPorDiretorERede(linhas.map(calcularMargemLoja));
 }
 
 module.exports = {

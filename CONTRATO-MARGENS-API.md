@@ -1,40 +1,50 @@
-# Contrato da API — Módulo Margens (erp_Novagest) — v2
+# Contrato da API — Módulo Margens (erp_Novagest) — v4
 
-> **Mudança de arquitetura**: o cadastro de Diretor/Rede/Loja inteiro
-> (inclusive Lojas físicas, que antes viviam aqui) migrou pra
-> `CONTRATO-CADASTROS-API.md`, sob `/api/cadastros/*` — é dado
-> compartilhado, não pertence ao Margens nem ao Ranking. O Margens só
-> **consome** `GET /api/cadastros/redes` (que já vem com diretor +
-> responsável + lojas[] aninhado — ver seção 5 daquele contrato) e mantém
-> só o que é genuinamente dele: os **lançamentos diários de margem** e o
-> **relatório de período**.
+> **Modelo de dados corrigido**: `Faturamento` e `Custo geral de produtos`
+> são valores **consolidados da franquia inteira** (o mesmo número vale
+> pra todas as lojas num dado dia) — não são específicos de loja/rede. O
+> único valor que realmente varia de loja pra loja é o **Total Tar**
+> (tarifas de cartão de crédito/débito daquela unidade), e é isso que faz
+> a margem de cada loja ser diferente.
+>
+> Ao confirmar o lançamento de uma loja, o backend grava o `totalTar`
+> daquela loja **junto com uma cópia (snapshot) do Faturamento e Custo
+> geral usados naquele momento** — histórico intencional, já que os
+> valores consolidados podem ser alterados depois sem que isso reescreva
+> o cálculo de lançamentos já confirmados.
+>
+> Isso reaproveita as 5 colunas que `MargensEntradas` já tem no banco,
+> sem exigir alteração de schema: `faturamento` = snapshot do Faturamento
+> consolidado; `custos` = snapshot do Custo geral de produtos; `cartoes` =
+> Total Tar da loja; `franquia` e `despesas` sempre `0` (não usadas nesta
+> versão).
+>
+> Cadastro de Diretor/Rede/Loja/Responsavel continua em
+> `CONTRATO-CADASTROS-API.md` — não mudou.
 
 ## Informações gerais
 
 - **Prefixo do módulo**: `/api/margens`
-- **Auth**: `authMiddleware` no mount, igual ao Ranking — qualquer usuário
-  autenticado pode preencher/ler qualquer rede ou loja (sem restrição de
-  admin nesta v1).
+- **Auth**: `authMiddleware` no mount — qualquer usuário autenticado.
 - **Formato de erro padrão**: `{ "error": "mensagem" }`
 
 ---
 
 ## 1. `GET /api/margens/entradas?data=YYYY-MM-DD`
 
-Lançamento diário — todas as lojas que já têm valor lançado nessa data.
-
-### Parâmetro
-| Parâmetro | Obrigatório | Validação |
-|---|---|---|
-| `data` | sim | `^\d{4}-\d{2}-\d{2}$`, senão `400`: `{ "error": "Parâmetro \"data\" é obrigatório e deve estar no formato YYYY-MM-DD." }` |
+Lançamentos já confirmados numa data específica — usado pelo frontend pra
+saber quais lojas já estão "Confirmadas" (trava os campos) e quais ainda
+estão em aberto, além de pré-preencher os campos Faturamento/Custo geral
+com o último snapshot usado naquele dia (se já houver algum).
 
 ### Resposta de sucesso — `200 OK`
 ```json
 [
   {
     "id": 900, "data_ref": "2026-07-27T00:00:00.000Z", "loja_id": 40,
-    "faturamento": 12000.00, "franquia": 0, "custos": 5400.00,
-    "cartoes": 320.00, "despesas": 1800.00, "atualizado_em": "2026-07-27T18:00:00.000Z"
+    "faturamento": 335328.34, "custoProduto": 168124.80, "totalTar": 6000.00,
+    "lucro": 161203.54, "percentualMargem": 48.07,
+    "atualizado_em": "2026-07-27T18:00:00.000Z"
   }
 ]
 ```
@@ -46,31 +56,36 @@ Lançamento diário — todas as lojas que já têm valor lançado nessa data.
 
 ## 2. `POST /api/margens/entradas`
 
-Upsert por `(data, lojaId)` — igual em espírito ao `POST /api/ranking/entradas` (MERGE, `200 OK` mesmo em criação).
+Upsert por `(data, lojaId)` — MERGE, `200 OK` mesmo em criação. Usado
+tanto no "Confirmar" (primeira vez) quanto no "Editar → salvar de novo"
+(sobrescreve o registro existente).
 
 ### Corpo da requisição
 | Campo | Tipo | Obrigatório | Validação |
 |---|---|---|---|
 | `data` | string | sim | `^\d{4}-\d{2}-\d{2}$` |
 | `lojaId` | number | sim | inteiro positivo, deve existir em `Lojas` |
-| `faturamento` | number | sim | `>= 0` |
-| `franquia` | number | não | `>= 0`, default `0` |
-| `custos` | number | sim | `>= 0` |
-| `cartoes` | number | sim | `>= 0` |
-| `despesas` | number | não | `>= 0`, default `0` |
+| `faturamento` | number | sim | `>= 0` — o valor consolidado da franquia usado neste momento |
+| `custoProduto` | number | sim | `>= 0` — o custo geral de produtos consolidado usado neste momento |
+| `totalTar` | number | sim | `>= 0` — a taxa de cartão específica desta loja |
 
 ### Validações — `400 Bad Request` (nesta ordem)
 1. `data` inválida
-2. `lojaId` ausente/inválido, ou não referencia loja existente: `{ "error": "Loja informada não existe." }`
-3. `faturamento`/`custos`/`cartoes` ausentes ou negativos
-4. `franquia`/`despesas`, se enviados, não podem ser negativos
+2. `lojaId` ausente/inválido, ou não existe: `{ "error": "Loja informada não existe." }`
+3. `faturamento` ausente ou negativo
+4. `custoProduto` ausente ou negativo
+5. `totalTar` ausente ou negativo
+
+### Comportamento no banco
+`MERGE` gravando `faturamento=@faturamento`, `custos=@custoProduto`,
+`cartoes=@totalTar`, `franquia=0`, `despesas=0`.
 
 ### Resposta de sucesso — `200 OK`
 ```json
 {
   "acao": "INSERT", "id": 900, "data_ref": "2026-07-27T00:00:00.000Z", "loja_id": 40,
-  "faturamento": 12000.00, "franquia": 0, "custos": 5400.00, "cartoes": 320.00,
-  "despesas": 1800.00, "atualizado_em": "2026-07-27T18:00:00.000Z"
+  "faturamento": 335328.34, "custoProduto": 168124.80, "totalTar": 6000.00,
+  "atualizado_em": "2026-07-27T18:00:00.000Z"
 }
 ```
 
@@ -81,20 +96,17 @@ Upsert por `(data, lojaId)` — igual em espírito ao `POST /api/ranking/entrada
 
 ## 3. `GET /api/margens/relatorio?dataInicio=YYYY-MM-DD&dataFim=YYYY-MM-DD`
 
-Soma os lançamentos diários do período por loja, calcula a margem e devolve
-já pronto para montar o relatório (agrupado por Diretor → Rede → Loja).
-
-### Cálculo (por loja, somando o período)
+Soma os lançamentos do período por loja (cada dia com seu próprio
+snapshot de Faturamento/Custo geral + o Total Tar daquele dia) e calcula:
 ```
-fatSemFranquia = SUM(faturamento) - SUM(franquia)
-lucroBruto     = fatSemFranquia - SUM(custos) - SUM(cartoes)
-lucroLiquido   = lucroBruto - SUM(despesas)
-percentualLucroBruto   = lucroBruto / fatSemFranquia * 100
-percentualLucroLiquido = lucroLiquido / fatSemFranquia * 100
-cor: percentualLucroBruto >= 41 ? "verde" : (percentualLucroBruto >= 40 ? "amarelo" : "vermelho")
+lucro            = SUM(faturamento) - SUM(custoProduto) - SUM(totalTar)
+percentualMargem = lucro / SUM(faturamento) * 100
+cor: percentualMargem >= 41 ? "verde" : (>= 40 ? "amarelo" : "vermelho")
 ```
-Se `fatSemFranquia` for `0` para uma loja (sem lançamento no período), ela é
-omitida do resultado.
+Omite lojas sem nenhum lançamento confirmado no período. Retorna tudo do
+período de uma vez, agrupado por diretor → rede → lojas — os filtros de
+Rede/Cor/Loja na tela de relatório são aplicados no FRONTEND sobre esse
+resultado, sem parâmetro de query pra isso.
 
 ### Resposta de sucesso — `200 OK`
 ```json
@@ -103,31 +115,25 @@ omitida do resultado.
     "diretor": { "id": 1, "nome": "Victor Hugo" },
     "rede": { "id": 5, "nome": "Delta", "responsavel": { "id": 3, "nome": "Grazy" } },
     "lojas": [
-      {
-        "id": 40, "nome": "SLZ 01",
-        "faturamento": 335328.34, "fatSemFranquia": 335328.34,
-        "lucroBruto": 161203.54, "lucroLiquido": 149011.08,
-        "percentualLucroBruto": 48.07, "percentualLucroLiquido": 44.44,
-        "cor": "verde"
-      }
+      { "id": 40, "nome": "SLZ 01", "faturamento": 335328.34, "custoProduto": 168124.80,
+        "totalTar": 6000.00, "lucro": 161203.54, "percentualMargem": 48.07, "cor": "verde" }
     ]
   }
 ]
 ```
 
 ### Erros
-`400` (parâmetros de data ausentes/inválidos): `{ "error": "Parâmetros \"dataInicio\" e \"dataFim\" são obrigatórios e devem estar no formato YYYY-MM-DD." }`
+`400`: `{ "error": "Parâmetros \"dataInicio\" e \"dataFim\" são obrigatórios e devem estar no formato YYYY-MM-DD." }`
 `500`: `{ "error": "Erro interno ao gerar relatório de margens." }`
 
 ---
 
 ## Resumo rápido
 
-| Método | Rota | Body/Query | Sucesso | Principais erros |
-|---|---|---|---|---|
-| GET | `/api/margens/entradas` | query `data` | `200` array de entradas do dia | `400`, `500` |
-| POST | `/api/margens/entradas` | `data`, `lojaId`, valores | `200` entrada com `acao` | `400`, `500` |
-| GET | `/api/margens/relatorio` | query `dataInicio`, `dataFim` | `200` margem calculada por loja/rede/diretor | `400`, `500` |
+| Método | Rota | Body/Query | Sucesso |
+|---|---|---|---|
+| GET | `/api/margens/entradas` | query `data` | `200` array do dia (com snapshot faturamento/custoProduto + totalTar por loja) |
+| POST | `/api/margens/entradas` | `data`, `lojaId`, `faturamento`, `custoProduto`, `totalTar` | `200` com `acao` |
+| GET | `/api/margens/relatorio` | query `dataInicio`, `dataFim` | `200` agrupado, sem filtro server-side |
 
-Todos os erros seguem `{ "error": "mensagem" }`. Cadastro de
-Diretor/Rede/Loja/Responsável (GG) → ver `CONTRATO-CADASTROS-API.md`.
+Todos os erros seguem `{ "error": "mensagem" }`.

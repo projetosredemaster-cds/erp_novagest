@@ -29,18 +29,15 @@ async function listarEntradas(req, res) {
 
 /**
  * POST /api/margens/entradas
- * Body: { data, lojaId, faturamento, franquia?, custos, cartoes, despesas? }
+ * Body: { data, lojaId, faturamento, custoProduto, totalTar }
  * Cria ou atualiza (upsert) a entrada correspondente a (data, lojaId).
  *
- * Ordem de validação 400, conforme CONTRATO-MARGENS-API.md seção 2: data ->
- * lojaId/existência -> faturamento/custos/cartoes -> franquia/despesas. A
- * checagem de existência de `lojaId` é feita antes das demais validações
- * numéricas de propósito, para respeitar essa ordem mesmo quando múltiplos
- * campos do corpo são inválidos ao mesmo tempo.
+ * Ordem de validação 400 (CONTRATO-MARGENS-API.md, seção 2): data ->
+ * lojaId/existência -> faturamento -> custoProduto -> totalTar.
  */
 async function criarOuAtualizarEntrada(req, res) {
   const body = req.body || {};
-  const { data, lojaId, faturamento, franquia, custos, cartoes, despesas } = body;
+  const { data, lojaId, faturamento, custoProduto, totalTar } = body;
 
   if (!data || !DATE_REGEX.test(data)) {
     return res.status(400).json({
@@ -64,48 +61,26 @@ async function criarOuAtualizarEntrada(req, res) {
       });
     }
 
-    const custosNum = Number(custos);
-    if (custos === undefined || custos === null || Number.isNaN(custosNum) || custosNum < 0) {
+    const custoProdutoNum = Number(custoProduto);
+    if (custoProduto === undefined || custoProduto === null || Number.isNaN(custoProdutoNum) || custoProdutoNum < 0) {
       return res.status(400).json({
-        error: 'Campo "custos" é obrigatório e deve ser um número maior ou igual a zero.',
+        error: 'Campo "custoProduto" é obrigatório e deve ser um número maior ou igual a zero.',
       });
     }
 
-    const cartoesNum = Number(cartoes);
-    if (cartoes === undefined || cartoes === null || Number.isNaN(cartoesNum) || cartoesNum < 0) {
+    const totalTarNum = Number(totalTar);
+    if (totalTar === undefined || totalTar === null || Number.isNaN(totalTarNum) || totalTarNum < 0) {
       return res.status(400).json({
-        error: 'Campo "cartoes" é obrigatório e deve ser um número maior ou igual a zero.',
+        error: 'Campo "totalTar" é obrigatório e deve ser um número maior ou igual a zero.',
       });
-    }
-
-    let franquiaNum = 0;
-    if (franquia !== undefined && franquia !== null) {
-      franquiaNum = Number(franquia);
-      if (Number.isNaN(franquiaNum) || franquiaNum < 0) {
-        return res.status(400).json({
-          error: 'Campo "franquia", quando enviado, deve ser um número maior ou igual a zero.',
-        });
-      }
-    }
-
-    let despesasNum = 0;
-    if (despesas !== undefined && despesas !== null) {
-      despesasNum = Number(despesas);
-      if (Number.isNaN(despesasNum) || despesasNum < 0) {
-        return res.status(400).json({
-          error: 'Campo "despesas", quando enviado, deve ser um número maior ou igual a zero.',
-        });
-      }
     }
 
     const entrada = await margensService.salvarEntrada({
       data,
       lojaId: lojaIdNum,
       faturamento: faturamentoNum,
-      franquia: franquiaNum,
-      custos: custosNum,
-      cartoes: cartoesNum,
-      despesas: despesasNum,
+      custoProduto: custoProdutoNum,
+      totalTar: totalTarNum,
     });
     return res.status(200).json(entrada);
   } catch (err) {

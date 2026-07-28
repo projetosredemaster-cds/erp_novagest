@@ -17,10 +17,10 @@ export function fetchEntradas(data) {
   return request(`/api/margens/entradas?${params.toString()}`);
 }
 
-export function salvarEntrada({ data, lojaId, faturamento, franquia, custos, cartoes, despesas }) {
+export function salvarEntrada({ data, lojaId, faturamento, custoProduto, totalTar }) {
   return request('/api/margens/entradas', {
     method: 'POST',
-    body: JSON.stringify({ data, lojaId, faturamento, franquia, custos, cartoes, despesas }),
+    body: JSON.stringify({ data, lojaId, faturamento, custoProduto, totalTar }),
   });
 }
 
