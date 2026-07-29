@@ -14,7 +14,7 @@ const { sql, getPool } = require('../config/db');
  *                     franquia, custos, cartoes, despesas, atualizado_em;
  *                     UNIQUE em data_ref+loja_id).
  *
- * A API (CONTRATO-MARGENS-API.md v4) trata `faturamento` e `custoProduto`
+ * A API (CONTRATO-MARGENS-API.md v5) trata `faturamento` e `custoProduto`
  * como valores CONSOLIDADOS DA FRANQUIA (o mesmo número vale pra todas as
  * lojas num dado dia) — o único valor específico de cada loja é `totalTar`
  * (taxa de cartão daquela unidade). Ao confirmar uma loja, o snapshot do
@@ -23,8 +23,12 @@ const { sql, getPool } = require('../config/db');
  * futuras nos valores consolidados. Isso reaproveita as 5 colunas que a
  * tabela já tem, sem alterar schema: `faturamento` = snapshot do
  * faturamento consolidado; `custos` = snapshot do custo geral de produtos;
- * `cartoes` = totalTar da loja; `franquia`/`despesas` sempre `0` (não
- * usadas nesta versão).
+ * `cartoes` = totalTar da loja; `franquia` guarda a margem % informada
+ * manualmente (`margemInformada`) quando o frontend usa o "modo margem
+ * colada" — continua `0` quando o frontend usa o "modo Total Tar" (é só
+ * auditoria/histórico do lançamento diário, não entra em nenhum cálculo
+ * de agregação do relatório de período); `despesas` sempre `0` (não usada
+ * nesta versão).
  *
  * Todas as queries são parametrizadas via `request.input(...)` — nunca
  * concatenar valores vindos do usuário diretamente na string SQL.
@@ -40,7 +44,7 @@ async function listEntradasPorData(data) {
     .input('data', sql.Date, data)
     .query(`
       SELECT id, data_ref, loja_id, faturamento, custos AS custoProduto,
-             cartoes AS totalTar, atualizado_em
+             cartoes AS totalTar, franquia AS margemInformada, atualizado_em
       FROM MargensEntradas
       WHERE data_ref = @data
       ORDER BY loja_id
@@ -65,11 +69,14 @@ async function existeLoja(id) {
 /**
  * Cria ou atualiza (upsert) uma entrada de margem, identificada pela
  * combinação (data_ref, loja_id), usando MERGE dentro de uma transação
- * (mesmo padrão de `upsertEntrada` em `ranking.model.js`). Grava sempre
- * franquia/despesas como 0 — colunas mantidas no schema mas não usadas
- * nesta versão (ver CONTRATO-MARGENS-API.md v4).
+ * (mesmo padrão de `upsertEntrada` em `ranking.model.js`). Grava
+ * `franquia = @margemInformada` (a margem % colada manualmente pelo
+ * usuário no "modo margem colada", ou `0` quando o frontend usa o "modo
+ * Total Tar"/o campo não é informado) e `despesas` sempre `0` — colunas
+ * mantidas no schema, `despesas` não usada nesta versão (ver
+ * CONTRATO-MARGENS-API.md v5).
  */
-async function upsertEntrada({ data, lojaId, faturamento, custoProduto, totalTar }) {
+async function upsertEntrada({ data, lojaId, faturamento, custoProduto, totalTar, margemInformada }) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
 
@@ -81,6 +88,7 @@ async function upsertEntrada({ data, lojaId, faturamento, custoProduto, totalTar
     request.input('faturamento', sql.Decimal(18, 2), faturamento);
     request.input('custoProduto', sql.Decimal(18, 2), custoProduto);
     request.input('totalTar', sql.Decimal(18, 2), totalTar);
+    request.input('margemInformada', sql.Decimal(18, 2), margemInformada || 0);
 
     const result = await request.query(`
       MERGE INTO MargensEntradas AS target
@@ -90,14 +98,14 @@ async function upsertEntrada({ data, lojaId, faturamento, custoProduto, totalTar
       WHEN MATCHED THEN
         UPDATE SET
           faturamento = @faturamento,
-          franquia = 0,
+          franquia = @margemInformada,
           custos = @custoProduto,
           cartoes = @totalTar,
           despesas = 0,
           atualizado_em = SYSUTCDATETIME()
       WHEN NOT MATCHED THEN
         INSERT (data_ref, loja_id, faturamento, franquia, custos, cartoes, despesas, atualizado_em)
-        VALUES (@data, @lojaId, @faturamento, 0, @custoProduto, @totalTar, 0, SYSUTCDATETIME())
+        VALUES (@data, @lojaId, @faturamento, @margemInformada, @custoProduto, @totalTar, 0, SYSUTCDATETIME())
       OUTPUT
         $action AS acao,
         inserted.id,
@@ -106,6 +114,7 @@ async function upsertEntrada({ data, lojaId, faturamento, custoProduto, totalTar
         inserted.faturamento,
         inserted.custos AS custoProduto,
         inserted.cartoes AS totalTar,
+        inserted.franquia AS margemInformada,
         inserted.atualizado_em;
     `);
 

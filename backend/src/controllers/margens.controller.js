@@ -29,15 +29,16 @@ async function listarEntradas(req, res) {
 
 /**
  * POST /api/margens/entradas
- * Body: { data, lojaId, faturamento, custoProduto, totalTar }
+ * Body: { data, lojaId, faturamento, custoProduto, totalTar, margemInformada? }
  * Cria ou atualiza (upsert) a entrada correspondente a (data, lojaId).
  *
  * Ordem de validação 400 (CONTRATO-MARGENS-API.md, seção 2): data ->
- * lojaId/existência -> faturamento -> custoProduto -> totalTar.
+ * lojaId/existência -> faturamento -> custoProduto -> totalTar ->
+ * margemInformada (opcional).
  */
 async function criarOuAtualizarEntrada(req, res) {
   const body = req.body || {};
-  const { data, lojaId, faturamento, custoProduto, totalTar } = body;
+  const { data, lojaId, faturamento, custoProduto, totalTar, margemInformada } = body;
 
   if (!data || !DATE_REGEX.test(data)) {
     return res.status(400).json({
@@ -75,12 +76,24 @@ async function criarOuAtualizarEntrada(req, res) {
       });
     }
 
+    let margemInformadaNum = 0;
+    if (margemInformada !== undefined && margemInformada !== null) {
+      const valorConvertido = Number(margemInformada);
+      if (!Number.isFinite(valorConvertido)) {
+        return res.status(400).json({
+          error: 'Campo "margemInformada", quando informado, deve ser um número.',
+        });
+      }
+      margemInformadaNum = valorConvertido;
+    }
+
     const entrada = await margensService.salvarEntrada({
       data,
       lojaId: lojaIdNum,
       faturamento: faturamentoNum,
       custoProduto: custoProdutoNum,
       totalTar: totalTarNum,
+      margemInformada: margemInformadaNum,
     });
     return res.status(200).json(entrada);
   } catch (err) {

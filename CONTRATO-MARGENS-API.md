@@ -1,4 +1,4 @@
-# Contrato da API — Módulo Margens (erp_Novagest) — v4
+# Contrato da API — Módulo Margens (erp_Novagest) — v5
 
 > **Modelo de dados corrigido**: `Faturamento` e `Custo geral de produtos`
 > são valores **consolidados da franquia inteira** (o mesmo número vale
@@ -16,8 +16,17 @@
 > Isso reaproveita as 5 colunas que `MargensEntradas` já tem no banco,
 > sem exigir alteração de schema: `faturamento` = snapshot do Faturamento
 > consolidado; `custos` = snapshot do Custo geral de produtos; `cartoes` =
-> Total Tar da loja; `franquia` e `despesas` sempre `0` (não usadas nesta
-> versão).
+> Total Tar da loja; `despesas` sempre `0` (não usada nesta versão).
+>
+> **Novidade v5**: `franquia`, que era sempre `0`, agora também pode
+> guardar a margem % informada manualmente (`margemInformada`) quando o
+> frontend usa o **"modo margem colada"** — o usuário cola a margem %
+> pronta calculada num ERP externo em vez de digitar o Total Tar. No
+> "modo Total Tar" (fluxo atual, sem mudança), `franquia` continua `0`.
+> Isso é só um campo de **auditoria/histórico do lançamento diário** — não
+> afeta em nada o cálculo do relatório de período (seção 3), que continua
+> somando `faturamento`/`custoProduto`/`totalTar` normalmente e nunca usa
+> `franquia`/`margemInformada` em nenhuma soma ou fórmula.
 >
 > Cadastro de Diretor/Rede/Loja/Responsavel continua em
 > `CONTRATO-CADASTROS-API.md` — não mudou.
@@ -43,11 +52,17 @@ com o último snapshot usado naquele dia (se já houver algum).
   {
     "id": 900, "data_ref": "2026-07-27T00:00:00.000Z", "loja_id": 40,
     "faturamento": 335328.34, "custoProduto": 168124.80, "totalTar": 6000.00,
+    "margemInformada": 0,
     "lucro": 161203.54, "percentualMargem": 48.07,
     "atualizado_em": "2026-07-27T18:00:00.000Z"
   }
 ]
 ```
+
+`margemInformada` reflete a coluna `franquia` — `0` quando o lançamento
+foi feito no "modo Total Tar" (fluxo padrão, sem margem colada), ou um
+número (inclusive negativo, caso de prejuízo) quando foi feito no "modo
+margem colada".
 
 ### Erros
 `400`, `500`: `{ "error": "Erro interno ao listar entradas de margem." }`
@@ -68,6 +83,7 @@ tanto no "Confirmar" (primeira vez) quanto no "Editar → salvar de novo"
 | `faturamento` | number | sim | `>= 0` — o valor consolidado da franquia usado neste momento |
 | `custoProduto` | number | sim | `>= 0` — o custo geral de produtos consolidado usado neste momento |
 | `totalTar` | number | sim | `>= 0` — a taxa de cartão específica desta loja |
+| `margemInformada` | number | não | opcional — se vier, deve ser um número finito; sem limite inferior (aceita negativo, caso de prejuízo) — a margem % colada manualmente pelo usuário no "modo margem colada" |
 
 ### Validações — `400 Bad Request` (nesta ordem)
 1. `data` inválida
@@ -75,16 +91,20 @@ tanto no "Confirmar" (primeira vez) quanto no "Editar → salvar de novo"
 3. `faturamento` ausente ou negativo
 4. `custoProduto` ausente ou negativo
 5. `totalTar` ausente ou negativo
+6. `margemInformada` informado (não `undefined`/`null`) mas não é um número finito: `{ "error": "Campo \"margemInformada\", quando informado, deve ser um número." }`
 
 ### Comportamento no banco
 `MERGE` gravando `faturamento=@faturamento`, `custos=@custoProduto`,
-`cartoes=@totalTar`, `franquia=0`, `despesas=0`.
+`cartoes=@totalTar`, `franquia=@margemInformada` (o número informado, ou
+`0` quando `margemInformada` está ausente/`null` — mesmo comportamento de
+antes da v5), `despesas=0`.
 
 ### Resposta de sucesso — `200 OK`
 ```json
 {
   "acao": "INSERT", "id": 900, "data_ref": "2026-07-27T00:00:00.000Z", "loja_id": 40,
   "faturamento": 335328.34, "custoProduto": 168124.80, "totalTar": 6000.00,
+  "margemInformada": 0,
   "atualizado_em": "2026-07-27T18:00:00.000Z"
 }
 ```
@@ -132,8 +152,8 @@ resultado, sem parâmetro de query pra isso.
 
 | Método | Rota | Body/Query | Sucesso |
 |---|---|---|---|
-| GET | `/api/margens/entradas` | query `data` | `200` array do dia (com snapshot faturamento/custoProduto + totalTar por loja) |
-| POST | `/api/margens/entradas` | `data`, `lojaId`, `faturamento`, `custoProduto`, `totalTar` | `200` com `acao` |
+| GET | `/api/margens/entradas` | query `data` | `200` array do dia (com snapshot faturamento/custoProduto + totalTar + margemInformada por loja) |
+| POST | `/api/margens/entradas` | `data`, `lojaId`, `faturamento`, `custoProduto`, `totalTar`, `margemInformada` (opcional) | `200` com `acao` |
 | GET | `/api/margens/relatorio` | query `dataInicio`, `dataFim` | `200` agrupado, sem filtro server-side |
 
 Todos os erros seguem `{ "error": "mensagem" }`.

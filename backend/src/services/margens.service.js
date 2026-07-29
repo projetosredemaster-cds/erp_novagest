@@ -60,10 +60,13 @@ async function lojaExiste(lojaId) {
  * gravando o totalTar da loja junto com um snapshot do faturamento/
  * custoProduto consolidados usados neste momento. Assume que a existência
  * de `lojaId` já foi validada pelo chamador (ver `lojaExiste`) — não repete
- * a checagem aqui.
+ * a checagem aqui. `margemInformada` é passthrough puro (sem regra de
+ * negócio aqui) — auditoria da margem % colada manualmente no modo
+ * "margem colada" do frontend, gravada na coluna `franquia` (ver
+ * CONTRATO-MARGENS-API.md).
  */
-async function salvarEntrada({ data, lojaId, faturamento, custoProduto, totalTar }) {
-  return margensModel.upsertEntrada({ data, lojaId, faturamento, custoProduto, totalTar });
+async function salvarEntrada({ data, lojaId, faturamento, custoProduto, totalTar, margemInformada }) {
+  return margensModel.upsertEntrada({ data, lojaId, faturamento, custoProduto, totalTar, margemInformada });
 }
 
 /**

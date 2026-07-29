@@ -1,6 +1,6 @@
 // Testes de integração de rota (Supertest, sem subir o servidor de verdade,
 // sem tocar o Azure SQL real) para o módulo Margens (ver CONTRATO-MARGENS-API.md
-// v4). Cobre:
+// v5). Cobre:
 //   - GET  /api/margens/entradas
 //   - POST /api/margens/entradas (upsert)
 //   - GET  /api/margens/relatorio
@@ -126,6 +126,42 @@ describe('GET /api/margens/entradas', () => {
     expect(entrada.lucro).toBeCloseTo(161203.54, 2);
     // percentualMargem = lucro / faturamento * 100
     expect(entrada.percentualMargem).toBeCloseTo(48.07, 2);
+  });
+
+  it('200 — reflete "margemInformada" (gravada na coluna franquia) no corpo da resposta', async () => {
+    margensModel.listEntradasPorData.mockResolvedValue([
+      {
+        id: 901, data_ref: '2026-07-28T00:00:00.000Z', loja_id: 41,
+        faturamento: 100000, custoProduto: 40000, totalTar: 5000,
+        margemInformada: 44.20,
+        atualizado_em: '2026-07-28T18:00:00.000Z',
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/margens/entradas?data=2026-07-28')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].margemInformada).toBe(44.20);
+  });
+
+  it('200 — reflete "margemInformada: 0" (modo Total Tar, distinto do modo margem colada) no corpo da resposta', async () => {
+    margensModel.listEntradasPorData.mockResolvedValue([
+      {
+        id: 902, data_ref: '2026-07-28T00:00:00.000Z', loja_id: 42,
+        faturamento: 100000, custoProduto: 40000, totalTar: 5000,
+        margemInformada: 0,
+        atualizado_em: '2026-07-28T18:00:00.000Z',
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/margens/entradas?data=2026-07-28')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].margemInformada).toBe(0);
   });
 
   it('500 quando o model lança erro', async () => {
@@ -305,6 +341,155 @@ describe('POST /api/margens/entradas', () => {
     });
   });
 
+  it('400 quando "margemInformada" é informado mas não é um número (ex: "abc")', async () => {
+    margensModel.existeLoja.mockResolvedValue(true);
+
+    const res = await request(app)
+      .post('/api/margens/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ ...payloadValido, margemInformada: 'abc' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "margemInformada", quando informado, deve ser um número.',
+    });
+    expect(margensModel.upsertEntrada).not.toHaveBeenCalled();
+  });
+
+  it('200 — "margemInformada" ausente do corpo continua funcionando como hoje (model recebe 0)', async () => {
+    margensModel.existeLoja.mockResolvedValue(true);
+    margensModel.upsertEntrada.mockResolvedValue({
+      acao: 'INSERT', id: 900, data_ref: '2026-07-28T00:00:00.000Z', loja_id: 40,
+      faturamento: 100000, custoProduto: 40000, totalTar: 5000, margemInformada: 0,
+      atualizado_em: '2026-07-28T18:00:00.000Z',
+    });
+
+    const res = await request(app)
+      .post('/api/margens/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(200);
+    expect(margensModel.upsertEntrada).toHaveBeenCalledWith({
+      data: '2026-07-28', lojaId: 40, faturamento: 100000, custoProduto: 40000, totalTar: 5000,
+      margemInformada: 0,
+    });
+  });
+
+  it('200 — "margemInformada: 44.20" é repassado ao model', async () => {
+    margensModel.existeLoja.mockResolvedValue(true);
+    margensModel.upsertEntrada.mockResolvedValue({
+      acao: 'INSERT', id: 900, data_ref: '2026-07-28T00:00:00.000Z', loja_id: 40,
+      faturamento: 100000, custoProduto: 40000, totalTar: 5000, margemInformada: 44.20,
+      atualizado_em: '2026-07-28T18:00:00.000Z',
+    });
+
+    const res = await request(app)
+      .post('/api/margens/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ ...payloadValido, margemInformada: 44.20 });
+
+    expect(res.status).toBe(200);
+    expect(margensModel.upsertEntrada).toHaveBeenCalledWith({
+      data: '2026-07-28', lojaId: 40, faturamento: 100000, custoProduto: 40000, totalTar: 5000,
+      margemInformada: 44.20,
+    });
+  });
+
+  it('200 — "margemInformada: -12.5" (negativo, caso de prejuízo) não é rejeitado — sem limite inferior', async () => {
+    margensModel.existeLoja.mockResolvedValue(true);
+    margensModel.upsertEntrada.mockResolvedValue({
+      acao: 'INSERT', id: 900, data_ref: '2026-07-28T00:00:00.000Z', loja_id: 40,
+      faturamento: 100000, custoProduto: 40000, totalTar: 5000, margemInformada: -12.5,
+      atualizado_em: '2026-07-28T18:00:00.000Z',
+    });
+
+    const res = await request(app)
+      .post('/api/margens/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ ...payloadValido, margemInformada: -12.5 });
+
+    expect(res.status).toBe(200);
+    expect(margensModel.upsertEntrada).toHaveBeenCalledWith({
+      data: '2026-07-28', lojaId: 40, faturamento: 100000, custoProduto: 40000, totalTar: 5000,
+      margemInformada: -12.5,
+    });
+  });
+
+  it('200 — "margemInformada: 0" explícito é aceito e repassado como 0 (valor legítimo, não confundir com "ausente")', async () => {
+    margensModel.existeLoja.mockResolvedValue(true);
+    margensModel.upsertEntrada.mockResolvedValue({
+      acao: 'INSERT', id: 900, data_ref: '2026-07-28T00:00:00.000Z', loja_id: 40,
+      faturamento: 100000, custoProduto: 40000, totalTar: 5000, margemInformada: 0,
+      atualizado_em: '2026-07-28T18:00:00.000Z',
+    });
+
+    const res = await request(app)
+      .post('/api/margens/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ ...payloadValido, margemInformada: 0 });
+
+    expect(res.status).toBe(200);
+    expect(margensModel.upsertEntrada).toHaveBeenCalledWith({
+      data: '2026-07-28', lojaId: 40, faturamento: 100000, custoProduto: 40000, totalTar: 5000,
+      margemInformada: 0,
+    });
+  });
+
+  it('400 quando "margemInformada" é um objeto (não numérico — Number({}) é NaN)', async () => {
+    margensModel.existeLoja.mockResolvedValue(true);
+
+    const res = await request(app)
+      .post('/api/margens/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ ...payloadValido, margemInformada: {} });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "margemInformada", quando informado, deve ser um número.',
+    });
+    expect(margensModel.upsertEntrada).not.toHaveBeenCalled();
+  });
+
+  it('400 quando "margemInformada" é um array com mais de um item (não numérico — Number([1,2]) é NaN)', async () => {
+    margensModel.existeLoja.mockResolvedValue(true);
+
+    const res = await request(app)
+      .post('/api/margens/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ ...payloadValido, margemInformada: [1, 2] });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "margemInformada", quando informado, deve ser um número.',
+    });
+    expect(margensModel.upsertEntrada).not.toHaveBeenCalled();
+  });
+
+  // NOTA: diferente do que se poderia supor, `margemInformada: ''` (string vazia) NÃO
+  // cai neste 400 — `Number('')` é `0` em JS (não `NaN`), então uma string vazia é
+  // silenciosamente aceita e tratada como `margemInformada: 0`. Documentado aqui como
+  // comportamento real observado (ver relatório de QA), não como bug corrigido.
+  it('200 — "margemInformada: \'\'" (string vazia) é aceito e convertido para 0, não gera 400 (Number(\'\') é 0, não NaN)', async () => {
+    margensModel.existeLoja.mockResolvedValue(true);
+    margensModel.upsertEntrada.mockResolvedValue({
+      acao: 'INSERT', id: 900, data_ref: '2026-07-28T00:00:00.000Z', loja_id: 40,
+      faturamento: 100000, custoProduto: 40000, totalTar: 5000, margemInformada: 0,
+      atualizado_em: '2026-07-28T18:00:00.000Z',
+    });
+
+    const res = await request(app)
+      .post('/api/margens/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ ...payloadValido, margemInformada: '' });
+
+    expect(res.status).toBe(200);
+    expect(margensModel.upsertEntrada).toHaveBeenCalledWith({
+      data: '2026-07-28', lojaId: 40, faturamento: 100000, custoProduto: 40000, totalTar: 5000,
+      margemInformada: 0,
+    });
+  });
+
   it('200 — cria a entrada (primeira vez), acao: INSERT', async () => {
     margensModel.existeLoja.mockResolvedValue(true);
     margensModel.upsertEntrada.mockResolvedValue({
@@ -322,6 +507,7 @@ describe('POST /api/margens/entradas', () => {
     expect(res.body.acao).toBe('INSERT');
     expect(margensModel.upsertEntrada).toHaveBeenCalledWith({
       data: '2026-07-28', lojaId: 40, faturamento: 100000, custoProduto: 40000, totalTar: 5000,
+      margemInformada: 0,
     });
   });
 
@@ -341,6 +527,28 @@ describe('POST /api/margens/entradas', () => {
     expect(res.status).toBe(200);
     expect(res.body.acao).toBe('UPDATE');
     expect(res.body.totalTar).toBe(8000);
+  });
+
+  it('200 — atualiza a entrada existente (UPDATE) também repassa "margemInformada" corretamente ao model', async () => {
+    margensModel.existeLoja.mockResolvedValue(true);
+    margensModel.upsertEntrada.mockResolvedValue({
+      acao: 'UPDATE', id: 900, data_ref: '2026-07-28T00:00:00.000Z', loja_id: 40,
+      faturamento: 100000, custoProduto: 40000, totalTar: 5000, margemInformada: 44.20,
+      atualizado_em: '2026-07-28T19:00:00.000Z',
+    });
+
+    const res = await request(app)
+      .post('/api/margens/entradas')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ ...payloadValido, margemInformada: 44.20 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.acao).toBe('UPDATE');
+    expect(res.body.margemInformada).toBe(44.20);
+    expect(margensModel.upsertEntrada).toHaveBeenCalledWith({
+      data: '2026-07-28', lojaId: 40, faturamento: 100000, custoProduto: 40000, totalTar: 5000,
+      margemInformada: 44.20,
+    });
   });
 
   it('500 quando o model lança erro ao salvar', async () => {
@@ -537,6 +745,34 @@ describe('GET /api/margens/relatorio', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
+  });
+
+  it('200 — "margemInformada"/"franquia" não aparece na resposta do relatório nem afeta o cálculo (é só auditoria do lançamento diário, ver CONTRATO-MARGENS-API.md v5)', async () => {
+    margensModel.getSomasPorLojaNoPeriodo.mockResolvedValue([
+      {
+        loja_id: 1, loja_nome: 'Loja Teste', rede_id: 5, rede_nome: 'Delta',
+        responsavel_id: null, responsavel_nome: null,
+        diretor_id: 1, diretor_nome: 'Victor Hugo',
+        faturamento: 1000, custoProduto: 400, totalTar: 100,
+        // campos a mais que o SELECT real do relatório nunca traz hoje — simula o
+        // pior caso (alguém adicionar SUM(franquia) no futuro) pra garantir que,
+        // mesmo vindo do model, isso não vaza nem entra em nenhum cálculo aqui.
+        margemInformada: 999, franquia: 999,
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/margens/relatorio?dataInicio=2026-07-01&dataFim=2026-07-28')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    const loja = res.body[0].lojas[0];
+    expect(loja).not.toHaveProperty('margemInformada');
+    expect(loja).not.toHaveProperty('franquia');
+    // lucro/percentualMargem/cor continuam vindo só de faturamento/custoProduto/totalTar
+    expect(loja.lucro).toBe(500);
+    expect(loja.percentualMargem).toBe(50);
+    expect(loja.cor).toBe('verde');
   });
 
   it('500 quando o model lança erro', async () => {
