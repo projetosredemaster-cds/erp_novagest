@@ -5,7 +5,7 @@ export default function AppShell() {
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <Sidebar />
-      <main className="ml-56 min-h-screen">
+      <main className="min-h-screen lg:ml-56">
         <Outlet />
       </main>
     </div>

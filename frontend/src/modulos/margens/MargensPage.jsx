@@ -210,9 +210,9 @@ const COR_PDF = {
 
 // classes reaproveitadas (mesma filosofia de RankingPage.jsx — ainda não há util
 // compartilhado, ver CLAUDE.md)
-const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed";
-const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed";
-const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-5 pt-5 pb-[22px]";
+const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-2.5 sm:py-1.5 min-h-11 sm:min-h-0 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed";
+const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-2.5 sm:py-1.5 min-h-11 sm:min-h-0 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed";
+const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-4 sm:px-5 pt-4 sm:pt-5 pb-4 sm:pb-[22px]";
 const input = "bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] px-3 py-2 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed";
 
 export default function MargensPage() {
@@ -229,18 +229,18 @@ export default function MargensPage() {
   }
 
   return (
-    <div className="bg-[var(--bg)] text-[var(--text)] font-['Inter',sans-serif] antialiased p-6 min-h-screen">
+    <div className="bg-[var(--bg)] text-[var(--text)] font-['Inter',sans-serif] antialiased p-3 sm:p-4 lg:p-6 min-h-screen">
       <div className="max-w-[1180px] mx-auto">
-        <div className="flex justify-between items-end flex-wrap gap-4 border-b border-[var(--border)] pb-[18px] mb-[22px]">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end flex-wrap gap-4 border-b border-[var(--border)] pb-[18px] mb-[22px]">
           <div>
             <div className="text-[11px] tracking-[.14em] uppercase text-[var(--teal)] font-semibold">Painel de Margens · Lucro</div>
-            <h1 className="font-display text-[34px] font-extrabold mt-0.5 leading-none">
+            <h1 className="font-display text-[26px] sm:text-[30px] lg:text-[34px] font-extrabold mt-0.5 leading-none">
               {currentView === 'lancamento' ? 'Lançamento' : 'Relatório de período'}
             </h1>
           </div>
           <div className="flex gap-2.5 items-center">
             <button
-              className={btnGhost}
+              className={`${btnGhost} w-full sm:w-auto`}
               onClick={() => setCurrentView(v => (v === 'lancamento' ? 'relatorio' : 'lancamento'))}
             >
               {currentView === 'lancamento' ? '📊 Ver relatório de período' : '← Voltar ao lançamento'}
@@ -254,7 +254,7 @@ export default function MargensPage() {
       </div>
 
       <div
-        className={`fixed bottom-5 right-5 max-w-[360px] px-4 py-2 rounded-lg text-[13px] font-bold pointer-events-none transition-opacity duration-300 ${
+        className={`fixed bottom-3 left-3 right-3 sm:bottom-5 sm:left-auto sm:right-5 max-w-full sm:max-w-[360px] px-4 py-2 rounded-lg text-[13px] font-bold pointer-events-none transition-opacity duration-300 ${
           flashMsg ? 'opacity-100' : 'opacity-0'
         } ${
           flashMsg?.type === 'error'
@@ -337,16 +337,16 @@ function ResumoPeriodo() {
 
   return (
     <div className={card}>
-      <div className="flex items-end justify-between flex-wrap gap-3 mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
         <h2 className="font-display text-[20px] font-bold m-0">Resumo geral do período</h2>
-        <div className="flex gap-2.5 items-end flex-wrap">
-          <label className="flex flex-col gap-1">
+        <div className="flex flex-col sm:flex-row gap-2.5 sm:items-end flex-wrap">
+          <label className="flex flex-col gap-1 w-full sm:w-auto">
             <span className="text-[12px] text-[var(--muted)] font-semibold">Início</span>
-            <input type="date" value={dataInicio} onChange={e => handleInicioChange(e.target.value)} className={input} />
+            <input type="date" value={dataInicio} onChange={e => handleInicioChange(e.target.value)} className={`${input} w-full sm:w-auto`} />
           </label>
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 w-full sm:w-auto">
             <span className="text-[12px] text-[var(--muted)] font-semibold">Fim</span>
-            <input type="date" value={dataFim} onChange={e => handleFimChange(e.target.value)} className={input} />
+            <input type="date" value={dataFim} onChange={e => handleFimChange(e.target.value)} className={`${input} w-full sm:w-auto`} />
           </label>
         </div>
       </div>
@@ -354,7 +354,7 @@ function ResumoPeriodo() {
       {loading ? (
         <div className="text-[var(--muted)] text-sm px-1 py-6 text-center">Carregando resumo...</div>
       ) : error ? (
-        <div className="bg-[var(--danger-bg)] border border-[var(--danger)] text-[var(--danger)] rounded-xl px-5 py-4 text-sm flex items-center justify-between gap-4 flex-wrap">
+        <div className="bg-[var(--danger-bg)] border border-[var(--danger)] text-[var(--danger)] rounded-xl px-4 sm:px-5 py-4 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
           <span>Não foi possível carregar o resumo: {error}</span>
           <button className={btnGhost} onClick={handleRetry}>Tentar novamente</button>
         </div>
@@ -615,17 +615,17 @@ function FormularioLancamento({ flash }) {
           Valores únicos por dia, valem para todas as lojas — o que diferencia a margem de cada loja é o Total Tar.
         </p>
 
-        <div className="flex gap-2.5 items-end flex-wrap">
-          <label className="flex flex-col gap-1">
+        <div className="flex flex-col sm:flex-row gap-2.5 sm:items-end sm:flex-wrap">
+          <label className="flex flex-col gap-1 w-full sm:w-auto">
             <span className="text-[12px] text-[var(--muted)] font-semibold">Data</span>
             <input
               type="date"
               value={dataLancamento}
               onChange={e => handleDataLancamentoChange(e.target.value)}
-              className={input}
+              className={`${input} w-full sm:w-auto`}
             />
           </label>
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 w-full sm:w-auto">
             <span className="text-[12px] text-[var(--muted)] font-semibold">Faturamento</span>
             <input
               type="text" inputMode="decimal" placeholder="0,00"
@@ -638,10 +638,10 @@ function FormularioLancamento({ flash }) {
                 moveCaretToEnd(e.target);
               }}
               onPaste={e => { e.preventDefault(); setConsolidadoCampo('faturamento', parseValorBR(e.clipboardData.getData('text'))); moveCaretToEnd(e.target); }}
-              className="font-display w-[160px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-sm text-right font-semibold focus:outline-none focus:border-[var(--teal)]"
+              className="font-display w-full sm:w-[160px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-sm text-right font-semibold focus:outline-none focus:border-[var(--teal)]"
             />
           </label>
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 w-full sm:w-auto">
             <span className="text-[12px] text-[var(--muted)] font-semibold">Custo geral de produtos</span>
             <input
               type="text" inputMode="decimal" placeholder="0,00"
@@ -654,7 +654,7 @@ function FormularioLancamento({ flash }) {
                 moveCaretToEnd(e.target);
               }}
               onPaste={e => { e.preventDefault(); setConsolidadoCampo('custoProduto', parseValorBR(e.clipboardData.getData('text'))); moveCaretToEnd(e.target); }}
-              className="font-display w-[160px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-sm text-right font-semibold focus:outline-none focus:border-[var(--teal)]"
+              className="font-display w-full sm:w-[160px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-sm text-right font-semibold focus:outline-none focus:border-[var(--teal)]"
             />
           </label>
         </div>
@@ -664,13 +664,13 @@ function FormularioLancamento({ flash }) {
         <h2 className="font-display text-[20px] font-bold m-0 mb-4">Lançamento por loja</h2>
 
         <div className="mb-5">
-          <label className="flex flex-col gap-1 max-w-xs">
+          <label className="flex flex-col gap-1 w-full sm:max-w-xs">
             <span className="text-[12px] text-[var(--muted)] font-semibold">Rede</span>
             <select
               value={redeSelecionadaId}
               onChange={e => setRedeSelecionadaId(e.target.value)}
               disabled={loadingArvore || !!errorArvore}
-              className={`${input} min-w-[220px]`}
+              className={`${input} w-full sm:min-w-[220px]`}
             >
               <option value="">Selecione a rede...</option>
               {diretores.map(diretor => (
@@ -687,12 +687,12 @@ function FormularioLancamento({ flash }) {
         {loadingArvore || loadingEntradas ? (
           <div className="text-[var(--muted)] text-sm px-1 py-10 text-center">Carregando...</div>
         ) : errorArvore ? (
-          <div className="bg-[var(--danger-bg)] border border-[var(--danger)] text-[var(--danger)] rounded-xl px-5 py-4 text-sm flex items-center justify-between gap-4 flex-wrap">
+          <div className="bg-[var(--danger-bg)] border border-[var(--danger)] text-[var(--danger)] rounded-xl px-4 sm:px-5 py-4 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
             <span>Não foi possível carregar diretores/redes: {errorArvore}</span>
             <button className={btnGhost} onClick={handleRetryArvore}>Tentar novamente</button>
           </div>
         ) : errorEntradas ? (
-          <div className="bg-[var(--danger-bg)] border border-[var(--danger)] text-[var(--danger)] rounded-xl px-5 py-4 text-sm flex items-center justify-between gap-4 flex-wrap">
+          <div className="bg-[var(--danger-bg)] border border-[var(--danger)] text-[var(--danger)] rounded-xl px-4 sm:px-5 py-4 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
             <span>Não foi possível carregar os lançamentos do dia: {errorEntradas}</span>
             <button className={btnGhost} onClick={handleRetryEntradas}>Tentar novamente</button>
           </div>
@@ -724,11 +724,11 @@ function FormularioLancamento({ flash }) {
               const preenchido = valorMargemDigitada(loja.id) !== '' || valorTar(loja.id) !== '';
 
               return (
-                <div key={loja.id} className="bg-[var(--panel-alt)] border border-[var(--border)] rounded-[9px] px-3 py-2.5 flex items-center gap-3 flex-wrap">
-                  <div className="flex-1 min-w-[120px] text-[14px] font-semibold">{loja.nome}</div>
+                <div key={loja.id} className="bg-[var(--panel-alt)] border border-[var(--border)] rounded-[9px] px-3 py-2.5 flex flex-col sm:flex-row sm:items-center gap-3 sm:flex-wrap">
+                  <div className="flex-1 min-w-0 sm:min-w-[120px] text-[14px] font-semibold">{loja.nome}</div>
 
                   {!bloqueado ? (
-                    <label className="flex flex-col gap-1">
+                    <label className="flex flex-col gap-1 w-full sm:w-auto">
                       <span className="text-[11px] text-[var(--muted)] font-semibold uppercase tracking-[.04em]">Margem (%)</span>
                       <input
                         type="text" inputMode="decimal" placeholder="0,00"
@@ -741,13 +741,13 @@ function FormularioLancamento({ flash }) {
                           moveCaretToEnd(e.target);
                         }}
                         onPaste={e => { e.preventDefault(); setMargemDigitada(loja.id, parseValorBR(e.clipboardData.getData('text'))); moveCaretToEnd(e.target); }}
-                        className="font-display w-[110px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-sm text-right font-semibold focus:outline-none focus:border-[var(--teal)]"
+                        className="font-display w-full sm:w-[110px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-sm text-right font-semibold focus:outline-none focus:border-[var(--teal)]"
                       />
                     </label>
                   ) : null}
 
                   {bloqueado || tarRevelado ? (
-                    <label className="flex flex-col gap-1">
+                    <label className="flex flex-col gap-1 w-full sm:w-auto">
                       <span className="text-[11px] text-[var(--muted)] font-semibold uppercase tracking-[.04em]">Total Tar</span>
                       <input
                         type="text" inputMode="decimal" placeholder="0,00"
@@ -761,23 +761,23 @@ function FormularioLancamento({ flash }) {
                           moveCaretToEnd(e.target);
                         }}
                         onPaste={e => { e.preventDefault(); setTar(loja.id, parseValorBR(e.clipboardData.getData('text'))); moveCaretToEnd(e.target); }}
-                        className="font-display w-[130px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-sm text-right font-semibold focus:outline-none focus:border-[var(--teal)] disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="font-display w-full sm:w-[130px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-sm text-right font-semibold focus:outline-none focus:border-[var(--teal)] disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                     </label>
                   ) : null}
 
                   {bloqueado && salvo?.margemInformada != null ? (
-                    <span className="text-[12px] text-[var(--muted)] font-semibold">
+                    <span className="text-[12px] text-[var(--muted)] font-semibold break-words">
                       Margem informada: {formatPercentualBR(salvo.margemInformada)}
                     </span>
                   ) : null}
 
-                  <div className="flex flex-col gap-1 w-[90px]">
+                  <div className="flex flex-col gap-1 w-full sm:w-[90px]">
                     <span className="text-[11px] text-[var(--muted)] font-semibold uppercase tracking-[.04em]">Margem</span>
                     {percentual === null ? (
                       <span className="text-[13px] text-[var(--muted)]">—</span>
                     ) : (
-                      <span className={`text-[12px] font-bold px-2 py-0.5 rounded-full border text-center ${COR_BADGE[cor]}`}>
+                      <span className={`inline-block text-[12px] font-bold px-2 py-0.5 rounded-full border text-center ${COR_BADGE[cor]}`}>
                         {formatPercentualBR(percentual)}
                       </span>
                     )}
@@ -786,7 +786,7 @@ function FormularioLancamento({ flash }) {
                   {!bloqueado ? (
                     <button
                       type="button"
-                      className={`${btnGhost} !px-2.5 !py-1 !text-[11px]`}
+                      className={`${btnGhost} w-full sm:w-auto !px-2.5 !py-1 !text-[11px]`}
                       onClick={() => toggleModoLoja(loja.id)}
                     >
                       {tarRevelado ? 'Ocultar Total Tar' : 'Calcular pelo Total Tar'}
@@ -794,15 +794,15 @@ function FormularioLancamento({ flash }) {
                   ) : null}
 
                   {bloqueado ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-[var(--teal)]/15 text-[var(--teal)] border-[var(--teal)]/40">
                         ✓ Confirmado
                       </span>
-                      <button className={btnGhost} onClick={() => handleEditarLoja(loja.id)}>Editar</button>
+                      <button className={`${btnGhost} w-full sm:w-auto`} onClick={() => handleEditarLoja(loja.id)}>Editar</button>
                     </div>
                   ) : (
                     <button
-                      className={btn}
+                      className={`${btn} w-full sm:w-auto`}
                       onClick={() => handleConfirmarLoja(loja.id)}
                       disabled={salvando || !preenchido}
                     >
@@ -936,48 +936,48 @@ function RelatorioView() {
 
   return (
     <div>
-      <div className="flex gap-2.5 items-end mb-4 flex-wrap">
-        <label className="flex flex-col gap-1">
+      <div className="flex flex-col sm:flex-row gap-2.5 sm:items-end mb-4 sm:flex-wrap">
+        <label className="flex flex-col gap-1 w-full sm:w-auto">
           <span className="text-[13px] text-[var(--muted)] font-semibold">Início</span>
-          <input type="date" value={dataInicio} onChange={e => setDataInicio(e.target.value)} className={input} />
+          <input type="date" value={dataInicio} onChange={e => setDataInicio(e.target.value)} className={`${input} w-full sm:w-auto`} />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1 w-full sm:w-auto">
           <span className="text-[13px] text-[var(--muted)] font-semibold">Fim</span>
-          <input type="date" value={dataFim} onChange={e => setDataFim(e.target.value)} className={input} />
+          <input type="date" value={dataFim} onChange={e => setDataFim(e.target.value)} className={`${input} w-full sm:w-auto`} />
         </label>
-        <button className={btn} onClick={handleGerar} disabled={loading}>
+        <button className={`${btn} w-full sm:w-auto`} onClick={handleGerar} disabled={loading}>
           {loading ? 'Gerando...' : 'Gerar relatório'}
         </button>
-        <button className={btnGhost} onClick={handleBaixarPdf} disabled={!linhasFiltradas.length}>
+        <button className={`${btnGhost} w-full sm:w-auto`} onClick={handleBaixarPdf} disabled={!linhasFiltradas.length}>
           Baixar PDF
         </button>
       </div>
 
-      <div className="flex gap-2.5 items-end mb-5 flex-wrap">
-        <label className="flex flex-col gap-1">
+      <div className="flex flex-col sm:flex-row gap-2.5 sm:items-end mb-5 sm:flex-wrap">
+        <label className="flex flex-col gap-1 w-full sm:w-auto">
           <span className="text-[13px] text-[var(--muted)] font-semibold">Rede</span>
-          <select value={redeFiltro} onChange={e => setRedeFiltro(e.target.value)} className={`${input} min-w-[160px]`}>
+          <select value={redeFiltro} onChange={e => setRedeFiltro(e.target.value)} className={`${input} w-full sm:w-auto sm:min-w-[160px]`}>
             <option value="">Todas</option>
             {redesDisponiveis.map(r => (
               <option key={r.id} value={r.id}>{r.nome}</option>
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1 w-full sm:w-auto">
           <span className="text-[13px] text-[var(--muted)] font-semibold">Cor</span>
-          <select value={corFiltro} onChange={e => setCorFiltro(e.target.value)} className={`${input} min-w-[140px]`}>
+          <select value={corFiltro} onChange={e => setCorFiltro(e.target.value)} className={`${input} w-full sm:w-auto sm:min-w-[140px]`}>
             <option value="">Todas</option>
             <option value="verde">Verde</option>
             <option value="amarelo">Amarelo</option>
             <option value="vermelho">Vermelho</option>
           </select>
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1 w-full sm:w-auto">
           <span className="text-[13px] text-[var(--muted)] font-semibold">Buscar loja</span>
           <input
             type="text" placeholder="Nome da loja..." value={buscaLoja}
             onChange={e => setBuscaLoja(e.target.value)}
-            className={`${input} min-w-[180px]`}
+            className={`${input} w-full sm:w-auto sm:min-w-[180px]`}
           />
         </label>
       </div>
@@ -985,7 +985,7 @@ function RelatorioView() {
       {loading ? (
         <div className="text-[var(--muted)] text-sm px-1 py-10 text-center">Gerando relatório...</div>
       ) : error ? (
-        <div className="bg-[var(--danger-bg)] border border-[var(--danger)] text-[var(--danger)] rounded-xl px-5 py-4 text-sm flex items-center justify-between gap-4 flex-wrap">
+        <div className="bg-[var(--danger-bg)] border border-[var(--danger)] text-[var(--danger)] rounded-xl px-4 sm:px-5 py-4 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
           <span>Não foi possível gerar o relatório: {error}</span>
           <button className={btnGhost} onClick={handleGerar}>Tentar novamente</button>
         </div>
@@ -1016,9 +1016,9 @@ function RelatorioView() {
                   </div>
                   <div className="flex flex-col gap-1.5">
                     {rede.lojas.map(loja => (
-                      <div key={loja.lojaId} className="flex items-center gap-3 px-3 py-2 rounded-[9px] bg-[var(--panel-alt)]">
+                      <div key={loja.lojaId} className="flex items-center flex-wrap gap-x-3 gap-y-1.5 px-3 py-2 rounded-[9px] bg-[var(--panel-alt)]">
                         <span className={`inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 ${COR_BOLINHA[loja.cor] || 'bg-[var(--muted)]'}`} />
-                        <span className="flex-1 text-[14px] font-semibold">{loja.lojaNome}</span>
+                        <span className="flex-1 min-w-[100px] text-[14px] font-semibold break-words">{loja.lojaNome}</span>
                         <span className="text-[13px] text-[var(--muted)]">Margem: {formatPercentualBR(loja.percentualMargem)}</span>
                         <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${COR_BADGE[loja.cor] || 'bg-[var(--panel-alt)] text-[var(--muted)] border-[var(--border)]'}`}>
                           {capitalizeCor(loja.cor)}

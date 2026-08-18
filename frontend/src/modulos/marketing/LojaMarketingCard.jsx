@@ -13,8 +13,8 @@ import {
   corCardPorFaturamentoGeral,
 } from './marketingFormat.js';
 
-const campoMonetario = "font-display w-full sm:w-[150px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-sm text-right font-semibold focus:outline-none focus:border-[var(--teal)] disabled:opacity-50 disabled:cursor-not-allowed";
-const campoSomenteLeitura = "font-display w-full sm:w-[150px] bg-[#12151b]/60 border border-dashed border-[var(--border)] text-[var(--muted)] px-2.5 py-1.5 rounded-lg text-sm text-right";
+const campoMonetario = "font-display w-full sm:w-[150px] bg-[#12151b] border border-[var(--border)] text-[var(--text)] px-2.5 py-1.5 rounded-lg text-sm text-right font-semibold focus:outline-none focus:border-[var(--teal)] disabled:opacity-50 disabled:cursor-not-allowed min-h-11 lg:min-h-0";
+const campoSomenteLeitura = "font-display w-full sm:w-[150px] bg-[#12151b]/60 border border-dashed border-[var(--border)] text-[var(--muted)] px-2.5 py-1.5 rounded-lg text-sm text-right min-h-11 lg:min-h-0 flex items-center justify-end";
 
 export default function LojaMarketingCard({
   loja,
@@ -74,7 +74,7 @@ export default function LojaMarketingCard({
         {salvando ? <span className="text-[11px] text-[var(--muted)] font-semibold">Salvando...</span> : null}
       </div>
 
-      <div className="flex items-end gap-3 flex-wrap">
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-end sm:flex-wrap">
         {aba === 'marketing' ? (
           <CampoFaturamento
             id={`${idBase}-geral`}

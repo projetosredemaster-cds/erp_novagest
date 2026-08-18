@@ -108,9 +108,9 @@ function rankRede(values, redes) {
   return withVal.map((r, i) => ({ ...r, pos: i, medal: i === 0 ? '🥇' : (i === 1 ? '🥈' : '🍍') }));
 }
 
-const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110";
-const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110";
-const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-5 pt-5 pb-[22px]";
+const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-2.5 min-h-11 lg:py-1.5 lg:min-h-0 text-[13px] font-bold cursor-pointer hover:brightness-110";
+const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-2.5 min-h-11 lg:py-1.5 lg:min-h-0 text-[13px] font-bold cursor-pointer hover:brightness-110";
+const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-3 pt-4 pb-4 sm:px-5 sm:pt-5 sm:pb-[22px]";
 
 export default function RankingPage() {
   const { isAdmin } = useAuth();
@@ -478,19 +478,19 @@ export default function RankingPage() {
   }
 
   return (
-    <div className="bg-[var(--bg)] text-[var(--text)] font-['Inter',sans-serif] antialiased p-6 min-h-screen">
+    <div className="bg-[var(--bg)] text-[var(--text)] font-['Inter',sans-serif] antialiased p-3 sm:p-6 min-h-screen">
       <div className="max-w-[1180px] mx-auto">
-        <div className="flex justify-between items-end flex-wrap gap-4 border-b border-[var(--border)] pb-[18px] mb-[22px]">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end flex-wrap gap-4 border-b border-[var(--border)] pb-[18px] mb-[22px]">
           <div>
             <div className="text-[11px] tracking-[.14em] uppercase text-[var(--teal)] font-semibold">Painel de Ranking · Vendas</div>
-            <h1 className="font-display text-[34px] font-extrabold mt-0.5 leading-none">Placar do dia</h1>
+            <h1 className="font-display text-[26px] sm:text-[34px] font-extrabold mt-0.5 leading-none">Placar do dia</h1>
           </div>
-          <div className="flex gap-2.5 items-center">
+          <div className="flex gap-2.5 items-center w-full sm:w-auto">
             <input
               type="date"
               value={currentDate}
               onChange={e => setCurrentDate(e.target.value)}
-              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] px-3 py-2 rounded-lg text-sm"
+              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] px-3 py-2 rounded-lg text-sm w-full sm:w-auto min-h-11 lg:min-h-0"
             />
           </div>
         </div>
@@ -542,7 +542,7 @@ export default function RankingPage() {
       </div>
 
       <div
-        className={`fixed bottom-5 right-5 max-w-[360px] px-4 py-2 rounded-lg text-[13px] font-bold pointer-events-none transition-opacity duration-300 ${
+        className={`fixed bottom-5 right-5 max-w-[calc(100vw-2.5rem)] sm:max-w-[360px] px-4 py-2 rounded-lg text-[13px] font-bold pointer-events-none transition-opacity duration-300 ${
           flashMsg ? 'opacity-100' : 'opacity-0'
         } ${
           flashMsg?.type === 'error'
@@ -564,7 +564,7 @@ function ReportView({ config, categoriasVisiveis, cat, values, setValue, onBlurS
           <div
             key={c.id}
             onClick={() => setCurrentCatId(c.id)}
-            className={`px-[18px] py-2 rounded-full text-[13px] font-semibold cursor-pointer transition-[.15s] border ${
+            className={`px-[18px] py-3 lg:py-2 min-h-11 lg:min-h-0 flex items-center rounded-full text-[13px] font-semibold cursor-pointer transition-[.15s] border ${
               c.id === cat.id
                 ? 'bg-[var(--teal)] text-[#0b1010] border-[var(--teal)]'
                 : 'bg-[var(--panel)] border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] hover:border-[#3a4150]'
@@ -576,28 +576,28 @@ function ReportView({ config, categoriasVisiveis, cat, values, setValue, onBlurS
         <div
           onClick={() => addCategoria()}
           title="Nova categoria"
-          className="bg-transparent border border-dashed border-[var(--border)] text-[var(--muted)] w-[34px] h-[34px] rounded-full cursor-pointer text-base leading-none flex items-center justify-center hover:text-[var(--text)] hover:border-[var(--teal)]"
+          className="bg-transparent border border-dashed border-[var(--border)] text-[var(--muted)] w-11 h-11 lg:w-[34px] lg:h-[34px] rounded-full cursor-pointer text-base leading-none flex items-center justify-center hover:text-[var(--text)] hover:border-[var(--teal)]"
         >
           +
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-[18px]">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-[18px]">
         {config.diretores.map(diretor => {
           const redesRankeaveis = diretor.redes.filter(r => r.ativo !== false && r.visivel !== false);
           const ranked = rankRede(values, redesRankeaveis);
           const total = ranked.reduce((s, r) => s + r.valor, 0);
           return (
             <div className={card} key={diretor.id}>
-              <div className="flex justify-between items-baseline mb-3.5">
-                <h2 className="font-display text-[22px] font-bold m-0">{diretor.nome}</h2>
-                <div className="text-xl font-bold text-[var(--teal)] bg-[var(--teal)]/10 px-3.5 py-1 rounded-lg">{toBRL(total)}</div>
+              <div className="flex flex-wrap justify-between items-baseline gap-2 mb-3.5">
+                <h2 className="font-display text-[19px] sm:text-[22px] font-bold m-0">{diretor.nome}</h2>
+                <div className="text-lg sm:text-xl font-bold text-[var(--teal)] bg-[var(--teal)]/10 px-3.5 py-1 rounded-lg">{toBRL(total)}</div>
               </div>
               {ranked.length
                 ? ranked.map(r => (
                   <div
                     key={r.id}
-                    className={`flex items-center gap-3 px-2.5 py-2.5 rounded-[9px] mb-1.5 ${
+                    className={`flex flex-wrap lg:flex-nowrap items-center gap-2 lg:gap-3 px-2.5 py-2.5 rounded-[9px] mb-1.5 ${
                       r.pos === 0
                         ? 'bg-gradient-to-r from-[var(--gold)]/[.16] to-[var(--gold)]/[.03]'
                         : r.pos === 1
@@ -608,7 +608,7 @@ function ReportView({ config, categoriasVisiveis, cat, values, setValue, onBlurS
                     <div className={`font-display w-[30px] text-center text-xl font-bold flex-shrink-0 ${r.pos === 0 ? 'text-[var(--gold)]' : r.pos === 1 ? 'text-[var(--silver)]' : 'text-[var(--muted)]'}`}>{r.pos + 1}</div>
                     <div className="text-base w-[22px] text-center flex-shrink-0">{r.medal}</div>
                     <div className="text-base w-5 text-center flex-shrink-0">{r.emoji || ''}</div>
-                    <div className="flex-1 text-[14.5px] font-semibold">{r.nome}</div>
+                    <div className="flex-1 min-w-[110px] lg:min-w-0 text-[14.5px] font-semibold">{r.nome}</div>
                     <input
                       type="text" inputMode="decimal" value={formatarDigitosBR(valorParaDigitos(values[r.id]))} placeholder="0,00"
                       onChange={e => {
@@ -632,7 +632,7 @@ function ReportView({ config, categoriasVisiveis, cat, values, setValue, onBlurS
                     />
                     {isAdmin ? (
                       <button
-                        className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-2.5 py-1.5 text-[12px] font-bold cursor-pointer hover:brightness-110 flex-shrink-0"
+                        className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-2.5 py-2.5 lg:py-1.5 min-h-11 lg:min-h-0 text-[12px] font-bold cursor-pointer hover:brightness-110 flex-shrink-0"
                         onClick={() => toggleRedeVisivel(r.id, false)}
                       >
                         Ocultar
@@ -652,7 +652,7 @@ function ReportView({ config, categoriasVisiveis, cat, values, setValue, onBlurS
         <div className="text-[11px] tracking-[.08em] uppercase text-[var(--muted)] font-semibold mb-2">
           Gera o texto com todas as categorias já preenchidas em {formatDatePt(currentDate)} — pronto pra colar no WhatsApp
         </div>
-        <div className="flex gap-2.5 my-3.5 items-center">
+        <div className="flex flex-wrap gap-2.5 my-3.5 items-center">
           <button className={btn} onClick={handleGenReport}>Gerar relatório do dia</button>
           <button className={btnGhost} onClick={handleExportExcel}>Baixar Excel</button>
           <button className={btnGhost} onClick={handleCopyReport}>Copiar</button>
@@ -664,7 +664,7 @@ function ReportView({ config, categoriasVisiveis, cat, values, setValue, onBlurS
         <textarea
           id="reportOut" readOnly value={reportText}
           placeholder='Clique em "Gerar relatório do dia" para montar o texto...'
-          className="w-full min-h-[420px] bg-[#0b0d11] border border-[var(--border)] text-[var(--text)] rounded-[10px] p-4 font-mono text-[13.5px] leading-[1.55] resize-y"
+          className="w-full min-h-[260px] max-h-[60vh] overflow-y-auto lg:max-h-none lg:min-h-[420px] bg-[#0b0d11] border border-[var(--border)] text-[var(--text)] rounded-[10px] p-4 font-mono text-[13.5px] leading-[1.55] resize-y whitespace-pre-wrap break-words"
         />
       </div>
     </div>

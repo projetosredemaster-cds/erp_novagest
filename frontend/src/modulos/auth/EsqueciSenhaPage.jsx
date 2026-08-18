@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { esqueciSenha } from './authApi.js';
 
-const btn = "w-full bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-2.5 text-sm font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
+const btn = "flex h-11 w-full items-center justify-center bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 text-sm font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
 const input = "w-full bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:border-[var(--teal)]";
 
 export default function EsqueciSenhaPage() {
@@ -23,11 +23,11 @@ export default function EsqueciSenhaPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] p-6 text-[var(--text)]">
-      <div className="w-full max-w-[380px] rounded-2xl border border-[var(--border)] bg-[var(--panel)] px-7 py-8">
+    <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] p-4 sm:p-6 text-[var(--text)]">
+      <div className="w-full max-w-[380px] rounded-2xl border border-[var(--border)] bg-[var(--panel)] px-5 py-7 sm:px-7 sm:py-8">
         <div className="mb-6">
           <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--teal)]">ERP</div>
-          <h1 className="font-display mt-0.5 text-[28px] font-extrabold leading-none">Esqueci minha senha</h1>
+          <h1 className="font-display mt-0.5 text-2xl sm:text-[28px] font-extrabold leading-none">Esqueci minha senha</h1>
           <p className="mt-2 text-[13px] text-[var(--muted)]">
             Informe seu e-mail cadastrado para receber um link de recuperação.
           </p>

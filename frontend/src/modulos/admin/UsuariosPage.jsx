@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../app/AuthContext.jsx';
 import { listarUsuarios, criarUsuario, removerUsuario } from '../auth/authApi.js';
 
-const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
-const btnDanger = "bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3 py-1.5 text-[12.5px] font-bold cursor-pointer hover:brightness-110";
-const inputCls = "min-w-[200px] flex-1 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--teal)]";
-const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-5 pt-5 pb-[22px]";
+const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
+const btnDanger = "bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[12.5px] font-bold cursor-pointer hover:brightness-110";
+const inputCls = "w-full min-w-[200px] flex-1 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-3 sm:py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--teal)]";
+const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-4 pt-5 pb-[22px] sm:px-5";
 
 function formatData(iso) {
   if (!iso) return '—';
@@ -94,16 +94,16 @@ export default function UsuariosPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] p-6 font-['Inter',sans-serif] text-[var(--text)] antialiased">
+    <div className="min-h-screen bg-[var(--bg)] p-4 sm:p-6 font-['Inter',sans-serif] text-[var(--text)] antialiased">
       <div className="mx-auto max-w-[820px]">
         <div className="mb-[22px] border-b border-[var(--border)] pb-[18px]">
           <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--teal)]">Administração</div>
-          <h1 className="font-display mt-0.5 text-[34px] font-extrabold leading-none">Usuários</h1>
+          <h1 className="font-display mt-0.5 text-[26px] sm:text-[34px] font-extrabold leading-tight sm:leading-none">Usuários</h1>
         </div>
 
         <div className={`${card} mb-[18px]`}>
           <h2 className="font-display mb-3.5 text-[19px] font-bold">Novo usuário</h2>
-          <form onSubmit={handleCreate} noValidate className="flex flex-wrap items-start gap-2">
+          <form onSubmit={handleCreate} noValidate className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-start gap-3 sm:gap-2">
             <input
               type="email"
               placeholder="E-mail"
@@ -111,7 +111,7 @@ export default function UsuariosPage() {
               onChange={(e) => setNovoEmail(e.target.value)}
               className={inputCls}
             />
-            <div className="min-w-[200px] flex-1">
+            <div className="w-full sm:min-w-[200px] sm:flex-1">
               <input
                 type="password"
                 placeholder="Senha"
@@ -119,16 +119,16 @@ export default function UsuariosPage() {
                 onChange={(e) => setNovaSenha(e.target.value)}
                 className={inputCls}
               />
-              <p className="mt-1.5 text-[11.5px] text-[var(--muted)]">
+              <p className="mt-1.5 text-[11.5px] text-[var(--muted)] break-words">
                 Mínimo de 6 caracteres, com pelo menos 1 letra maiúscula, 1 número e 1 caractere especial.
               </p>
             </div>
-            <button type="submit" className={btn} disabled={creating}>
+            <button type="submit" className={`${btn} w-full sm:w-auto`} disabled={creating}>
               {creating ? 'Criando...' : 'Adicionar usuário'}
             </button>
           </form>
           {formError ? (
-            <div className="mt-3 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3.5 py-2.5 text-[13px] text-[var(--danger)]">
+            <div className="mt-3 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3.5 py-2.5 text-[13px] text-[var(--danger)] break-words">
               {formError}
             </div>
           ) : null}
@@ -140,49 +140,71 @@ export default function UsuariosPage() {
           {loading ? (
             <div className="px-1 py-6 text-center text-sm text-[var(--muted)]">Carregando...</div>
           ) : loadError ? (
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[var(--danger)] bg-[var(--danger-bg)] px-5 py-4 text-sm text-[var(--danger)]">
-              <span>Não foi possível carregar os usuários: {loadError}</span>
-              <button className={btn} onClick={loadUsuarios}>Tentar novamente</button>
+            <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-3 sm:gap-4 rounded-xl border border-[var(--danger)] bg-[var(--danger-bg)] px-5 py-4 text-sm text-[var(--danger)]">
+              <span className="break-words">Não foi possível carregar os usuários: {loadError}</span>
+              <button className={`${btn} w-full sm:w-auto`} onClick={loadUsuarios}>Tentar novamente</button>
             </div>
           ) : usuarios.length === 0 ? (
             <div className="px-1 py-6 text-center text-sm text-[var(--muted)]">Nenhum usuário cadastrado.</div>
           ) : (
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="text-left text-[11px] uppercase tracking-[.08em] text-[var(--muted)]">
-                  <th className="pb-2 font-semibold">E-mail</th>
-                  <th className="pb-2 font-semibold">Perfil</th>
-                  <th className="pb-2 font-semibold">Criado em</th>
-                  <th className="pb-2 text-right font-semibold">Ações</th>
-                </tr>
-              </thead>
-              <tbody>
+            <>
+              <div className="flex flex-col gap-3 sm:hidden">
                 {usuarios.map((u) => (
-                  <tr key={u.id} className="border-t border-[var(--border)]">
-                    <td className="py-2.5">{u.email}</td>
-                    <td className="py-2.5">
-                      <span
-                        className={`rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${
-                          u.isAdmin ? 'bg-[var(--teal)]/15 text-[var(--teal)]' : 'bg-[var(--panel-alt)] text-[var(--muted)]'
-                        }`}
-                      >
-                        {u.isAdmin ? 'Admin' : 'Usuário comum'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 text-[var(--muted)]">{formatData(u.criado_em)}</td>
-                    <td className="py-2.5 text-right">
-                      <button className={btnDanger} onClick={() => handleRemove(u)}>Remover</button>
-                    </td>
-                  </tr>
+                  <div
+                    key={u.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel-alt)] px-4 py-3"
+                  >
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                      <span className="truncate text-sm font-medium text-[var(--text)]">{u.email}</span>
+                      {u.isAdmin ? (
+                        <span className="w-fit rounded-full bg-[var(--teal)]/15 px-2.5 py-0.5 text-[11.5px] font-semibold text-[var(--teal)]">
+                          Admin
+                        </span>
+                      ) : null}
+                    </div>
+                    <button className={`${btnDanger} shrink-0`} onClick={() => handleRemove(u)}>Remover</button>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+              <div className="hidden overflow-x-auto sm:block">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="text-left text-[11px] uppercase tracking-[.08em] text-[var(--muted)]">
+                      <th className="pb-2 font-semibold">E-mail</th>
+                      <th className="pb-2 font-semibold">Perfil</th>
+                      <th className="pb-2 font-semibold">Criado em</th>
+                      <th className="pb-2 text-right font-semibold">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usuarios.map((u) => (
+                      <tr key={u.id} className="border-t border-[var(--border)]">
+                        <td className="py-2.5">{u.email}</td>
+                        <td className="py-2.5">
+                          <span
+                            className={`rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${
+                              u.isAdmin ? 'bg-[var(--teal)]/15 text-[var(--teal)]' : 'bg-[var(--panel-alt)] text-[var(--muted)]'
+                            }`}
+                          >
+                            {u.isAdmin ? 'Admin' : 'Usuário comum'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-[var(--muted)]">{formatData(u.criado_em)}</td>
+                        <td className="py-2.5 text-right">
+                          <button className={btnDanger} onClick={() => handleRemove(u)}>Remover</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       </div>
 
       <div
-        className={`fixed bottom-5 right-5 max-w-[360px] rounded-lg px-4 py-2 text-[13px] font-bold pointer-events-none transition-opacity duration-300 ${
+        className={`fixed bottom-5 left-4 right-4 sm:left-auto sm:right-5 max-w-[360px] rounded-lg px-4 py-2 text-[13px] font-bold pointer-events-none transition-opacity duration-300 ${
           flashMsg ? 'opacity-100' : 'opacity-0'
         } ${
           flashMsg?.type === 'error'

@@ -104,7 +104,7 @@ function EstadoCarregamento({ loading, error, onRetry }) {
     return (
       <div className="bg-[var(--danger-bg)] border border-[var(--danger)] text-[var(--danger)] rounded-xl px-5 py-4 text-sm flex items-center justify-between gap-4 flex-wrap">
         <span>Não foi possível carregar o relatório de marketing: {error}</span>
-        <button className={btnGhost} onClick={onRetry}>Tentar novamente</button>
+        <button className={`${btnGhost} min-h-11 lg:min-h-0`} onClick={onRetry}>Tentar novamente</button>
       </div>
     );
   }
@@ -239,29 +239,29 @@ export default function RelatorioMarketing({ diretorId, diretores }) {
         A cor compara sempre com o mês imediatamente anterior na MESMA linha (verde = subiu, laranja = caiu).
       </p>
 
-      <div className="flex gap-3 flex-wrap items-end mb-4">
-        <label className="flex flex-col gap-1">
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-end sm:flex-wrap mb-4">
+        <label className="flex flex-col gap-1 w-full sm:w-auto">
           <span className="text-[12px] text-[var(--muted)] font-semibold" id="relatorio-marketing-inicio-label">Mês inicial</span>
           <input
             type="month"
             aria-labelledby="relatorio-marketing-inicio-label"
             value={mesInicio}
             onChange={e => handleMesInicioChange(e.target.value)}
-            className={input}
+            className={`${input} w-full sm:w-auto min-h-11 lg:min-h-0`}
           />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1 w-full sm:w-auto">
           <span className="text-[12px] text-[var(--muted)] font-semibold" id="relatorio-marketing-fim-label">Mês final</span>
           <input
             type="month"
             aria-labelledby="relatorio-marketing-fim-label"
             value={mesFim}
             onChange={e => handleMesFimChange(e.target.value)}
-            className={input}
+            className={`${input} w-full sm:w-auto min-h-11 lg:min-h-0`}
           />
         </label>
         {}
-        <button type="button" className={btnGhost} onClick={handleBaixarPdf} disabled={!temDadosParaExportar}>
+        <button type="button" className={`${btnGhost} w-full sm:w-auto min-h-11 lg:min-h-0`} onClick={handleBaixarPdf} disabled={!temDadosParaExportar}>
           Baixar PDF
         </button>
       </div>
@@ -285,13 +285,13 @@ export default function RelatorioMarketing({ diretorId, diretores }) {
                 <table className="w-full border-collapse text-[13px]">
                   <thead>
                     <tr className="border-b border-[var(--border)]">
-                      <th className="px-2 py-1.5 text-left text-[11px] text-[var(--muted)] font-semibold uppercase tracking-[.04em]">
+                      <th className="sticky left-0 z-20 bg-[var(--panel)] min-w-[110px] px-2 py-1.5 text-left text-[11px] text-[var(--muted)] font-semibold uppercase tracking-[.04em] whitespace-nowrap">
                         Loja
                       </th>
                       {periodosVisiveis.map(p => (
                         <th
                           key={chavePeriodo(p)}
-                          className="px-2 py-1.5 text-right text-[11px] text-[var(--muted)] font-semibold uppercase tracking-[.04em]"
+                          className="px-2 py-1.5 text-right text-[11px] text-[var(--muted)] font-semibold uppercase tracking-[.04em] whitespace-nowrap"
                         >
                           {labelMes(p)}
                         </th>
@@ -319,13 +319,13 @@ export default function RelatorioMarketing({ diretorId, diretores }) {
                           <>
                             {rede.lojas.map(loja => (
                               <tr key={loja.id} className="border-t border-[var(--border)]">
-                                <td className="px-2 py-1.5 text-left">{loja.nome}</td>
+                                <td className="sticky left-0 z-10 bg-[var(--panel)] min-w-[110px] px-2 py-1.5 text-left whitespace-nowrap">{loja.nome}</td>
                                 {periodosVisiveis.map((periodo, i) => {
                                   const atual = indicesPorPeriodo[i + 1]?.get(loja.id)?.percentualMarketing ?? null;
                                   const anterior = indicesPorPeriodo[i]?.get(loja.id)?.percentualMarketing ?? null;
                                   const { texto, classe } = calcularCelula(atual, anterior);
                                   return (
-                                    <td key={chavePeriodo(periodo)} className={`px-2 py-1.5 text-right font-semibold ${classe}`}>
+                                    <td key={chavePeriodo(periodo)} className={`px-2 py-1.5 text-right font-semibold whitespace-nowrap ${classe}`}>
                                       {texto}
                                     </td>
                                   );
@@ -361,6 +361,7 @@ export default function RelatorioMarketing({ diretorId, diretores }) {
 }
 
 function LinhaTotal({ label, lojas, periodosVisiveis, indicesPorPeriodo, destaque = false }) {
+  const bgSticky = destaque ? 'bg-[var(--panel)]' : 'bg-[var(--panel-alt)]';
   return (
     <tr
       className={
@@ -369,7 +370,7 @@ function LinhaTotal({ label, lojas, periodosVisiveis, indicesPorPeriodo, destaqu
           : 'border-t border-[var(--border)] font-semibold bg-[var(--panel-alt)]'
       }
     >
-      <td className="px-2 py-1.5 text-left text-[12px] uppercase tracking-[.03em] text-[var(--muted)]">
+      <td className={`sticky left-0 z-10 ${bgSticky} min-w-[110px] px-2 py-1.5 text-left text-[12px] uppercase tracking-[.03em] text-[var(--muted)] whitespace-nowrap`}>
         {label}
       </td>
       {periodosVisiveis.map((periodo, i) => {
@@ -385,7 +386,7 @@ function LinhaTotal({ label, lojas, periodosVisiveis, indicesPorPeriodo, destaqu
         );
         const { texto, classe } = calcularCelula(percentualAtual, percentualAnterior);
         return (
-          <td key={chavePeriodo(periodo)} className={`px-2 py-1.5 text-right ${classe}`}>
+          <td key={chavePeriodo(periodo)} className={`px-2 py-1.5 text-right whitespace-nowrap ${classe}`}>
             {texto}
           </td>
         );

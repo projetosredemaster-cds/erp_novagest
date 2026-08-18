@@ -31,7 +31,7 @@ export default function TotalGeralRow({ lojasAtual, lojasAnteriores, aba, labelP
         Total geral do diretor
       </div>
 
-      <div className="flex items-end gap-6 flex-wrap">
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-end sm:gap-6 sm:flex-wrap">
         <TotalCampo label="Total Fat. Geral" valor={formatMoedaBR(totalGeralAtual)} />
         <TotalCampo
           label={aba === 'marketing' ? 'Total Fat. Marketing' : 'Total Fat. Retorno/Indicação'}

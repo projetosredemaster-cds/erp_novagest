@@ -79,7 +79,7 @@ function EstadoCarregamento({ loading, error, onRetry }) {
     return (
       <div className="bg-[var(--danger-bg)] border border-[var(--danger)] text-[var(--danger)] rounded-xl px-5 py-4 text-sm flex items-center justify-between gap-4 flex-wrap">
         <span>Não foi possível carregar as entradas de marketing: {error}</span>
-        <button className={btnGhost} onClick={onRetry}>Tentar novamente</button>
+        <button className={`${btnGhost} min-h-11 lg:min-h-0`} onClick={onRetry}>Tentar novamente</button>
       </div>
     );
   }
@@ -259,22 +259,22 @@ export default function MarketingPage() {
   );
 
   return (
-    <div className="bg-[var(--bg)] text-[var(--text)] font-['Inter',sans-serif] antialiased p-6 min-h-screen">
+    <div className="bg-[var(--bg)] text-[var(--text)] font-['Inter',sans-serif] antialiased p-4 sm:p-6 min-h-screen">
       <div className="max-w-[1180px] mx-auto">
-        <div className="flex justify-between items-end flex-wrap gap-4 border-b border-[var(--border)] pb-[18px] mb-[22px]">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 border-b border-[var(--border)] pb-[18px] mb-[22px]">
           <div>
             <div className="text-[11px] tracking-[.14em] uppercase text-[var(--teal)] font-semibold">Painel de Marketing</div>
-            <h1 className="font-display text-[34px] font-extrabold mt-0.5 leading-none">Lançamento mensal</h1>
+            <h1 className="font-display text-[28px] sm:text-[34px] font-extrabold mt-0.5 leading-none">Lançamento mensal</h1>
           </div>
-          <div className="flex gap-3 flex-wrap items-end">
-            <label className="flex flex-col gap-1">
+          <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-end sm:flex-wrap w-full sm:w-auto">
+            <label className="flex flex-col gap-1 w-full sm:w-auto">
               <span className="text-[12px] text-[var(--muted)] font-semibold" id="marketing-diretor-label">Diretor</span>
               <select
                 aria-labelledby="marketing-diretor-label"
                 value={diretorIdEfetivo}
                 onChange={e => setDiretorId(e.target.value === '' ? '' : Number(e.target.value))}
                 disabled={view === 'lancamento' && (loading || !!error || aba === 'resumo')}
-                className={`${input} min-w-[180px]`}
+                className={`${input} w-full sm:w-auto sm:min-w-[180px] min-h-11 lg:min-h-0`}
               >
                 <option value="">Selecione...</option>
                 {diretores.map(d => (
@@ -288,20 +288,20 @@ export default function MarketingPage() {
             </label>
             {}
             {view === 'lancamento' ? (
-              <label className="flex flex-col gap-1">
+              <label className="flex flex-col gap-1 w-full sm:w-auto">
                 <span className="text-[12px] text-[var(--muted)] font-semibold" id="marketing-mes-label">Mês/Ano</span>
                 <input
                   type="month"
                   aria-labelledby="marketing-mes-label"
                   value={mesAno}
                   onChange={e => handleMesAnoChange(e.target.value)}
-                  className={input}
+                  className={`${input} w-full sm:w-auto min-h-11 lg:min-h-0`}
                 />
               </label>
             ) : null}
             <button
               type="button"
-              className={btnGhost}
+              className={`${btnGhost} w-full sm:w-auto min-h-11 lg:min-h-0`}
               onClick={() => setView(v => (v === 'lancamento' ? 'relatorio' : 'lancamento'))}
             >
               {view === 'lancamento' ? '📊 Ver relatório de visão geral' : '← Voltar ao lançamento'}
@@ -313,7 +313,7 @@ export default function MarketingPage() {
           <RelatorioMarketing diretorId={diretorIdEfetivo} diretores={diretores} onDiretorChange={setDiretorId} />
         ) : (
         <>
-        <div role="tablist" aria-label="Tipo de indicador" className="flex gap-2 mb-4">
+        <div role="tablist" aria-label="Tipo de indicador" className="flex flex-wrap gap-2 mb-4">
           {ABAS.map(({ id, label }) => (
             <button
               key={id}
@@ -322,7 +322,7 @@ export default function MarketingPage() {
               id={`marketing-tab-${id}`}
               aria-selected={aba === id}
               aria-controls="marketing-tabpanel"
-              className={`${tabBase} ${aba === id ? tabAtiva : tabInativa}`}
+              className={`${tabBase} min-h-11 lg:min-h-0 ${aba === id ? tabAtiva : tabInativa}`}
               onClick={() => setAba(id)}
             >
               {label}
@@ -415,7 +415,7 @@ export default function MarketingPage() {
       </div>
 
       <div
-        className={`fixed bottom-5 right-5 max-w-[360px] px-4 py-2 rounded-lg text-[13px] font-bold pointer-events-none transition-opacity duration-300 ${
+        className={`fixed bottom-5 right-5 left-5 sm:left-auto max-w-none sm:max-w-[360px] px-4 py-2 rounded-lg text-[13px] font-bold pointer-events-none transition-opacity duration-300 ${
           flashMsg ? 'opacity-100' : 'opacity-0'
         } ${
           flashMsg?.type === 'error'

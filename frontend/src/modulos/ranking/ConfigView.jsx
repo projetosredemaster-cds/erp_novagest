@@ -4,9 +4,9 @@ import {
   fetchRedes, criarLoja, atualizarLoja,
 } from '../../lib/cadastrosApi.js';
 
-const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110";
-const toggleBtn = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-full px-2 py-0.5 text-[11px] font-bold cursor-pointer hover:brightness-110";
-const removeBtn = "bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-full w-[18px] h-[18px] text-[11px] cursor-pointer leading-none flex-shrink-0";
+const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-2.5 min-h-11 lg:py-1.5 lg:min-h-0 text-[13px] font-bold cursor-pointer hover:brightness-110";
+const toggleBtn = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-full px-3 py-2.5 min-h-11 lg:px-2 lg:py-0.5 lg:min-h-0 text-[13px] lg:text-[11px] font-bold cursor-pointer hover:brightness-110";
+const removeBtn = "bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-full w-11 h-11 lg:w-[18px] lg:h-[18px] text-[11px] cursor-pointer leading-none flex-shrink-0 inline-flex items-center justify-center";
 
 export default function ConfigView({
   config,
@@ -122,22 +122,22 @@ export default function ConfigView({
   return (
     <div>
       <div className="mb-[22px]">
-        <h3 className="font-display text-[19px] mb-3 font-bold">Diretores e redes</h3>
+        <h3 className="font-display text-[17px] sm:text-[19px] mb-3 font-bold">Diretores e redes</h3>
         {lojasError ? <div className="text-[var(--danger)] text-[13px] mb-2">Não foi possível carregar as lojas: {lojasError}</div> : null}
         {config.diretores.map(diretor => (
-          <div key={diretor.id} className="border border-[var(--border)] rounded-xl px-4 py-3.5 mb-3 bg-[var(--panel-alt)]">
-            <div className="flex gap-2.5 items-center mb-2.5">
+          <div key={diretor.id} className="border border-[var(--border)] rounded-xl px-3 py-3 sm:px-4 sm:py-3.5 mb-3 bg-[var(--panel-alt)]">
+            <div className="flex flex-wrap gap-2.5 items-center mb-2.5">
               <input
                 key={`diretor-nome-${diretor.id}`}
                 defaultValue={diretor.nome}
                 aria-label={`Nome do diretor ${diretor.nome}`}
                 readOnly={!isAdmin}
                 onBlur={e => updateDiretorNome(diretor.id, e.target.value)}
-                className="font-display text-[var(--text)] text-[19px] font-bold px-1 py-0.5 flex-1 bg-transparent border border-transparent rounded-lg focus:outline-none focus:border-[var(--teal)] focus:bg-[#12151b]"
+                className="font-display text-[var(--text)] text-[17px] sm:text-[19px] font-bold px-1 py-0.5 flex-1 min-w-[140px] bg-transparent border border-transparent rounded-lg focus:outline-none focus:border-[var(--teal)] focus:bg-[#12151b]"
               />
               {isAdmin ? (
                 <button
-                  className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110"
+                  className="bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3.5 py-2.5 lg:py-1.5 min-h-11 lg:min-h-0 text-[13px] font-bold cursor-pointer hover:brightness-110"
                   onClick={() => removeDiretor(diretor.id)}
                 >
                   Remover diretor
@@ -154,7 +154,7 @@ export default function ConfigView({
                       key={r.id}
                       className={`border border-[var(--border)] rounded-lg px-3 py-2.5 bg-[#12151b] ${r.ativo === false ? 'opacity-50' : ''}`}
                     >
-                      <div className="flex flex-wrap items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-2 lg:gap-1.5">
                         <input
                           key={`rede-emoji-${r.id}`}
                           defaultValue={r.emoji || ''}
@@ -177,7 +177,7 @@ export default function ConfigView({
                             aria-label={`Diretor da rede ${r.nome}`}
                             value={diretor.id}
                             onChange={e => updateRedeDiretor(r.id, Number(e.target.value))}
-                            className="text-[12px] font-medium text-[var(--muted)] flex-none w-32 bg-transparent border border-[var(--border)] rounded-lg px-1.5 py-1 focus:outline-none focus:border-[var(--teal)]"
+                            className="text-[12px] font-medium text-[var(--muted)] flex-none w-32 bg-transparent border border-[var(--border)] rounded-lg px-1.5 py-2.5 min-h-11 lg:py-1 lg:min-h-0 focus:outline-none focus:border-[var(--teal)]"
                           >
                             {config.diretores.map(d => (
                               <option key={d.id} value={d.id}>{d.nome}</option>
@@ -189,7 +189,7 @@ export default function ConfigView({
                             aria-label={`GG da rede ${r.nome}`}
                             value={r.responsavel?.id ?? ''}
                             onChange={e => updateRedeResponsavel(r.id, e.target.value === '' ? null : Number(e.target.value))}
-                            className="text-[12px] font-medium text-[var(--muted)] flex-none w-28 bg-transparent border border-[var(--border)] rounded-lg px-1.5 py-1 focus:outline-none focus:border-[var(--teal)]"
+                            className="text-[12px] font-medium text-[var(--muted)] flex-none w-28 bg-transparent border border-[var(--border)] rounded-lg px-1.5 py-2.5 min-h-11 lg:py-1 lg:min-h-0 focus:outline-none focus:border-[var(--teal)]"
                           >
                             <option value="">Nenhum</option>
                             {responsaveis.map(resp => (
@@ -230,7 +230,7 @@ export default function ConfigView({
                         </button>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-[var(--border)]">
+                      <div className="flex flex-wrap items-center gap-2 lg:gap-1.5 mt-2 pt-2 border-t border-[var(--border)]">
                         <span className="text-[11px] text-[var(--muted)] font-semibold uppercase tracking-[.04em]">Lojas:</span>
                         {loadingLojas ? <span className="text-[11px] text-[var(--muted)]">Carregando...</span> : null}
                         {!loadingLojas && !lojas.length ? <span className="text-[11px] text-[var(--muted)]">Nenhuma loja ainda</span> : null}
@@ -247,7 +247,7 @@ export default function ConfigView({
                                   aria-label={`Mover loja ${loja.nome} para outra rede`}
                                   value={r.id}
                                   onChange={e => updateLojaRede(r.id, loja.id, Number(e.target.value))}
-                                  className="text-[11px] font-medium text-[var(--muted)] bg-transparent border border-[var(--border)] rounded-full px-1 py-0.5 focus:outline-none focus:border-[var(--teal)]"
+                                  className="text-[11px] font-medium text-[var(--muted)] bg-transparent border border-[var(--border)] rounded-full px-2 py-2 min-h-11 lg:px-1 lg:py-0.5 lg:min-h-0 focus:outline-none focus:border-[var(--teal)]"
                                 >
                                   {todasRedesFlat.map(opt => (
                                     <option key={opt.id} value={opt.id}>{opt.label}</option>
@@ -271,7 +271,7 @@ export default function ConfigView({
                               aria-label={`Nome da nova loja da rede ${r.nome}`}
                               value={novaLojaNomePorRede[r.id] || ''}
                               onChange={e => setNovaLojaNomePorRede(prev => ({ ...prev, [r.id]: e.target.value }))}
-                              className="w-24 bg-transparent border border-[var(--border)] rounded-full px-2 py-1 text-[11px] focus:outline-none focus:border-[var(--teal)]"
+                              className="w-24 bg-transparent border border-[var(--border)] rounded-full px-2 py-2 min-h-11 lg:py-1 lg:min-h-0 text-[11px] focus:outline-none focus:border-[var(--teal)]"
                             />
                             <button onClick={() => handleAddLoja(r.id)} className={toggleBtn}>Adicionar loja</button>
                           </span>
@@ -287,12 +287,12 @@ export default function ConfigView({
         ))}
 
         {isAdmin ? (
-          <div className="flex gap-2 mt-1 flex-wrap items-center">
+          <div className="flex flex-col gap-2 mt-1 sm:flex-row sm:flex-wrap sm:items-center">
             <select
               aria-label="Diretor pai da nova rede"
               value={novaRedeDiretorId}
               onChange={e => setNovaRedeDiretorId(e.target.value)}
-              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
+              className="w-full sm:w-auto bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 min-h-11 lg:min-h-0 text-sm"
             >
               <option value="">Selecione o diretor...</option>
               {config.diretores.map(d => (
@@ -301,14 +301,14 @@ export default function ConfigView({
             </select>
             <input
               placeholder="🏆" maxLength={2} value={novaRedeEmoji} onChange={e => setNovaRedeEmoji(e.target.value)}
-              className="w-11 text-center bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-2.5 py-2 text-sm"
+              className="w-24 sm:w-11 text-center bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-2.5 py-2 min-h-11 lg:min-h-0 text-sm"
             />
             <input
               placeholder="Nome da rede (ex: Delta)" value={novaRedeNome} onChange={e => setNovaRedeNome(e.target.value)}
-              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
+              className="w-full sm:w-auto bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 min-h-11 lg:min-h-0 text-sm"
             />
             <button
-              className={btn}
+              className={`${btn} w-full sm:w-auto`}
               onClick={() => {
                 addRede(novaRedeDiretorId, novaRedeEmoji, novaRedeNome);
                 setNovaRedeEmoji('');
@@ -321,19 +321,19 @@ export default function ConfigView({
         ) : null}
 
         {isAdmin ? (
-          <div className="flex gap-2 mt-2.5">
+          <div className="flex flex-col gap-2 mt-2.5 sm:flex-row sm:items-center">
             <input placeholder="Nome do diretor (ex: Victor Hugo)" value={newDiretorNome} onChange={e => setNewDiretorNome(e.target.value)}
-              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm" />
-            <button className={btn} onClick={() => { addDiretor(newDiretorNome); setNewDiretorNome(''); }}>Adicionar diretor</button>
+              className="w-full sm:w-auto bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 min-h-11 lg:min-h-0 text-sm" />
+            <button className={`${btn} w-full sm:w-auto`} onClick={() => { addDiretor(newDiretorNome); setNewDiretorNome(''); }}>Adicionar diretor</button>
           </div>
         ) : null}
       </div>
 
       <div>
-        <h3 className="font-display text-[19px] mb-3 font-bold">Categorias</h3>
+        <h3 className="font-display text-[17px] sm:text-[19px] mb-3 font-bold">Categorias</h3>
         <div className="flex flex-wrap gap-1.5 mb-3">
           {config.categorias.map(c => (
-            <div key={c.id} className="inline-flex items-center gap-1.5 bg-[#12151b] border border-[var(--border)] rounded-full pl-4 pr-2 py-2 text-[13px]">
+            <div key={c.id} className="inline-flex flex-wrap max-w-full items-center gap-1.5 bg-[#12151b] border border-[var(--border)] rounded-full pl-4 pr-2 py-2 text-[13px]">
               <span>{c.nome}</span>
               {c.principal ? <span className="text-[var(--teal)] text-[11px]">(principal)</span> : null}
               {c.padrao ? <span className="text-[var(--muted)] text-[11px]">(padrão)</span> : null}
@@ -361,14 +361,14 @@ export default function ConfigView({
           ))}
         </div>
         {isAdmin ? (
-          <div className="flex gap-2 items-center flex-wrap">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
             <input
               placeholder="Nome da categoria (ex: Frete, Trocas...)" value={novaCategoriaNome}
               onChange={e => setNovaCategoriaNome(e.target.value)}
-              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
+              className="w-full sm:w-auto bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 min-h-11 lg:min-h-0 text-sm"
             />
             <button
-              className={btn}
+              className={`${btn} w-full sm:w-auto`}
               onClick={() => { addCategoria(novaCategoriaNome); setNovaCategoriaNome(''); }}
             >
               Adicionar categoria
@@ -379,7 +379,7 @@ export default function ConfigView({
 
       {isAdmin ? (
         <div className="mt-[22px]">
-          <h3 className="font-display text-[19px] mb-3 font-bold">GGs</h3>
+          <h3 className="font-display text-[17px] sm:text-[19px] mb-3 font-bold">GGs</h3>
           {loadingResponsaveis ? (
             <div className="text-[var(--muted)] text-sm">Carregando GGs...</div>
           ) : responsaveisError ? (
@@ -403,13 +403,13 @@ export default function ConfigView({
               }
             </div>
           )}
-          <div className="flex gap-2 items-center flex-wrap">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
             <input
               placeholder="Nome do GG" value={novoResponsavelNome}
               onChange={e => setNovoResponsavelNome(e.target.value)}
-              className="bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
+              className="w-full sm:w-auto bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 min-h-11 lg:min-h-0 text-sm"
             />
-            <button className={btn} onClick={handleAddResponsavel}>Adicionar GG</button>
+            <button className={`${btn} w-full sm:w-auto`} onClick={handleAddResponsavel}>Adicionar GG</button>
             {responsavelFormError ? <span className="text-[var(--danger)] text-[13px]">{responsavelFormError}</span> : null}
           </div>
         </div>

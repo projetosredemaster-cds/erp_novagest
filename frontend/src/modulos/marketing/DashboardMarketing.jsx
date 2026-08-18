@@ -124,12 +124,12 @@ function RankingLista({ titulo, itens, tom }) {
       ) : (
         <ol className="flex flex-col gap-2.5">
           {itens.map((item, idx) => (
-            <li key={item.id} className="flex items-center justify-between gap-3 text-[13px]">
+            <li key={item.id} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3 text-[13px]">
               <div className="min-w-0">
-                <div className="font-semibold truncate">{idx + 1}. {item.nome}</div>
-                <div className="text-[11px] text-[var(--muted)] truncate">{item.redeNome} · {item.diretorNome}</div>
+                <div className="font-semibold whitespace-normal break-words sm:truncate">{idx + 1}. {item.nome}</div>
+                <div className="text-[11px] text-[var(--muted)] whitespace-normal break-words sm:truncate">{item.redeNome} · {item.diretorNome}</div>
               </div>
-              <div className="text-right shrink-0">
+              <div className="text-left sm:text-right sm:shrink-0">
                 <div className={`font-bold ${corTexto}`}>{formatVariacaoBR(item.variacao)}</div>
                 <div className="text-[11px] text-[var(--muted)]">
                   {formatMoedaBR(item.atual)} (antes {formatMoedaBR(item.anterior)})
