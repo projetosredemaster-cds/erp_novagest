@@ -13,6 +13,8 @@ const authMiddleware = require('./middlewares/authMiddleware');
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 const allowedOrigins = process.env.NODE_ENV === 'production'
   ? [process.env.FRONTEND_URL].filter(Boolean)
   : [process.env.FRONTEND_URL, 'http://localhost:5173'].filter(Boolean);
