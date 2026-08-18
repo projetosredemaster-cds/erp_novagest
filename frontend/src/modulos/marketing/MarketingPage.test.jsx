@@ -252,4 +252,129 @@ describe('MarketingPage — onBlur só salva quando algo realmente mudou', () =>
     });
     expect(marketingApi.salvarEntrada).not.toHaveBeenCalled();
   });
+
+  // Cenário extra pedido no ciclo de QA: loja SEM lançamento anterior nenhum, usuário digita
+  // "0" (não deixa vazio) nos 2 campos editáveis da aba Marketing e sai do card. Não presumir
+  // qual dos dois comportamentos existe (chama DELETE mesmo sem nada pra apagar, OU detecta e
+  // não chama nada) — o código real: como o valor salvo de referência (`valoresSalvosRef`)
+  // nasce como '' (string vazia) pra loja nunca lançada, e o valor digitado vira `0` (número),
+  // `atual.faturamentoGeral !== salvo.faturamentoGeral` (0 !== '') já torna o dirty-check
+  // verdadeiro, então o branch de "todos zerados" É alcançado mesmo a loja nunca tendo tido
+  // lançamento nenhum — dispara removerEntrada (idempotente no backend: 204 mesmo sem linha
+  // pra apagar). O resultado final ("nenhuma linha no banco") é o mesmo dos dois
+  // comportamentos possíveis, mas o comportamento REAL observado é "chama DELETE".
+  it('loja SEM lançamento anterior, digitar 0 nos campos editáveis: dispara DELETE (removerEntrada), não fica em silêncio', async () => {
+    marketingApi.fetchEntradas.mockResolvedValue([
+      bloco({ lojas: [lojaSemLancamento(), lojaSemLancamento({ id: 41, nome: 'SLZ 02' })] }),
+    ]);
+
+    await renderESelecionarDiretor();
+
+    const camposGeral = await screen.findAllByLabelText('Faturamento Geral');
+    const camposMarketing = screen.getAllByLabelText('Faturamento Marketing');
+    const campoGeralAlvo = camposGeral[0];
+    const campoMarketingAlvo = camposMarketing[0];
+
+    const user = userEvent.setup();
+    await user.click(campoGeralAlvo);
+    await user.type(campoGeralAlvo, '0');
+    await user.tab(); // Geral -> Marketing, mesmo card: ainda não dispara
+    await user.type(campoMarketingAlvo, '0');
+    await user.tab(); // Marketing -> fora do card: dispara o blur consolidado
+
+    await waitFor(() => expect(marketingApi.removerEntrada).toHaveBeenCalledTimes(1));
+    expect(marketingApi.removerEntrada).toHaveBeenCalledWith({
+      ano: expect.any(Number),
+      mes: expect.any(Number),
+      lojaId: 40,
+    });
+    expect(marketingApi.salvarEntrada).not.toHaveBeenCalled();
+  });
+
+  // Cenário extra pedido no ciclo de QA: loja COM valor real já salvo nos 3 campos, usuário
+  // zera só 1 dos 3 (mantendo os outros 2 com valor) — contrato (seção 2) exige que isso seja
+  // um POST normal, não um DELETE, porque zero pode ser um dado real num só dos campos.
+  it('loja COM valor real já salvo: zerar só 1 dos 3 campos (mantendo os outros 2) dispara POST, não DELETE', async () => {
+    marketingApi.fetchEntradas.mockResolvedValue([
+      bloco({
+        lojas: [
+          lojaComLancamento({ faturamentoGeral: 1000, faturamentoMarketing: 200, faturamentoRetornoIndicacao: 50 }),
+          lojaSemLancamento({ id: 42, nome: 'SLZ 03' }),
+        ],
+      }),
+    ]);
+
+    await renderESelecionarDiretor();
+
+    const camposGeral = await screen.findAllByLabelText('Faturamento Geral');
+    const camposMarketing = screen.getAllByLabelText('Faturamento Marketing');
+    const campoGeralAlvo = camposGeral[0];
+    const campoMarketingAlvo = camposMarketing[0];
+
+    const user = userEvent.setup();
+    // zera só o campo "Faturamento Marketing" (deixa Geral com o valor já existente, 1000)
+    await user.click(campoMarketingAlvo);
+    await user.clear(campoMarketingAlvo);
+    await user.tab(); // Marketing -> fora do card (pula Geral porque começamos nele): dispara
+
+    await waitFor(() => expect(marketingApi.salvarEntrada).toHaveBeenCalledTimes(1));
+    expect(marketingApi.salvarEntrada).toHaveBeenCalledWith({
+      lojaId: 41,
+      ano: expect.any(Number),
+      mes: expect.any(Number),
+      faturamentoGeral: 1000, // valor já existente, preservado
+      faturamentoMarketing: 0, // zerado de propósito
+      faturamentoRetornoIndicacao: 50, // valor já existente, preservado
+    });
+    expect(marketingApi.removerEntrada).not.toHaveBeenCalled();
+    // campoGeralAlvo não foi tocado nesta interação — usado só de referência acima.
+    void campoGeralAlvo;
+  });
+});
+
+describe('MarketingPage — estados de carregamento/erro/vazio', () => {
+  it('sem diretor selecionado: mostra mensagem pedindo pra selecionar um diretor (mesmo com dados carregados)', async () => {
+    marketingApi.fetchEntradas.mockResolvedValue([
+      bloco({ lojas: [lojaSemLancamento()] }),
+    ]);
+
+    render(<MarketingPage />);
+    await waitFor(() => expect(screen.queryByText('Carregando...')).not.toBeInTheDocument());
+
+    expect(screen.getByText('Selecione um diretor acima para ver e lançar o faturamento das redes/lojas dele.')).toBeInTheDocument();
+  });
+
+  it('nenhum diretor/rede/loja cadastrado: mostra mensagem de catálogo vazio', async () => {
+    marketingApi.fetchEntradas.mockResolvedValue([]);
+
+    render(<MarketingPage />);
+    await waitFor(() => expect(screen.queryByText('Carregando...')).not.toBeInTheDocument());
+
+    expect(screen.getByText(/Nenhum diretor, rede ou loja cadastrado\(a\) ainda\./)).toBeInTheDocument();
+  });
+
+  it('erro de rede ao carregar: mostra mensagem de erro com botão "Tentar novamente"', async () => {
+    marketingApi.fetchEntradas.mockRejectedValue(new Error('Falha de rede simulada'));
+
+    render(<MarketingPage />);
+
+    await waitFor(() => expect(screen.getByText(/Não foi possível carregar as entradas de marketing/)).toBeInTheDocument());
+    expect(screen.getByText(/Falha de rede simulada/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();
+  });
+
+  it('estado "Carregando..." aparece enquanto a promise de fetchEntradas não resolveu', async () => {
+    // MarketingPage dispara fetchEntradas 2x em paralelo (mês atual + mês anterior, ver
+    // useEffect/Promise.all) — mockReturnValue devolve a MESMA promise pendente pras duas
+    // chamadas, então um único resolveFetch() destrava as duas de uma vez.
+    let resolveFetch;
+    const pendente = new Promise(resolve => { resolveFetch = resolve; });
+    marketingApi.fetchEntradas.mockReturnValue(pendente);
+
+    render(<MarketingPage />);
+    expect(screen.getByText('Carregando...')).toBeInTheDocument();
+
+    resolveFetch([]);
+    await waitFor(() => expect(screen.queryByText('Carregando...')).not.toBeInTheDocument());
+  });
 });

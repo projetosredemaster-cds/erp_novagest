@@ -104,6 +104,14 @@ const CAMPO_COMPARACAO_POR_LABEL = {
   MARKETING: 'faturamentoMarketing',
   'RETORNO/INDICAÇÃO': 'faturamentoRetornoIndicacao',
 };
+// texto exibido na frase de observação para cada `label` recebido — separado da chave de
+// lookup acima (que continua "MARKETING", já que é isso que `labelParte` em
+// MarketingPage.jsx ainda passa) pra bater com o vocabulário da planilha original: a aba
+// Marketing fala de "RENDIMENTO" na observação, não de "MARKETING".
+const TEXTO_EXIBICAO_POR_LABEL = {
+  MARKETING: 'RENDIMENTO',
+  'RETORNO/INDICAÇÃO': 'RETORNO/INDICAÇÃO',
+};
 // função pura, testável isoladamente: recebe `comparacao` (objeto {faturamentoGeral,
 // faturamentoMarketing, faturamentoRetornoIndicacao} cada um "subiu"/"caiu"/"igual", ou
 // `null` quando não há mês anterior pra comparar — ver CONTRATO-MARKETING-API.md, seção 1)
@@ -116,7 +124,8 @@ export function buildObservacao(comparacao, label) {
   const geral = comparacao.faturamentoGeral;
   const parte = campoParte ? comparacao[campoParte] : undefined;
   const builder = TEXTOS_OBSERVACAO[`${geral}|${parte}`];
-  return builder ? builder(label) : 'SEM DADO DO MÊS ANTERIOR';
+  const textoExibicao = TEXTO_EXIBICAO_POR_LABEL[label] ?? label;
+  return builder ? builder(textoExibicao) : 'SEM DADO DO MÊS ANTERIOR';
 }
 
 // seta pequena ao lado de um percentual/variação (item 4 do redesign original) — cores
@@ -221,6 +230,55 @@ export function formatVariacaoBR(n, sufixo = '%') {
   const sinal = n > 0 ? '+' : n < 0 ? '-' : '';
   const abs = Math.abs(n).toFixed(1).replace('.', ',');
   return `${sinal}${abs}${sufixo}`;
+}
+
+// ---------- período (mês/ano) — usado pelo lançamento e pelo Relatório de visão geral ----------
+
+// período (ano, mês) imediatamente anterior ao informado — dezembro do ano anterior quando
+// o mês informado é janeiro. Movida de MarketingPage.jsx (onde alimentava só a linha de
+// TOTAL/aba "Resumo Geral") pra cá, pra também ser reaproveitada pelo Relatório de visão
+// geral (RelatorioMarketing.jsx), que precisa do mês imediatamente anterior ao início do
+// intervalo só pra colorir a 1ª coluna visível.
+export function periodoAnterior(ano, mes) {
+  return mes === 1 ? { ano: ano - 1, mes: 12 } : { ano, mes: mes - 1 };
+}
+
+// converte uma string "YYYY-MM" (mesmo formato de <input type="month">) em { ano, mes }, ou
+// `null` se o formato for inválido/vazio — helper interno de enumerarPeriodos, não exportado
+// por não ser necessário fora daqui.
+function parseMesAno(mesAno) {
+  if (!mesAno || typeof mesAno !== 'string') return null;
+  const partes = mesAno.split('-');
+  if (partes.length !== 2) return null;
+  const ano = Number(partes[0]);
+  const mes = Number(partes[1]);
+  if (!Number.isFinite(ano) || !Number.isFinite(mes) || mes < 1 || mes > 12) return null;
+  return { ano, mes };
+}
+
+// enumera, em ordem ascendente e INCLUSIVE dos dois extremos, todos os períodos {ano, mes}
+// entre `mesAnoInicio` e `mesAnoFim` (strings "YYYY-MM") — usado pelo Relatório de visão
+// geral (RelatorioMarketing.jsx) pra saber quantas/quais chamadas de fetchEntradas disparar
+// e quais colunas desenhar na tabela. Array vazio se `mesAnoFim` for anterior a
+// `mesAnoInicio`, ou se qualquer um dos dois for inválido/vazio — função pura, sem
+// dependência de Date() (evita bugs de fuso horário na virada de mês/ano).
+export function enumerarPeriodos(mesAnoInicio, mesAnoFim) {
+  const inicio = parseMesAno(mesAnoInicio);
+  const fim = parseMesAno(mesAnoFim);
+  if (!inicio || !fim) return [];
+  const chaveInicio = inicio.ano * 12 + inicio.mes;
+  const chaveFim = fim.ano * 12 + fim.mes;
+  if (chaveFim < chaveInicio) return [];
+
+  const periodos = [];
+  let ano = inicio.ano;
+  let mes = inicio.mes;
+  for (let chave = chaveInicio; chave <= chaveFim; chave += 1) {
+    periodos.push({ ano, mes });
+    mes += 1;
+    if (mes > 12) { mes = 1; ano += 1; }
+  }
+  return periodos;
 }
 
 // monta o ranking Top 5 de maiores altas/quedas percentuais (item 2b) a partir de uma

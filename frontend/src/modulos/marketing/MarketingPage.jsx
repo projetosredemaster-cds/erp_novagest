@@ -16,7 +16,8 @@ import { fetchEntradas, salvarEntrada, removerEntrada } from './marketingApi.js'
 import LojaMarketingCard from './LojaMarketingCard.jsx';
 import TotalGeralRow from './TotalGeralRow.jsx';
 import DashboardMarketing from './DashboardMarketing.jsx';
-import { numOrZero, valorParaDigitos, digitosParaValor } from './marketingFormat.js';
+import RelatorioMarketing from './RelatorioMarketing.jsx';
+import { numOrZero, valorParaDigitos, digitosParaValor, periodoAnterior } from './marketingFormat.js';
 
 function mesAnoAtual() {
   const hoje = new Date();
@@ -87,12 +88,10 @@ function lojasDoDiretor(blocos, diretorId) {
     .flatMap(bloco => bloco.lojas || []);
 }
 
-// período (ano, mês) imediatamente anterior ao selecionado — dezembro do ano anterior
-// quando o mês selecionado é janeiro. Usado pra buscar o segundo GET que alimenta a linha
-// de TOTAL (item 1) e a aba "Resumo Geral" (item 2).
-function periodoAnterior(ano, mes) {
-  return mes === 1 ? { ano: ano - 1, mes: 12 } : { ano, mes: mes - 1 };
-}
+// `periodoAnterior` (usado pra buscar o segundo GET que alimenta a linha de TOTAL (item 1) e
+// a aba "Resumo Geral" (item 2)) foi movida para marketingFormat.js — RelatorioMarketing.jsx
+// (view "Relatório de visão geral") também precisa dela, pra achar o mês imediatamente
+// anterior ao início do intervalo selecionado.
 
 const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-5 pt-5 pb-[22px]";
 const input = "bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] px-3 py-2 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed";
@@ -166,6 +165,14 @@ export default function MarketingPage() {
   // scroll infinito relatado pelo usuário).
   const [diretorId, setDiretorId] = useState('');
   const [aba, setAba] = useState('marketing');
+
+  // view de topo, separada de `aba` — `aba` continua controlando só as 3 abas
+  // Marketing/Retorno-Indicação/Resumo Geral DENTRO da view "lancamento" (padrão); "relatorio"
+  // troca a tela inteira pro Relatório de visão geral (RelatorioMarketing.jsx, multi-mês, só
+  // percentual), mesmo mecanismo (state + botão `btnGhost`) já usado em MargensPage.jsx entre
+  // "Lançamento" e "Relatório de período". `diretorId` é compartilhado entre as duas views de
+  // propósito — a seleção de diretor não se perde ao alternar.
+  const [view, setView] = useState('lancamento');
 
   const [flashMsg, setFlashMsg] = useState(null);
   const flashTimer = useRef(null);
@@ -389,7 +396,7 @@ export default function MarketingPage() {
                 aria-labelledby="marketing-diretor-label"
                 value={diretorIdEfetivo}
                 onChange={e => setDiretorId(e.target.value === '' ? '' : Number(e.target.value))}
-                disabled={loading || !!error || aba === 'resumo'}
+                disabled={view === 'lancamento' && (loading || !!error || aba === 'resumo')}
                 className={`${input} min-w-[180px]`}
               >
                 <option value="">Selecione...</option>
@@ -401,23 +408,39 @@ export default function MarketingPage() {
                   propósito — filtro fica desabilitado nela em vez de escondido, pra deixar
                   claro que ele existe mas não se aplica, e reaparece já com a seleção
                   preservada ao voltar pra Marketing/Retorno-Indicação. */}
-              {aba === 'resumo' ? (
+              {view === 'lancamento' && aba === 'resumo' ? (
                 <span className="text-[11px] text-[var(--muted)]">Não se aplica ao Resumo Geral</span>
               ) : null}
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[12px] text-[var(--muted)] font-semibold" id="marketing-mes-label">Mês/Ano</span>
-              <input
-                type="month"
-                aria-labelledby="marketing-mes-label"
-                value={mesAno}
-                onChange={e => handleMesAnoChange(e.target.value)}
-                className={input}
-              />
-            </label>
+            {/* Mês/Ano é só do lançamento (um mês por vez) — a view "relatorio" tem seu
+                próprio par de filtros de período (mês inicial/final), dentro de
+                RelatorioMarketing.jsx, então este input some quando ela está ativa. */}
+            {view === 'lancamento' ? (
+              <label className="flex flex-col gap-1">
+                <span className="text-[12px] text-[var(--muted)] font-semibold" id="marketing-mes-label">Mês/Ano</span>
+                <input
+                  type="month"
+                  aria-labelledby="marketing-mes-label"
+                  value={mesAno}
+                  onChange={e => handleMesAnoChange(e.target.value)}
+                  className={input}
+                />
+              </label>
+            ) : null}
+            <button
+              type="button"
+              className={btnGhost}
+              onClick={() => setView(v => (v === 'lancamento' ? 'relatorio' : 'lancamento'))}
+            >
+              {view === 'lancamento' ? '📊 Ver relatório de visão geral' : '← Voltar ao lançamento'}
+            </button>
           </div>
         </div>
 
+        {view === 'relatorio' ? (
+          <RelatorioMarketing diretorId={diretorIdEfetivo} diretores={diretores} onDiretorChange={setDiretorId} />
+        ) : (
+        <>
         <div role="tablist" aria-label="Tipo de indicador" className="flex gap-2 mb-4">
           {ABAS.map(({ id, label }) => (
             <button
@@ -517,6 +540,8 @@ export default function MarketingPage() {
             </>
           )}
         </div>
+        </>
+        )}
       </div>
 
       <div
