@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 const rankingRoutes = require('./routes/ranking.routes');
 const cadastrosRoutes = require('./routes/cadastros.routes');
 const margensRoutes = require('./routes/margens.routes');
+const marketingRoutes = require('./routes/marketing.routes');
 const authRoutes = require('./routes/auth.routes');
 const adminRoutes = require('./routes/admin.routes');
 const authMiddleware = require('./middlewares/authMiddleware');
@@ -22,17 +23,15 @@ app.use(helmet());
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
-// Rate limit específico do login, para dificultar força bruta de senha.
-// Aplicado via mount em vez de dentro de auth.routes.js para manter o
-// throttling isolado da definição das rotas de autenticação.
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  limit: 10, // 10 tentativas por IP nessa janela
-  standardHeaders: true,
-  legacyHeaders: false,
+  windowMs: 15 * 60 * 1000,
+  max: 10,
   message: { error: 'Muitas tentativas de login. Tente novamente em alguns minutos.' },
 });
-app.use('/api/auth/login', loginLimiter);
+
+if (process.env.NODE_ENV !== 'development') {
+  app.use('/api/auth/login', loginLimiter);
+}
 
 // Rota simples de healthcheck da API
 app.get('/api/health', (req, res) => {
@@ -61,6 +60,11 @@ app.use('/api/cadastros', authMiddleware, cadastrosRoutes);
 // período) — ver CONTRATO-MARGENS-API.md. Lê Diretor/Rede/Loja/Responsavel
 // só via JOIN (dado compartilhado do módulo Cadastros).
 app.use('/api/margens', authMiddleware, margensRoutes);
+
+// Módulo Marketing (lançamento mensal de faturamento geral/marketing/
+// retorno-indicação por Loja) — ver CONTRATO-MARKETING-API.md. Lê
+// Diretor/Rede/Loja só via JOIN (dado compartilhado do módulo Cadastros).
+app.use('/api/marketing', authMiddleware, marketingRoutes);
 
 // 404 — rota não encontrada
 app.use((req, res) => {
