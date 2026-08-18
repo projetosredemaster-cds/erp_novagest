@@ -116,7 +116,45 @@ async function criarOuAtualizarEntrada(req, res) {
   }
 }
 
+/**
+ * DELETE /api/marketing/entradas?ano=YYYY&mes=MM&lojaId=X
+ * Remove a entrada de (ano, mes, lojaId). Idempotente: 204 tanto se a linha
+ * existia quanto se não existia (ver CONTRATO-MARKETING-API.md, seção 3) —
+ * não valida se a loja existe antes de excluir, diferente do POST.
+ */
+async function excluirEntrada(req, res) {
+  const { ano, mes, lojaId } = req.query;
+  const anoNum = Number(ano);
+  const mesNum = Number(mes);
+  const lojaIdNum = Number(lojaId);
+
+  if (
+    ano === undefined ||
+    mes === undefined ||
+    lojaId === undefined ||
+    !isAnoMesValido(anoNum, mesNum) ||
+    !isPositiveInteger(lojaIdNum)
+  ) {
+    return res.status(400).json({
+      error: 'Parâmetros "ano", "mes" e "lojaId" são obrigatórios e devem ser numéricos válidos (mes entre 1 e 12).',
+    });
+  }
+
+  try {
+    await marketingService.removerEntrada({
+      ano: anoNum,
+      mes: mesNum,
+      lojaId: lojaIdNum,
+    });
+    return res.status(204).send();
+  } catch (err) {
+    console.error('[marketing.controller] Erro ao excluir entrada de marketing:', err);
+    return res.status(500).json({ error: 'Erro interno ao excluir entrada de marketing.' });
+  }
+}
+
 module.exports = {
   listarEntradas,
   criarOuAtualizarEntrada,
+  excluirEntrada,
 };

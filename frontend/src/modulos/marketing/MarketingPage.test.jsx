@@ -1,20 +1,24 @@
 // Testes de componente (Vitest + React Testing Library) de MarketingPage.jsx, cobrindo o
-// bugfix do onBlur disparando POST sem mudança real (ver CONTRATO-MARKETING-API.md, seção
-// 2, e comentário de handleBlurLoja em MarketingPage.jsx). `marketingApi.js` é totalmente
-// mockado — nenhuma chamada de rede real acontece aqui, mesmo padrão de
-// MargensPage.test.jsx/RankingPage.test.jsx.
+// bugfix do onBlur disparando POST sem mudança real e a escolha POST-vs-DELETE no blur (ver
+// CONTRATO-MARKETING-API.md, seções 2 e 3, e comentário de handleBlurLoja em
+// MarketingPage.jsx). `marketingApi.js` é totalmente mockado — nenhuma chamada de rede real
+// acontece aqui, mesmo padrão de MargensPage.test.jsx/RankingPage.test.jsx.
 //
-// Cobre os testes de aceitação da tarefa original de bugfix, mais a revisão do gate de envio
-// (relaxado por aba, ver comentário de handleBlurLoja):
+// Cobre os testes de aceitação da tarefa original de bugfix, mais a troca do gate por aba
+// (`preenchidosNaAba`) pela decisão POST-vs-DELETE baseada nos 3 valores atuais (ver
+// comentário de handleBlurLoja):
 //  - loja SEM lançamento no mês: clicar nos campos editáveis do card e tabular por eles sem
-//    digitar nada não deve disparar NENHUM POST (dirty-check em handleBlurLoja).
+//    digitar nada não deve disparar NENHUMA chamada de rede (dirty-check em handleBlurLoja).
 //  - loja já lançada (os 3 valores salvos): editar só o Faturamento Geral e sair do card
 //    dispara UM ÚNICO POST, com o valor novo de Geral e os valores JÁ EXISTENTES de
 //    Marketing/Retorno-Indicação (não zerados) — cobre também a consolidação de blur por
 //    card via relatedTarget (tabular do 1º pro 2º campo do MESMO card não dispara nada;
 //    só tabular pra FORA do card dispara).
-//  - loja nova, só com Geral+Marketing preenchidos (Retorno/Indicação nunca digitado): salva
-//    normalmente na aba Marketing, sem esperar o 3º campo (gate relaxado por aba).
+//  - loja nova, só com Geral preenchido (Marketing e Retorno/Indicação nunca digitados):
+//    dispara POST normal com os outros dois campos como 0 — não bloqueia mais (gate antigo
+//    removido; "zero pode ser dado real", contrato seção 2).
+//  - loja já lançada: limpar os 3 campos até ficarem todos zero/vazios dispara DELETE
+//    (`removerEntrada`) em vez de POST, e a linha volta ao shape "sem lançamento".
 //
 // Verificação usada: teste de componente simulado (sem browser real disponível neste
 // ambiente) — ver relatório da tarefa.
@@ -27,6 +31,7 @@ import MarketingPage from './MarketingPage.jsx';
 vi.mock('./marketingApi', () => ({
   fetchEntradas: vi.fn(),
   salvarEntrada: vi.fn(),
+  removerEntrada: vi.fn(),
 }));
 
 import * as marketingApi from './marketingApi';
@@ -86,9 +91,10 @@ async function renderESelecionarDiretor(diretorId = 1) {
 beforeEach(() => {
   vi.clearAllMocks();
   // resolvido por padrão em todo teste — mesmo nos testes onde não deveria ser chamado,
-  // evita que um POST disparado por engano quebre com "undefined.then" em vez de falhar
-  // de forma clara na asserção `not.toHaveBeenCalled()`.
+  // evita que um POST/DELETE disparado por engano quebre com "undefined.then" em vez de
+  // falhar de forma clara na asserção `not.toHaveBeenCalled()`.
   marketingApi.salvarEntrada.mockResolvedValue({ atualizadoEm: '2026-08-18T12:00:00.000Z' });
+  marketingApi.removerEntrada.mockResolvedValue(undefined);
 });
 
 describe('MarketingPage — onBlur só salva quando algo realmente mudou', () => {
@@ -151,9 +157,6 @@ describe('MarketingPage — onBlur só salva quando algo realmente mudou', () =>
   });
 
   it('loja nova na aba Marketing: preencher só Geral+Marketing (Retorno/Indicação nunca digitado) já dispara POST', async () => {
-    // gate relaxado por aba: na aba "marketing" só Geral+Marketing precisam estar
-    // preenchidos pra liberar o envio — Retorno/Indicação pode continuar '' indefinidamente
-    // (é preenchido, se for o caso, separadamente na aba "Cliente Retorno/Indicação").
     marketingApi.fetchEntradas.mockResolvedValue([
       bloco({ lojas: [lojaSemLancamento(), lojaSemLancamento({ id: 41, nome: 'SLZ 02' })] }),
     ]);
@@ -181,5 +184,72 @@ describe('MarketingPage — onBlur só salva quando algo realmente mudou', () =>
       faturamentoMarketing: 200,
       faturamentoRetornoIndicacao: 0, // nunca digitado — enviado como 0, contrato exige o campo sempre
     });
+  });
+
+  it('loja nova na aba Marketing: preencher só o Faturamento Geral (Marketing continua vazio) já dispara POST — gate antigo removido', async () => {
+    // Cobre a revisão do gate pedida na tarefa: antes bloqueava POST se algum campo da aba
+    // ativa estivesse vazio; agora "todos zero" tem tratamento próprio (branch de DELETE,
+    // testado no teste seguinte), então preencher só 1 dos 3 campos não bloqueia mais — zero
+    // nos outros dois pode ser um dado real (contrato, seção 2).
+    marketingApi.fetchEntradas.mockResolvedValue([
+      bloco({ lojas: [lojaSemLancamento(), lojaSemLancamento({ id: 41, nome: 'SLZ 02' })] }),
+    ]);
+
+    await renderESelecionarDiretor();
+
+    const camposGeral = await screen.findAllByLabelText('Faturamento Geral');
+    const campoGeralAlvo = camposGeral[0];
+
+    const user = userEvent.setup();
+    await user.click(campoGeralAlvo);
+    await user.type(campoGeralAlvo, '150000'); // R$ 1.500,00
+    await user.tab(); // Geral -> Marketing, mesmo card: ainda não dispara
+    await user.tab(); // Marketing -> fora do card, sem digitar nada nele: dispara mesmo assim
+
+    await waitFor(() => expect(marketingApi.salvarEntrada).toHaveBeenCalledTimes(1));
+    expect(marketingApi.salvarEntrada).toHaveBeenCalledWith({
+      lojaId: 40,
+      ano: expect.any(Number),
+      mes: expect.any(Number),
+      faturamentoGeral: 1500,
+      faturamentoMarketing: 0,
+      faturamentoRetornoIndicacao: 0,
+    });
+  });
+
+  it('loja já lançada: limpar os 3 campos (todos zero/vazios) dispara DELETE em vez de POST', async () => {
+    // faturamentoRetornoIndicacao já nasce 0 (loja com marketing lançado mas sem
+    // retorno/indicação) — só precisa zerar Geral e Marketing na aba ativa pra atingir
+    // "os 3 valores atuais são zero/vazios" e cair no branch de removerEntrada.
+    marketingApi.fetchEntradas.mockResolvedValue([
+      bloco({
+        lojas: [
+          lojaComLancamento({ faturamentoRetornoIndicacao: 0 }),
+          lojaSemLancamento({ id: 42, nome: 'SLZ 03' }),
+        ],
+      }),
+    ]);
+
+    await renderESelecionarDiretor();
+
+    const camposGeral = await screen.findAllByLabelText('Faturamento Geral');
+    const camposMarketing = screen.getAllByLabelText('Faturamento Marketing');
+    const campoGeralAlvo = camposGeral[0];
+    const campoMarketingAlvo = camposMarketing[0];
+
+    const user = userEvent.setup();
+    await user.click(campoGeralAlvo);
+    await user.clear(campoGeralAlvo);
+    await user.tab(); // Geral -> Marketing, mesmo card: ainda não dispara
+    await user.clear(campoMarketingAlvo);
+    await user.tab(); // Marketing -> fora do card: dispara
+
+    await waitFor(() => expect(marketingApi.removerEntrada).toHaveBeenCalledTimes(1));
+    expect(marketingApi.removerEntrada).toHaveBeenCalledWith({
+      ano: expect.any(Number),
+      mes: expect.any(Number),
+      lojaId: 41,
+    });
+    expect(marketingApi.salvarEntrada).not.toHaveBeenCalled();
   });
 });

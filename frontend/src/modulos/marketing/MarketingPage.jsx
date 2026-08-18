@@ -12,7 +12,7 @@
 // com o restante 100% Tailwind do sistema (regra rígida do projeto: nunca no
 // mesmo componente) — teria que isolar em arquivo próprio, sem ganho real.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchEntradas, salvarEntrada } from './marketingApi.js';
+import { fetchEntradas, salvarEntrada, removerEntrada } from './marketingApi.js';
 import LojaMarketingCard from './LojaMarketingCard.jsx';
 import TotalGeralRow from './TotalGeralRow.jsx';
 import DashboardMarketing from './DashboardMarketing.jsx';
@@ -244,25 +244,29 @@ export default function MarketingPage() {
 
   // dispara quando o foco sai do CARD inteiro de uma loja (consolidado em
   // LojaMarketingCard.jsx via relatedTarget/debounce — ver comentário lá), em QUALQUER uma
-  // das duas abas (ver CONTRATO-MARKETING-API.md, seção 2, e item 2 do redesign) — sempre lê
-  // os 3 valores atuais do estado ÚNICO da loja, não só o campo que perdeu foco, pra nunca
-  // mandar POST com campo faltando (mesmo se o valor veio de uma edição feita na outra aba).
+  // das duas abas (ver CONTRATO-MARKETING-API.md, seções 2 e 3, e item 2 do redesign) —
+  // sempre lê os 3 valores atuais do estado ÚNICO da loja, não só o campo que perdeu foco,
+  // pra nunca mandar POST/DELETE com base num valor desatualizado (mesmo se o valor veio de
+  // uma edição feita na outra aba).
   //
-  // Bugfix: antes disparava incondicionalmente a cada blur, então só encostar num campo e
-  // dar Tab sem digitar nada (loja nunca lançada) gravava uma linha zerada no banco
-  // (numOrZero('') === 0). Agora só dispara POST quando as DUAS condições abaixo são
-  // verdadeiras:
-  //  - dirty: pelo menos um dos 3 valores atuais é diferente do último valor conhecido como
-  //    salvo (`valoresSalvosRef`, populado na carga inicial e após cada POST bem-sucedido);
-  //  - preenchidosNaAba: os campos RELEVANTES pra aba ativa têm algum valor informado
-  //    (nenhum é ''). Relaxado por aba (decisão do usuário, depois de revisão desta tarefa):
-  //    na aba "marketing" exige Geral+Marketing preenchidos (Retorno/Indicação pode ficar
-  //    vazio — a aba "Cliente Retorno/Indicação" existe justamente pra ser preenchida
-  //    separada/depois, ou nunca, se a rede não trabalha com indicação); na aba "retorno"
-  //    exige Geral+Retorno preenchidos (Geral, nessa aba, é sempre somente-leitura — só fica
-  //    preenchido se já foi lançado via aba Marketing). O campo fora da aba atual continua
-  //    sendo enviado no payload via numOrZero (contrato exige os 3 sempre), só não bloqueia o
-  //    envio se ainda estiver vazio.
+  // Bugfix histórico: antes disparava POST incondicionalmente a cada blur, então só encostar
+  // num campo e dar Tab sem digitar nada (loja nunca lançada) gravava uma linha zerada no
+  // banco (numOrZero('') === 0). Isso continua coberto pelo dirty-check abaixo (só prossegue
+  // se pelo menos um dos 3 valores atuais é diferente do último valor conhecido como salvo,
+  // `valoresSalvosRef`, populado na carga inicial e após cada save/exclusão bem-sucedidos) —
+  // se nada mudou, não faz NENHUMA chamada de rede (nem POST, nem DELETE).
+  //
+  // Com o DELETE idempotente do backend (seção 3 do contrato), a escolha de rota passou a
+  // ser: quando os 3 valores atuais ficam todos zero/vazios (`numOrZero` de cada um dá 0),
+  // chama `removerEntrada` — exclui de fato a linha em vez de persistir um lançamento
+  // zerado (idempotente: sem problema chamar mesmo se a loja nunca teve lançamento nenhum,
+  // só não faz nada no banco). Em qualquer outro caso (pelo menos um dos 3 é diferente de
+  // zero) é POST normal — isso substitui o antigo gate `preenchidosNaAba`, que bloqueava
+  // envio quando algum campo da aba ativa ainda estava vazio: o cenário que esse gate existia
+  // pra evitar (persistir zerado sem querer) agora tem tratamento próprio no branch de
+  // DELETE, então não faz mais sentido bloquear "usuário preencheu só 1 dos 3 campos e
+  // saiu" — zero pode ser um dado real num dos outros campos (ex.: nenhum retorno/indicação
+  // naquele mês), e o contrato (seção 2) trata isso como POST normal.
   function handleBlurLoja(lojaId) {
     const atual = {
       faturamentoGeral: valorCampo(lojaId, 'faturamentoGeral'),
@@ -277,10 +281,38 @@ export default function MarketingPage() {
     const dirty = atual.faturamentoGeral !== salvo.faturamentoGeral
       || atual.faturamentoMarketing !== salvo.faturamentoMarketing
       || atual.faturamentoRetornoIndicacao !== salvo.faturamentoRetornoIndicacao;
-    const preenchidosNaAba = aba === 'marketing'
-      ? atual.faturamentoGeral !== '' && atual.faturamentoMarketing !== ''
-      : atual.faturamentoGeral !== '' && atual.faturamentoRetornoIndicacao !== '';
-    if (!dirty || !preenchidosNaAba) return;
+    if (!dirty) return;
+
+    const todosZerados = numOrZero(atual.faturamentoGeral) === 0
+      && numOrZero(atual.faturamentoMarketing) === 0
+      && numOrZero(atual.faturamentoRetornoIndicacao) === 0;
+
+    setSalvandoLojaId(lojaId);
+
+    if (todosZerados) {
+      const vazio = { faturamentoGeral: '', faturamentoMarketing: '', faturamentoRetornoIndicacao: '' };
+      removerEntrada({ ano, mes, lojaId })
+        .then(() => {
+          // volta a linha pro shape "sem lançamento" que a API devolve pra loja nunca
+          // lançada (ver seção 1 do contrato) — todos os campos de valor/percentual/
+          // comparacao/atualizadoEm em null, preservando id/nome da loja.
+          setBlocos(prev => atualizarLojaNosBlocos(prev, lojaId, loja => ({
+            ...loja,
+            faturamentoGeral: null,
+            faturamentoMarketing: null,
+            faturamentoRetornoIndicacao: null,
+            percentualMarketing: null,
+            percentualRetornoIndicacao: null,
+            comparacao: null,
+            atualizadoEm: null,
+          })));
+          valoresSalvosRef.current = { ...valoresSalvosRef.current, [lojaId]: vazio };
+          flash('Removido');
+        })
+        .catch(err => flash(err.message || 'Erro ao excluir lançamento de marketing.', 'error'))
+        .finally(() => setSalvandoLojaId(null));
+      return;
+    }
 
     const payload = {
       lojaId,
@@ -290,7 +322,6 @@ export default function MarketingPage() {
       faturamentoMarketing: numOrZero(atual.faturamentoMarketing),
       faturamentoRetornoIndicacao: numOrZero(atual.faturamentoRetornoIndicacao),
     };
-    setSalvandoLojaId(lojaId);
     salvarEntrada(payload)
       .then(entrada => {
         // Atualiza só a linha salva (percentuais recalculados aqui mesmo, com a mesma

@@ -58,7 +58,7 @@ async function listLojasAtivasComEntradas({ dataRef, dataRefAnterior }) {
         ON me.loja_id = l.id AND me.data_ref = @dataRef
       LEFT JOIN MarketingEntradas mePrev
         ON mePrev.loja_id = l.id AND mePrev.data_ref = @dataRefAnterior
-      WHERE l.ativo = 1
+      WHERE l.ativo = 1 AND r.ativo = 1
       ORDER BY d.nome, r.nome, l.nome
     `);
   return result.recordset;
@@ -129,8 +129,28 @@ async function upsertEntrada({ dataRef, lojaId, faturamentoGeral, faturamentoMar
   }
 }
 
+/**
+ * Remove a entrada correspondente a (data_ref, loja_id), se existir.
+ * Idempotente por design — não lança/sinaliza erro se a linha não existir
+ * (ver CONTRATO-MARKETING-API.md, seção 3), mesmo padrão de
+ * `ranking.model.js: deleteEntrada`.
+ */
+async function deleteEntrada({ dataRef, lojaId }) {
+  const pool = await getPool();
+  const request = pool.request();
+  request.input('dataRef', sql.Date, dataRef);
+  request.input('lojaId', sql.Int, lojaId);
+
+  await request.query(`
+    DELETE FROM MarketingEntradas
+    WHERE data_ref = @dataRef
+      AND loja_id = @lojaId
+  `);
+}
+
 module.exports = {
   listLojasAtivasComEntradas,
   existeLoja,
   upsertEntrada,
+  deleteEntrada,
 };

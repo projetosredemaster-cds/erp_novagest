@@ -30,6 +30,17 @@
 > Loja/Rede/Diretor — só lê (mesmo princípio de `margens.model.js` e
 > `residuo.model.js`: JOIN de leitura direto contra `Lojas`/`Redes`/`Diretores`,
 > sem chamar `cadastros.model.js`).
+>
+> **`ativo` impacta este módulo, `visivel` não** (v1 revisado — comportamento
+> corrigido, não estava assim antes): `GET /api/marketing/entradas` só
+> retorna Redes com `ativo = 1` **e** Lojas com `ativo = 1` — mesmo
+> princípio que Margens já aplica nos próprios seletores (rede/loja
+> desativada não pode receber novo lançamento em nenhum módulo). `visivel`
+> é um conceito só do grid do Ranking e não se aplica aqui. Diretor
+> removido some naturalmente da árvore (a query começa em `Diretores` e
+> segue pra `Redes`/`Lojas` — sem necessidade de tratamento especial, já
+> que `DELETE /api/cadastros/diretores/:id` só é permitido sem nenhuma
+> rede vinculada).
 
 ## Informações gerais
 
@@ -225,6 +236,35 @@ Upsert por `(data_ref, lojaId)` — mesmo padrão `MERGE` de
 
 ---
 
+## 3. `DELETE /api/marketing/entradas?ano=YYYY&mes=MM&lojaId=X`
+
+Remove o lançamento correspondente, se existir. **Idempotente**: `204`
+tanto se a linha existia quanto se não existia — mesmo padrão de
+`DELETE /api/ranking/entradas`.
+
+**Quando o frontend deve chamar isto em vez de `POST`**: quando, depois da
+edição, os 3 campos (`faturamentoGeral`, `faturamentoMarketing`,
+`faturamentoRetornoIndicacao`) ficam **todos** zero/vazios — nesse caso a
+linha inteira é excluída em vez de persistida zerada (equivalente ao
+"campo zerado apaga a entrada" que o Ranking já faz, adaptado pra um
+lançamento com 3 campos em vez de 1). Se só um dos três for zero mas os
+outros tiverem valor, isso **não** é motivo pra `DELETE` — é um `POST`
+normal, zero pode ser um dado real (ex.: nenhum retorno/indicação naquele
+mês).
+
+`DELETE FROM MarketingEntradas WHERE data_ref = @dataRef AND loja_id = @lojaId`
+
+### Validações — `400 Bad Request`
+`ano`/`mes`/`lojaId` ausentes ou inválidos:
+```json
+{ "error": "Parâmetros \"ano\", \"mes\" e \"lojaId\" são obrigatórios e devem ser numéricos válidos (mes entre 1 e 12)." }
+```
+
+### Erros
+`400`, `500`: `{ "error": "Erro interno ao excluir entrada de marketing." }`
+
+---
+
 ## Fora de escopo do v1 (registrado, não implementar agora)
 
 - **Detalhamento por canal** (TV, Netplace/Instagram, OLX, Facebook, Rádio):
@@ -239,9 +279,8 @@ Upsert por `(data_ref, lojaId)` — mesmo padrão `MERGE` de
 
 | Método | Rota | Observação |
 |---|---|---|
-| GET | `/api/marketing/entradas` | query `ano`, `mes` — agrupado Diretor→Rede→Loja, com % e comparação (marketing **e** retorno/indicação) já calculados |
+| GET | `/api/marketing/entradas` | query `ano`, `mes` — agrupado Diretor→Rede→Loja (só Redes/Lojas com `ativo=1`), com % e comparação (marketing **e** retorno/indicação) já calculados |
 | POST | `/api/marketing/entradas` | upsert por `(ano, mes, lojaId)` — `faturamentoGeral`, `faturamentoMarketing` e `faturamentoRetornoIndicacao` salvos juntos, num único lançamento |
+| DELETE | `/api/marketing/entradas` | query `ano`, `mes`, `lojaId` — idempotente; usar quando os 3 campos ficam zerados, em vez de persistir zerado |
 
-Todos os erros seguem `{ "error": "mensagem" }`. Sem rota `DELETE` no v1 —
-corrigir um lançamento é sempre um novo `POST` sobrescrevendo (mesmo
-princípio de "editar" já usado em Margens).
+Todos os erros seguem `{ "error": "mensagem" }`.

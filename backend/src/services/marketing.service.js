@@ -171,8 +171,21 @@ async function salvarEntrada({ lojaId, ano, mes, faturamentoGeral, faturamentoMa
   });
 }
 
+/**
+ * Remove a entrada de (ano, mes, lojaId), se existir. Idempotente — não
+ * valida se a loja/entrada existe antes de excluir (ver
+ * CONTRATO-MARKETING-API.md, seção 3). Reaproveita `formatDataRef`, mesma
+ * função usada por `salvarEntrada`, para não duplicar a conversão
+ * (ano, mes) -> data_ref.
+ */
+async function removerEntrada({ ano, mes, lojaId }) {
+  const dataRef = formatDataRef(ano, mes);
+  return marketingModel.deleteEntrada({ dataRef, lojaId });
+}
+
 module.exports = {
   listarEntradas,
   lojaExiste,
   salvarEntrada,
+  removerEntrada,
 };

@@ -30,3 +30,13 @@ export function salvarEntrada({ lojaId, ano, mes, faturamentoGeral, faturamentoM
     body: JSON.stringify({ lojaId, ano, mes, faturamentoGeral, faturamentoMarketing, faturamentoRetornoIndicacao }),
   });
 }
+
+// DELETE /api/marketing/entradas?ano=&mes=&lojaId= — idempotente (sempre 204, exista ou não
+// a linha). Chamada pelo onBlur de MarketingPage.jsx quando os 3 campos de faturamento da
+// loja ficam todos zero/vazios (ver seção 3 de CONTRATO-MARKETING-API.md), em vez de
+// persistir um lançamento zerado via POST — mesmo padrão de removerEntrada em
+// src/modulos/ranking/rankingApi.js.
+export function removerEntrada({ ano, mes, lojaId }) {
+  const params = new URLSearchParams({ ano: String(ano), mes: String(mes), lojaId: String(lojaId) });
+  return request(`/api/marketing/entradas?${params.toString()}`, { method: 'DELETE' });
+}
