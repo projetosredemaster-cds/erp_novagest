@@ -1,10 +1,4 @@
-// style-system: Tailwind
-// Aba "Resumo Geral" (item 2 do incremento sobre o redesign já existente): visão
-// consolidada de TODOS os diretores/redes/lojas do mês selecionado, sem depender do
-// filtro de Diretor do cabeçalho (ver MarketingPage.jsx). Cards de totais + ranking Top 5
-// de altas/quedas — sem gráfico, decisão explícita do pedido pra esta v1. Recebe
-// blocos/blocosAnteriores JÁ carregados por MarketingPage (mesmo fetch usado pela linha
-// de TOTAL do item 1) — não dispara nenhuma chamada de API própria.
+
 import { useMemo } from 'react';
 import {
   somarCampoLojas,
@@ -20,10 +14,6 @@ import {
   SETA_PERCENTUAL,
 } from './marketingFormat.js';
 
-// achata o array de blocos { diretor, rede, lojas[] } (formato do GET) numa lista plana
-// de lojas, carregando diretor/rede junto de cada loja pra dar contexto no ranking (ex.
-// "Delta · Victor Hugo") — esta aba não tem filtro de Diretor, então cada item do ranking
-// precisa se identificar sozinho.
 function achatarLojas(blocos) {
   return (blocos || []).flatMap(bloco =>
     (bloco.lojas || []).map(loja => ({ ...loja, rede: bloco.rede, diretor: bloco.diretor })),
@@ -46,9 +36,6 @@ export default function DashboardMarketing({ blocos, blocosAnteriores }) {
   const estadoMarketing = compararTotais(totalMarketingAtual, totalMarketingAnterior);
   const variacaoGeralPct = variacaoPercentual(totalGeralAtual, totalGeralAnterior);
   const variacaoMarketingPct = variacaoPercentual(totalMarketingAtual, totalMarketingAnterior);
-
-  // variação em PONTOS PERCENTUAIS (ex. 41,2% -> 43,8% = "+2,6 p.p."), não variação
-  // relativa — conta diferente da usada nos dois cards acima, ver variacaoPontosPercentuais.
   const variacaoPontos = variacaoPontosPercentuais(percentualAtual, percentualAnterior);
   const estadoPercentual = variacaoPontos === null ? null : variacaoPontos > 0 ? 'subiu' : variacaoPontos < 0 ? 'caiu' : 'igual';
 
@@ -57,9 +44,7 @@ export default function DashboardMarketing({ blocos, blocosAnteriores }) {
     [lojasAtual],
   );
 
-  // pareia cada loja do mês atual com o mesmo id no mês anterior pra alimentar o ranking
-  // — lojas que só existem em um dos dois meses (loja nova, por exemplo) ficam com
-  // `anterior: undefined` e são descartadas por calcularRankingVariacao.
+
   const ranking = useMemo(() => {
     const anteriorPorId = new Map(lojasAnterior.map(loja => [loja.id, loja.faturamentoGeral]));
     const itens = lojasAtual.map(loja => ({

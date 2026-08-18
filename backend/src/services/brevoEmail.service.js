@@ -1,16 +1,5 @@
-/**
- * Integração com a API transacional do Brevo (https://api.brevo.com/v3/smtp/email).
- * Camada de acesso a um serviço externo, no mesmo papel que um model tem para
- * o banco — não conhece Express (req/res), só monta a chamada HTTP e propaga
- * o erro real retornado pelo Brevo para quem chamar.
- */
-
 const BREVO_SMTP_EMAIL_URL = 'https://api.brevo.com/v3/smtp/email';
 
-// o relatório é gerado no frontend com marcação estilo WhatsApp (*negrito*, \n
-// pra quebra de linha) — aqui convertemos pro HTML mínimo que o corpo do e-mail
-// precisa, escapando antes qualquer caractere de HTML já presente no texto
-// (ex: nome de rede/loja cadastrado pelo usuário) para não quebrar o e-mail.
 function formatarTextoParaHtml(texto) {
   const escapado = String(texto)
     .replace(/&/g, '&amp;')

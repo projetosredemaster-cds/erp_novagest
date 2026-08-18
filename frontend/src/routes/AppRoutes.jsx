@@ -10,7 +10,7 @@ export default function AppRoutes() {
 
   return (
     <Routes>
-      {/* rota pública: sem <AppShell/>/Sidebar, fora da proteção de <RequireAuth/> */}
+      {}
       <Route path="/login" element={<LoginPage />} />
 
       <Route element={<RequireAuth />}>
@@ -28,8 +28,6 @@ export default function AppRoutes() {
               />
             );
 
-            // itens adminOnly ganham uma camada extra de proteção; se um
-            // usuário comum tentar acessar a URL direto, é redirecionado.
             if (mod.adminOnly) {
               return (
                 <Route key={`${mod.id}-guard`} element={<RequireAdmin />}>

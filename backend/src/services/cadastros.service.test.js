@@ -1,15 +1,3 @@
-// Teste unitário de `cadastros.service`, isolado do Express e do banco real
-// via `vi.spyOn` no model (mesma técnica/motivo documentado em
-// `../controllers/margens.controller.test.js` e
-// `../controllers/ranking.controller.test.js` — `vi.mock()` com sintaxe
-// `import` não intercepta requires internos de módulos CJS puros).
-//
-// Foco: ramificações de `atualizarRede` (a função citada explicitamente no
-// plano de QA — decide entre `null` / `'nome_duplicado'` /
-// `'diretor_inexistente'` / `'responsavel_inexistente'` / objeto atualizado)
-// e `atualizarLoja` (mesma forma, com `'rede_inexistente'` no lugar de
-// `'diretor_inexistente'`), além de `criarRede`/`criarLoja`.
-
 const cadastrosModel = require('../models/cadastros.model');
 const cadastrosService = require('./cadastros.service');
 

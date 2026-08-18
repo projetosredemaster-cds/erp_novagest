@@ -4,10 +4,7 @@ function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-/**
- * POST /api/auth/login
- * Body: { email: string, senha: string }
- */
+
 async function login(req, res) {
   const body = req.body || {};
   const { email, senha } = body;
@@ -34,12 +31,6 @@ async function login(req, res) {
   }
 }
 
-/**
- * GET /api/auth/me
- * Protegida por authMiddleware, que já populou req.usuario a partir do
- * token decodificado — a resposta é construída diretamente dele, sem
- * nova consulta ao banco.
- */
 async function me(req, res) {
   try {
     return res.status(200).json(req.usuario);

@@ -1,28 +1,3 @@
-// Testes de componente (Vitest + React Testing Library) de MargensPage.jsx
-// (ver CONTRATO-MARGENS-API.md v4). `margensApi.js` e
-// `../../lib/cadastrosApi.js` (de onde MargensPage importa `fetchRedes`)
-// continuam totalmente mockados — nenhuma chamada de rede real acontece
-// aqui, mesmo padrão de RankingPage.test.jsx.
-//
-// Cobre:
-//  - estados de loading/erro/vazio do bloco "Lançamento por loja";
-//  - linha nasce em modo "margem" (padrão): só o campo "Margem (%)" aparece,
-//    a cor vem direto do valor digitado, e o Total Tar fica escondido atrás
-//    do botão "Calcular pelo Total Tar";
-//  - confirmar uma loja via margem digitada: chama salvarEntrada com
-//    totalTar derivado + margemInformada e, após sucesso, os campos ficam
-//    desabilitados com o selo "Confirmado";
-//  - revelar o Total Tar ("Calcular pelo Total Tar") e preenchê-lo faz a
-//    margem calculada a partir dele mandar na cor/percentual exibidos e no
-//    payload de confirmação (precedência: Total Tar preenchido vence);
-//  - clicar "Editar" reabilita os campos de uma loja já confirmada, de volta
-//    ao modo "margem" padrão;
-//  - loja confirmada via margem digitada mostra "Margem informada: X%" ao
-//    lado da margem calculada;
-//  - filtros (Rede/Cor/Loja) da tela de Relatório filtram em memória sem
-//    disparar nova chamada de API (fetchRelatorio não é chamado de novo);
-//  - alternar o modo de uma loja não afeta as outras lojas da mesma rede.
-
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import MargensPage from './MargensPage.jsx';
@@ -50,8 +25,6 @@ function diretorComRede({ redeId = 5, redeNome = 'Delta', lojas } = {}) {
   };
 }
 
-// mocks-padrão pra qualquer teste que só precisa que a página carregue sem
-// travar (não é o foco do teste em si).
 function mockCargaBasica({ redes, entradas, relatorio } = {}) {
   fetchRedes.mockResolvedValue(redes ?? [diretorComRede()]);
   margensApi.fetchEntradas.mockResolvedValue(entradas ?? []);
@@ -162,7 +135,6 @@ describe('MargensPage — confirmar via margem digitada (fonte autoritativa padr
     expect(botaoConfirmar).not.toBeDisabled();
     fireEvent.click(botaoConfirmar);
 
-    // totalTarDerivado = 100000 - 40000 - (50/100 * 100000) = 10000
     await waitFor(() => expect(margensApi.salvarEntrada).toHaveBeenCalledWith({
       data: expect.any(String),
       lojaId: 40,
@@ -262,17 +234,13 @@ describe('MargensPage — revelar e usar o Total Tar (fonte autoritativa quando 
 
     await renderPage();
     fireEvent.change(screen.getByLabelText('Rede'), { target: { value: '5' } });
-    fireEvent.change(screen.getByLabelText('Faturamento'), { target: { value: '10000000' } }); // 100.000,00
-    fireEvent.change(screen.getByLabelText('Custo geral de produtos'), { target: { value: '4000000' } }); // 40.000,00
-    // margem digitada preenchida ANTES de revelar/preencher o Total Tar — deve ser
-    // completamente ignorada assim que o Total Tar também estiver preenchido.
-    fireEvent.change(screen.getByLabelText('Margem (%)'), { target: { value: '9000' } }); // 90,00%
+    fireEvent.change(screen.getByLabelText('Faturamento'), { target: { value: '10000000' } }); 
+    fireEvent.change(screen.getByLabelText('Custo geral de produtos'), { target: { value: '4000000' } });
+    fireEvent.change(screen.getByLabelText('Margem (%)'), { target: { value: '9000' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Calcular pelo Total Tar' }));
-    fireEvent.change(screen.getByLabelText('Total Tar'), { target: { value: '700000' } }); // 7.000,00
+    fireEvent.change(screen.getByLabelText('Total Tar'), { target: { value: '700000' } }); 
 
-    // margem exibida ao vivo já reflete o Total Tar (53%), não os 90% digitados:
-    // (100000 - 40000 - 7000) / 100000 * 100 = 53%
     expect(screen.getByText('53,00%')).toHaveClass('bg-emerald-500/15');
 
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }));
@@ -282,8 +250,8 @@ describe('MargensPage — revelar e usar o Total Tar (fonte autoritativa quando 
       lojaId: 40,
       faturamento: 100000,
       custoProduto: 40000,
-      totalTar: 7000, // valor digitado direto no Total Tar, NÃO o derivado da margem 90%
-      margemInformada: null, // margem digitada (90%) é descartada quando o Total Tar está preenchido
+      totalTar: 7000, 
+      margemInformada: null,
     }));
 
     expect(await screen.findByText('✓ Confirmado')).toBeInTheDocument();
@@ -306,20 +274,15 @@ describe('MargensPage — revelar e usar o Total Tar (fonte autoritativa quando 
     fireEvent.click(screen.getByRole('button', { name: 'Calcular pelo Total Tar' }));
     const campoTar = screen.getByLabelText('Total Tar');
 
-    // preenche o Total Tar: (1000 - 400 - 200) / 1000 * 100 = 40% (amarelo), sobrepõe a margem digitada
     fireEvent.change(campoTar, { target: { value: '20000' } }); // 200,00
     expect(screen.getByText('40,00%')).toHaveClass('bg-amber-500/15');
 
-    // apaga tudo do campo Total Tar (volta a ficar vazio, mas o campo continua VISÍVEL,
-    // pois o usuário não clicou em "Ocultar Total Tar") — a margem digitada (50%) deve
-    // voltar a mandar, mesmo com o campo secundário ainda revelado na tela.
     fireEvent.change(campoTar, { target: { value: '' } });
     expect(screen.getByText('50,00%')).toHaveClass('bg-emerald-500/15');
     expect(campoTar).toHaveValue('');
 
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }));
 
-    // totalTarDerivado = 1000 - 400 - (50/100 * 1000) = 100; margemInformada volta a ser enviada
     await waitFor(() => expect(margensApi.salvarEntrada).toHaveBeenCalledWith({
       data: expect.any(String),
       lojaId: 40,
@@ -344,8 +307,6 @@ describe('MargensPage — editar uma loja já confirmada', () => {
     await renderPage();
 
     fireEvent.change(screen.getByLabelText('Rede'), { target: { value: '5' } });
-
-    // já chega bloqueada (confirmada) porque já existe entrada pra essa loja/data
     expect(await screen.findByText('✓ Confirmado')).toBeInTheDocument();
     expect(screen.getByLabelText('Total Tar')).toBeDisabled();
 
@@ -353,7 +314,6 @@ describe('MargensPage — editar uma loja já confirmada', () => {
 
     expect(screen.queryByText('✓ Confirmado')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Confirmar' })).toBeInTheDocument();
-    // reabriu em modo 'margem' (padrão): só o campo Margem (%) aparece
     expect(screen.getByLabelText('Margem (%)')).toBeInTheDocument();
     expect(screen.queryByLabelText('Total Tar')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Calcular pelo Total Tar' })).toBeInTheDocument();
@@ -402,8 +362,6 @@ describe('MargensPage — após Confirmar, a margem calculada não mostra "—" 
     fireEvent.change(screen.getByLabelText('Rede'), { target: { value: '5' } });
 
     expect(await screen.findByText('✓ Confirmado')).toBeInTheDocument();
-    // margem = (100000 - 40000 - 10000) / 100000 * 100 = 50,00% — o bug original
-    // mostrava "—" aqui porque o faturamento tinha sido salvo como 0.
     expect(screen.getByText('50,00%')).toBeInTheDocument();
     expect(screen.queryByText('—')).not.toBeInTheDocument();
   });
@@ -419,7 +377,6 @@ describe('MargensPage — após Confirmar, a margem calculada não mostra "—" 
     fireEvent.change(screen.getByLabelText('Rede'), { target: { value: '5' } });
 
     expect(await screen.findByText('✓ Confirmado')).toBeInTheDocument();
-    // margem = (100000 - 40000 - 5000) / 100000 * 100 = 55,00%
     expect(screen.getByText('55,00%')).toBeInTheDocument();
     expect(screen.queryByText('—')).not.toBeInTheDocument();
   });
@@ -447,7 +404,6 @@ describe('MargensPage — filtros da tela de Relatório', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '📊 Ver relatório de período' }));
 
-    // RelatorioView dispara fetchRelatorio de novo ao montar
     await waitFor(() => expect(screen.queryByText('Gerando relatório...')).not.toBeInTheDocument());
     expect(await screen.findByText('Loja Verde')).toBeInTheDocument();
     expect(await screen.findByText('Loja Vermelha')).toBeInTheDocument();
@@ -504,15 +460,12 @@ describe('MargensPage — alternância de modo por loja', () => {
     await renderPage();
     fireEvent.change(screen.getByLabelText('Rede'), { target: { value: '5' } });
 
-    // as duas lojas nascem em modo 'margem' (padrão), sem Total Tar visível
     expect(screen.getAllByLabelText('Margem (%)')).toHaveLength(2);
     expect(screen.queryByLabelText('Total Tar')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Calcular pelo Total Tar' })).toHaveLength(2);
 
-    // revela o Total Tar só da primeira loja (Loja A)
     fireEvent.click(screen.getAllByRole('button', { name: 'Calcular pelo Total Tar' })[0]);
 
-    // Loja A agora mostra os dois campos; Loja B continua intacta em 'margem'
     expect(screen.getAllByLabelText('Margem (%)')).toHaveLength(2);
     expect(screen.getAllByLabelText('Total Tar')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Ocultar Total Tar' })).toBeInTheDocument();

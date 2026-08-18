@@ -1,36 +1,3 @@
-// Testes de componente (Vitest + React Testing Library) de RankingPage.jsx
-// na hierarquia v2 (Diretor -> Rede, ver CONTRATO-RANKING-API.md). Migrado
-// do contrato antigo de 2 níveis (Rede -> Loja): `rankingApi.js` e
-// `AuthContext.jsx` continuam totalmente mockados — nenhuma chamada de rede
-// real acontece aqui.
-//
-// Mapa de renomeação usado nesta migração:
-//   - fetchRedes        -> fetchDiretores  (topo agora é Diretor, com .redes[] aninhado)
-//   - criarLoja/removerLoja/atualizarLoja -> criarRede/removerRede/atualizarRede
-//   - loja_id (entradas) -> rede_id
-//   - lojaId (salvarEntrada) -> redeId
-//   - rótulo visível "Responsável" -> "GG" (texto apenas; responsavelId/fetchResponsaveis
-//     continuam iguais)
-//   - cabeçalho do card = diretor.nome puro (antes era "Rede " + responsavel.nome)
-//   - "loja oculta" (Lojas.ativo) não existe mais no nível operado pelo Ranking;
-//     equivalente agora é "rede inativa" (Redes.ativo), um nível acima
-//
-// Cobre:
-//  - uma rede com visivel:false não aparece como linha no card do diretor
-//    (grid principal), a rede visível aparece;
-//  - "Gerar relatório do dia" não inclui a rede oculta;
-//  - isAdmin:false esconde o botão Ocultar (report view) e a navegação para
-//    ConfigView em todos os lugares;
-//  - isAdmin:true: clicar em "Ocultar" chama atualizarRede com
-//    { visivel: false } e só atualiza o estado local após a promise
-//    resolver; se a promise rejeitar, o estado local não muda e o flash de
-//    erro aparece;
-//  - ConfigView "Diretores e redes": toggles de visivel/ativo, GG (select),
-//    CRUD de GGs, criação de rede sem campo responsavel;
-//  - ordenação fixa de categorias no relatório e parsing de valor BR
-//    (ambos sem mudança de comportamento, só de nome de campo);
-//  - polling de sincronização multi-usuário (rede_id em vez de loja_id).
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -97,9 +64,6 @@ function diretor1({ redes } = {}) {
   };
 }
 
-// diretor com uma rede ativa e uma rede inativa (Redes.ativo:false) — usado
-// para cobrir a feature "ocultar/mostrar rede individualmente" (equivalente,
-// um nível acima na hierarquia, ao antigo "ocultar loja").
 function redeAtiva() {
   return {
     id: 300, diretor_id: 5, nome: 'Rede Ativa', emoji: '🏆', ativo: true, visivel: true, responsavel: null,
@@ -151,7 +115,6 @@ describe('RankingPage — ocultar rede (grid principal)', () => {
 
     await renderPage();
 
-    // título do card agora é o nome do PRÓPRIO diretor (não mais "Rede " + responsavel.nome)
     expect(await screen.findByText('Victor Hugo')).toBeInTheDocument();
     expect(screen.getByText('Delta')).toBeInTheDocument();
     expect(screen.queryByText('Lendários')).not.toBeInTheDocument();
@@ -181,7 +144,6 @@ describe('RankingPage — controle de admin do botão Ocultar/Mostrar', () => {
 
     expect(await screen.findByText('Delta')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Ocultar' })).not.toBeInTheDocument();
-    // a ConfigView também não é acessível: sem o botão de navegação para admin
     expect(screen.queryByRole('button', { name: /Configurar diretores\/redes/ })).not.toBeInTheDocument();
   });
 
@@ -212,7 +174,6 @@ describe('RankingPage — toggleRedeVisivel (clique em Ocultar, isAdmin:true)', 
     await user.click(screen.getByRole('button', { name: 'Ocultar' }));
 
     expect(rankingApi.atualizarRede).toHaveBeenCalledWith(10, { visivel: false });
-    // ainda não resolveu: a rede continua visível no grid
     expect(screen.getByText('Delta')).toBeInTheDocument();
 
     resolvePromise({ ...redeVisivel(), visivel: false });
@@ -231,7 +192,6 @@ describe('RankingPage — toggleRedeVisivel (clique em Ocultar, isAdmin:true)', 
     await user.click(screen.getByRole('button', { name: 'Ocultar' }));
 
     await waitFor(() => expect(screen.getByText('Falha simulada ao atualizar rede')).toBeInTheDocument());
-    // a rede continua visível no grid — estado local não mudou
     expect(screen.getByText('Delta')).toBeInTheDocument();
   });
 });
@@ -250,7 +210,6 @@ describe('RankingPage — ConfigView (tela "⚙ Configurar diretores/redes")', (
     expect(screen.getByText('(oculta)')).toBeInTheDocument();
     const mostrarBtn = screen.getByRole('button', { name: 'Mostrar rede Lendários no relatório' });
     expect(mostrarBtn).toBeInTheDocument();
-    // a rede visível, na mesma tela, mostra "Ocultar rede ... no relatório" (não "Mostrar")
     expect(screen.getByRole('button', { name: 'Ocultar rede Delta no relatório' })).toBeInTheDocument();
 
     await user.click(mostrarBtn);
@@ -284,10 +243,10 @@ describe('RankingPage — GG de rede (formato aninhado { id, nome }, rótulo vis
 
     const selectAna = await screen.findByLabelText('GG da rede Delta');
     expect(selectAna.tagName).toBe('SELECT');
-    expect(selectAna.value).toBe('1'); // rede.responsavel = { id: 1, nome: 'Ana' }
+    expect(selectAna.value).toBe('1'); 
 
     const selectOculta = screen.getByLabelText('GG da rede Lendários');
-    expect(selectOculta.value).toBe(''); // rede.responsavel = null -> opção "Nenhum"
+    expect(selectOculta.value).toBe(''); 
   });
 
   it('isAdmin:true — trocar a seleção do <select> chama atualizarRede com { responsavelId } (number ou null)', async () => {
@@ -441,9 +400,6 @@ describe('RankingPage — POST /redes não envia responsavel (nasce sempre sem G
 });
 
 describe('RankingPage — ordem fixa de categorias no relatório gerado (buildFullReport)', () => {
-  // categorias retornadas pela API deliberadamente FORA da ordem fixa esperada no
-  // relatório (Acessórios primeiro, Receita Bruta por último) — buildFullReport deve
-  // reordenar só o texto do relatório, sem tocar em config.categorias/abas.
   const CATEGORIA_ACESSORIOS = { id: 3, nome: 'Acessórios', principal: false };
   const CATEGORIA_CORRECAO = { id: 2, nome: 'Correção', principal: false };
   const CATEGORIA_RECEITA_BRUTA = { id: 1, nome: 'Receita Bruta', principal: true };
@@ -460,13 +416,10 @@ describe('RankingPage — ordem fixa de categorias no relatório gerado (buildFu
   it('"Gerar relatório do dia" mostra Receita Bruta antes de Acessórios mesmo lançando valor em Acessórios primeiro e com a API retornando as categorias fora de ordem', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
     mockDadosOrdenacao({
-      // ordem retornada pela API: Acessórios, Correção, Receita Bruta (invertida)
       categorias: [CATEGORIA_ACESSORIOS, CATEGORIA_CORRECAO, CATEGORIA_RECEITA_BRUTA],
       valoresPorCategoria: {
-        // lançado em Acessórios primeiro (proposital), depois em Receita Bruta
         [CATEGORIA_ACESSORIOS.id]: [{ rede_id: 10, valor: 30 }],
         [CATEGORIA_RECEITA_BRUTA.id]: [{ rede_id: 10, valor: 10 }],
-        // Correção sem nenhum valor lançado -> seção omitida (comportamento já existente)
       },
     });
 
@@ -527,7 +480,6 @@ describe('RankingPage — ocultar/desativar rede individualmente (Redes.ativo, g
 
     expect(await screen.findByText('Rede Ativa')).toBeInTheDocument();
     expect(screen.queryByText('Rede Escondida')).not.toBeInTheDocument();
-    // total do diretor deve refletir só a rede ativa (50), não a soma com a inativa (999)
     expect(screen.getByText('R$ 50,00')).toBeInTheDocument();
     expect(screen.queryByText('R$ 1.049,00')).not.toBeInTheDocument();
   });
@@ -548,7 +500,7 @@ describe('RankingPage — ocultar/desativar rede individualmente (Redes.ativo, g
 
   it('categoria fica de fora do relatório quando só a rede inativa tem valor lançado (rede inativa não conta como "preenchida")', async () => {
     useAuth.mockReturnValue({ isAdmin: false });
-    mockDadosRedeInativa({ valores: [{ rede_id: 301, valor: 999 }] }); // só a rede inativa tem valor
+    mockDadosRedeInativa({ valores: [{ rede_id: 301, valor: 999 }] }); 
 
     const user = userEvent.setup();
     await renderPage();
@@ -640,7 +592,6 @@ describe('RankingPage — ConfigView: botão Desativar/Reativar rede (Redes.ativ
 
     expect(screen.getByText('(inativa)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reativar rede Rede Escondida' })).toBeInTheDocument();
-    // a rede ativa, no mesmo diretor, mostra "Desativar rede ..." (não "Reativar")
     expect(screen.getByRole('button', { name: 'Desativar rede Rede Ativa' })).toBeInTheDocument();
   });
 
@@ -660,7 +611,6 @@ describe('RankingPage — ConfigView: botão Desativar/Reativar rede (Redes.ativ
     await user.click(screen.getByRole('button', { name: 'Desativar rede Rede Ativa' }));
 
     expect(rankingApi.atualizarRede).toHaveBeenCalledWith(300, { ativo: false });
-    // ainda não resolveu: o botão continua no estado "Desativar"
     expect(screen.getByRole('button', { name: 'Desativar rede Rede Ativa' })).toBeInTheDocument();
 
     resolvePromise({ ...redeAtiva(), ativo: false });
@@ -685,14 +635,6 @@ describe('RankingPage — ConfigView: botão Desativar/Reativar rede (Redes.ativ
 });
 
 describe('RankingPage — polling automático de sincronização multi-usuário (a cada 5s)', () => {
-  // Os timers fake precisam estar instalados ANTES de o setInterval do polling ser
-  // criado, senão o intervalo real já agendado no primeiro mount não é afetado pelo
-  // avanço de tempo fake. Por isso cada teste: 1) renderiza e espera a carga inicial
-  // com timers reais (via renderPage(), que já usa waitFor normalmente); 2) instala
-  // vi.useFakeTimers(); 3) alterna currentView 'report' -> 'config' -> 'report'
-  // (usando o botão de admin) só para forçar o efeito de polling a limpar o interval
-  // real antigo e recriar um novo já sob os timers fake — sem isso o teste não
-  // conseguiria "adiantar" o polling.
   function armPolling() {
     fireEvent.click(screen.getByRole('button', { name: /Configurar diretores\/redes/ }));
     fireEvent.click(screen.getByRole('button', { name: /Voltar ao relatório/ }));

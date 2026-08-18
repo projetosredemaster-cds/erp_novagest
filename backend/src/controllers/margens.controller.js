@@ -6,9 +6,6 @@ function isPositiveInteger(value) {
   return Number.isInteger(value) && value > 0;
 }
 
-/**
- * GET /api/margens/entradas?data=YYYY-MM-DD
- */
 async function listarEntradas(req, res) {
   const { data } = req.query;
 
@@ -27,15 +24,6 @@ async function listarEntradas(req, res) {
   }
 }
 
-/**
- * POST /api/margens/entradas
- * Body: { data, lojaId, faturamento, custoProduto, totalTar, margemInformada? }
- * Cria ou atualiza (upsert) a entrada correspondente a (data, lojaId).
- *
- * Ordem de validação 400 (CONTRATO-MARGENS-API.md, seção 2): data ->
- * lojaId/existência -> faturamento -> custoProduto -> totalTar ->
- * margemInformada (opcional).
- */
 async function criarOuAtualizarEntrada(req, res) {
   const body = req.body || {};
   const { data, lojaId, faturamento, custoProduto, totalTar, margemInformada } = body;
@@ -102,9 +90,6 @@ async function criarOuAtualizarEntrada(req, res) {
   }
 }
 
-/**
- * GET /api/margens/relatorio?dataInicio=YYYY-MM-DD&dataFim=YYYY-MM-DD
- */
 async function gerarRelatorio(req, res) {
   const { dataInicio, dataFim } = req.query;
 

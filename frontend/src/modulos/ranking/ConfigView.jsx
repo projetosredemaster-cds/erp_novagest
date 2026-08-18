@@ -1,26 +1,13 @@
-// style-system: Tailwind
 import { useEffect, useMemo, useState } from 'react';
 import {
   fetchResponsaveis, criarResponsavel, removerResponsavel,
   fetchRedes, criarLoja, atualizarLoja,
 } from '../../lib/cadastrosApi.js';
 
-// classes reaproveitadas (mesma filosofia de RankingPage.jsx/MargensPage.jsx — ainda não
-// há util compartilhado entre os módulos, ver CLAUDE.md)
 const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110";
 const toggleBtn = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-full px-2 py-0.5 text-[11px] font-bold cursor-pointer hover:brightness-110";
 const removeBtn = "bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-full w-[18px] h-[18px] text-[11px] cursor-pointer leading-none flex-shrink-0";
 
-// Decisão de UX (visivel vs ativo na Rede, ver resumo final): mantidos como DOIS controles
-// separados e explícitos ("Ocultar"/"Mostrar" para `visivel`, "Desativar"/"Reativar" para
-// `ativo`) em vez de combinados num único botão — são conceitos com efeitos diferentes
-// (visivel: some do relatório/ranking mas continua "ativa" pro resto do sistema; ativo:
-// soft-delete de verdade, tem efeito no sistema inteiro — some dos seletores do Margens
-// também — é o que o backend olha antes de permitir excluir a rede/loja) e um admin pode
-// querer, por exemplo, desativar uma rede que fechou sem tirá-la do relatório do dia em
-// que ainda havia lançamento, ou ocultar temporariamente uma rede ainda ativa. A mesma
-// lógica (ativo = efeito no sistema todo) vale para Loja — só que Loja nunca tem `visivel`,
-// só `ativo` (ver CONTRATO-CADASTROS-API.md, seção 11: não existe DELETE de Loja).
 export default function ConfigView({
   config,
   removeDiretor, addDiretor, updateDiretorNome,
@@ -35,14 +22,11 @@ export default function ConfigView({
   const [novaRedeNome, setNovaRedeNome] = useState('');
   const [novaCategoriaNome, setNovaCategoriaNome] = useState('');
 
-  // lista achatada "Diretor — Rede" (todas as redes de todos os diretores), usada pelo
-  // <select> de "mover loja pra outra rede" — uma loja pode ir pra qualquer rede, não só
-  // pras redes do diretor atual dela.
   const todasRedesFlat = useMemo(() => (
     config.diretores.flatMap(d => d.redes.map(r => ({ id: r.id, label: `${d.nome} — ${r.nome}` })))
   ), [config.diretores]);
 
-  // ---------- GGs (responsáveis): lista carregada uma vez ao entrar na ConfigView ----------
+
   const [responsaveis, setResponsaveis] = useState([]);
   const [loadingResponsaveis, setLoadingResponsaveis] = useState(true);
   const [responsaveisError, setResponsaveisError] = useState(null);
@@ -78,10 +62,6 @@ export default function ConfigView({
       .catch(err => setResponsavelFormError(err.message || 'Erro ao remover GG'));
   }
 
-  // ---------- Lojas físicas: carregadas via GET /api/cadastros/redes (única rota que
-  // devolve lojas[] aninhado) — dado independente de `config.diretores` (que vem de
-  // GET /api/cadastros/diretores, sem lojas). Loja nunca aparece no Ranking em si, só
-  // aqui na tela de configuração (ver CLAUDE.md). ----------
   const [redesComLojas, setRedesComLojas] = useState([]);
   const [loadingLojas, setLoadingLojas] = useState(true);
   const [lojasError, setLojasError] = useState(null);
@@ -100,9 +80,6 @@ export default function ConfigView({
     return map;
   }, [redesComLojas]);
 
-  // helper genérico de mutação de loja: só troca o estado local depois que a API confirma,
-  // substituindo a loja pelo objeto real retornado — mesma filosofia não-otimista usada
-  // pra Rede em RankingPage.jsx (updateRedeCampo).
   function updateLojaLocal(redeIdAtual, lojaId, lojaAtualizada) {
     setRedesComLojas(prev => prev.map(r => {
       if (r.id === lojaAtualizada.rede_id) {
@@ -370,9 +347,7 @@ export default function ConfigView({
                   {c.visivel === false ? 'Mostrar' : 'Ocultar'}
                 </button>
               ) : null}
-              {/* categorias padrão nunca podem ser excluídas — só ocultadas (ver toggle
-                  acima); o botão de remover simplesmente não existe pra elas, nem
-                  desabilitado (ver CONTRATO-RANKING-API.md, seção 4). */}
+              {}
               {isAdmin && !c.padrao ? (
                 <button
                   onClick={() => removeCategoria(c.id)}

@@ -1,12 +1,7 @@
 require('dotenv').config();
 const { sql, getPool } = require('../config/db');
 
-/**
- * Script utilitário para testar a conexão com o Azure SQL Database
- * usando as credenciais definidas em backend/.env.
- *
- * Uso: npm run test:db  (a partir da pasta backend/)
- */
+
 async function testConnection() {
   console.log('[testConnection] Tentando conectar ao Azure SQL Database...');
   console.log(`[testConnection] Servidor: ${process.env.DB_SERVER || '(não definido)'}`);
@@ -26,7 +21,6 @@ async function testConnection() {
     try {
       await sql.close();
     } catch (_) {
-      // ignora erro ao fechar pool que pode nem ter sido aberta
     }
   }
 }

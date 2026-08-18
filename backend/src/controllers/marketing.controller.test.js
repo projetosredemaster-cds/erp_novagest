@@ -1,28 +1,4 @@
-// Testes de integração de rota (Supertest, sem subir o servidor de verdade,
-// sem tocar o Azure SQL real) para o módulo Marketing (ver
-// CONTRATO-MARKETING-API.md v1). Cobre:
-//   - GET    /api/marketing/entradas
-//   - POST   /api/marketing/entradas (upsert)
-//   - DELETE /api/marketing/entradas (idempotente)
-//   - autenticação (401 sem token / token inválido)
-//
-// NOTA DE IMPLEMENTAÇÃO — por que `require()` (CJS puro) em vez de `import`:
-// mesmo motivo documentado no topo de `ranking.controller.test.js`/
-// `margens.controller.test.js`: `vi.mock('../models/X', factory)` com
-// sintaxe `import` só intercepta o require feito DENTRO do próprio arquivo
-// de teste; como `marketing.service.js`/`marketing.controller.js`/`app.js`
-// são CommonJS puro (sem `import`/`export`), o require interno deles não
-// passa pelo grafo de módulos do Vite e continuaria resolvendo para o model
-// REAL. A alternativa segura usada aqui é obter a MESMA referência de
-// objeto que `marketing.service.js` usa (garantida pelo cache de módulos do
-// Node, compartilhado entre requires em CJS puro) e sobrescrever cada
-// método com `vi.spyOn(...).mockImplementation(...)`.
-//
-// Rede de segurança: todo método do model recebe, por padrão, uma
-// implementação-guarda que lança erro se for chamada sem um mock explícito
-// no teste — qualquer teste que acidentalmente dependa de um método não
-// mockado falha ALTO E CLARO em vez de silenciosamente tentar uma conexão
-// real com o Azure SQL de produção.
+
 
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
@@ -37,8 +13,6 @@ function tokenFor({ isAdmin = false } = {}) {
   );
 }
 
-// linha "crua" como o model devolveria (JOIN Lojas->Redes->Diretores, LEFT
-// JOIN duplo em MarketingEntradas) — ver marketing.model.js.
 function rowLoja({
   diretorId = 1, diretorNome = 'Victor Hugo',
   redeId = 5, redeNome = 'Delta',
@@ -59,8 +33,6 @@ function rowLoja({
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  // guarda: qualquer método do model chamado sem mock explícito no teste
-  // lança, em vez de tentar se conectar ao Azure SQL real.
   for (const key of Object.keys(marketingModel)) {
     if (typeof marketingModel[key] === 'function') {
       vi.spyOn(marketingModel, key).mockImplementation(() => {
@@ -194,9 +166,6 @@ describe('GET /api/marketing/entradas', () => {
   });
 
   it('200 — a filtragem de Rede/Loja inativa é responsabilidade do SQL do model (WHERE l.ativo=1 AND r.ativo=1); o controller/service só repassa o que o model devolve — se o mock só devolve lojas ativas, só elas aparecem na resposta', async () => {
-    // Este teste documenta o contrato, não valida o SQL real (que exigiria banco de teste
-    // provisionado — ver relatório de QA): com o model mockado para simular o efeito do WHERE
-    // ativo=1 (só devolvendo a loja ativa), a resposta reflete fielmente isso.
     marketingModel.listLojasAtivasComEntradas.mockResolvedValue([
       rowLoja({ lojaId: 40, lojaNome: 'Loja Ativa' }),
     ]);
@@ -258,9 +227,6 @@ describe('POST /api/marketing/entradas', () => {
     expect(res.status).toBe(401);
   });
 
-  // ---- Ordem exata de validação (CONTRATO-MARKETING-API.md, seção 2):
-  // lojaId -> ano/mes -> faturamentoGeral -> faturamentoMarketing -> faturamentoRetornoIndicacao
-
   it('400 quando "lojaId" está ausente — 1º na ordem de validação', async () => {
     const { lojaId, ...resto } = payloadValido;
     const res = await request(app)
@@ -270,7 +236,6 @@ describe('POST /api/marketing/entradas', () => {
 
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: 'Loja informada não existe.' });
-    // não deveria nem consultar o model — lojaId já falha em formato antes disso
     expect(marketingModel.existeLoja).not.toHaveBeenCalled();
   });
 

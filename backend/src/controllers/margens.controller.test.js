@@ -1,28 +1,4 @@
-// Testes de integração de rota (Supertest, sem subir o servidor de verdade,
-// sem tocar o Azure SQL real) para o módulo Margens (ver CONTRATO-MARGENS-API.md
-// v5). Cobre:
-//   - GET  /api/margens/entradas
-//   - POST /api/margens/entradas (upsert)
-//   - GET  /api/margens/relatorio
-//   - autenticação (401 sem token / token inválido)
-//
-// NOTA DE IMPLEMENTAÇÃO — por que `require()` (CJS puro) em vez de `import`:
-// mesmo motivo documentado no topo de `ranking.controller.test.js`:
-// `vi.mock('../models/X', factory)` com sintaxe `import` só intercepta o
-// require feito DENTRO do próprio arquivo de teste; como
-// `margens.service.js`/`margens.controller.js`/`app.js` são CommonJS puro
-// (sem `import`/`export`), o require interno deles não passa pelo grafo de
-// módulos do Vite e continuaria resolvendo para o model REAL. A alternativa
-// segura usada aqui é obter a MESMA referência de objeto que
-// `margens.service.js` usa (garantida pelo cache de módulos do Node,
-// compartilhado entre requires em CJS puro) e sobrescrever cada método com
-// `vi.spyOn(...).mockImplementation(...)`.
-//
-// Rede de segurança: todo método do model recebe, por padrão, uma
-// implementação-guarda que lança erro se for chamada sem um mock explícito
-// no teste — qualquer teste que acidentalmente dependa de um método não
-// mockado falha ALTO E CLARO em vez de silenciosamente tentar uma conexão
-// real com o Azure SQL de produção.
+
 
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
@@ -39,8 +15,6 @@ function tokenFor({ isAdmin = false } = {}) {
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  // guarda: qualquer método do model chamado sem mock explícito no teste
-  // lança, em vez de tentar se conectar ao Azure SQL real.
   for (const key of Object.keys(margensModel)) {
     if (typeof margensModel[key] === 'function') {
       vi.spyOn(margensModel, key).mockImplementation(() => {
@@ -122,9 +96,7 @@ describe('GET /api/margens/entradas', () => {
       id: 900, loja_id: 40,
       faturamento: 335328.34, custoProduto: 168124.80, totalTar: 6000.00,
     });
-    // lucro = 335328.34 - 168124.80 - 6000.00 = 161203.54
     expect(entrada.lucro).toBeCloseTo(161203.54, 2);
-    // percentualMargem = lucro / faturamento * 100
     expect(entrada.percentualMargem).toBeCloseTo(48.07, 2);
   });
 
@@ -466,10 +438,6 @@ describe('POST /api/margens/entradas', () => {
     expect(margensModel.upsertEntrada).not.toHaveBeenCalled();
   });
 
-  // NOTA: diferente do que se poderia supor, `margemInformada: ''` (string vazia) NÃO
-  // cai neste 400 — `Number('')` é `0` em JS (não `NaN`), então uma string vazia é
-  // silenciosamente aceita e tratada como `margemInformada: 0`. Documentado aqui como
-  // comportamento real observado (ver relatório de QA), não como bug corrigido.
   it('200 — "margemInformada: \'\'" (string vazia) é aceito e convertido para 0, não gera 400 (Number(\'\') é 0, não NaN)', async () => {
     margensModel.existeLoja.mockResolvedValue(true);
     margensModel.upsertEntrada.mockResolvedValue({
@@ -653,7 +621,6 @@ describe('GET /api/margens/relatorio', () => {
   });
 
   it('200 — fronteira de cor: percentualMargem = 41 -> verde', async () => {
-    // lucro/faturamento = 0.41 -> faturamento=100, lucro=41 -> custo+tar=59
     margensModel.getSomasPorLojaNoPeriodo.mockResolvedValue([
       {
         loja_id: 1, loja_nome: 'Loja 41', rede_id: 5, rede_nome: 'Delta',
@@ -693,7 +660,6 @@ describe('GET /api/margens/relatorio', () => {
   });
 
   it('200 — fronteira de cor: percentualMargem = 39,99 -> vermelho', async () => {
-    // faturamento=10000, lucro=3999 -> percentual = 39.99
     margensModel.getSomasPorLojaNoPeriodo.mockResolvedValue([
       {
         loja_id: 1, loja_nome: 'Loja 39,99', rede_id: 5, rede_nome: 'Delta',
@@ -713,8 +679,6 @@ describe('GET /api/margens/relatorio', () => {
   });
 
   it('200 — loja sem nenhum lançamento no período não aparece no resultado (mock simula ausência)', async () => {
-    // O JOIN é feito no SQL real; aqui o mock só retorna as lojas que TÊM
-    // lançamento no período — simulando o comportamento do INNER JOIN.
     margensModel.getSomasPorLojaNoPeriodo.mockResolvedValue([
       {
         loja_id: 1, loja_nome: 'Loja Com Lançamento', rede_id: 5, rede_nome: 'Delta',
@@ -722,8 +686,6 @@ describe('GET /api/margens/relatorio', () => {
         diretor_id: 1, diretor_nome: 'Victor Hugo',
         faturamento: 1000, custoProduto: 400, totalTar: 100,
       },
-      // "Loja Sem Lançamento" (id 2) deliberadamente NÃO está na lista —
-      // é isso que o INNER JOIN real garantiria.
     ]);
 
     const res = await request(app)
@@ -754,9 +716,6 @@ describe('GET /api/margens/relatorio', () => {
         responsavel_id: null, responsavel_nome: null,
         diretor_id: 1, diretor_nome: 'Victor Hugo',
         faturamento: 1000, custoProduto: 400, totalTar: 100,
-        // campos a mais que o SELECT real do relatório nunca traz hoje — simula o
-        // pior caso (alguém adicionar SUM(franquia) no futuro) pra garantir que,
-        // mesmo vindo do model, isso não vaza nem entra em nenhum cálculo aqui.
         margemInformada: 999, franquia: 999,
       },
     ]);
@@ -769,7 +728,6 @@ describe('GET /api/margens/relatorio', () => {
     const loja = res.body[0].lojas[0];
     expect(loja).not.toHaveProperty('margemInformada');
     expect(loja).not.toHaveProperty('franquia');
-    // lucro/percentualMargem/cor continuam vindo só de faturamento/custoProduto/totalTar
     expect(loja.lucro).toBe(500);
     expect(loja.percentualMargem).toBe(50);
     expect(loja.cor).toBe('verde');

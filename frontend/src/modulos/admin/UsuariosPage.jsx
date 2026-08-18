@@ -1,4 +1,3 @@
-// style-system: Tailwind
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../app/AuthContext.jsx';
 import { listarUsuarios, criarUsuario, removerUsuario } from '../auth/authApi.js';

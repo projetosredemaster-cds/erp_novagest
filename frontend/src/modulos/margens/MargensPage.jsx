@@ -1,15 +1,9 @@
-// style-system: Tailwind
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { fetchRedes } from '../../lib/cadastrosApi.js';
 import { fetchEntradas, salvarEntrada, fetchRelatorio } from './margensApi.js';
 
-// ---------- máscara monetária BR (mesma lógica de RankingPage.jsx — ainda não há
-// um util compartilhado entre os módulos, ver CLAUDE.md) ----------
-// interpreta texto digitado/colado no formato brasileiro (ex: "1.730,00" ou "1730,5")
-// como número — inputs de valor são type="text" justamente para não deixar o navegador
-// truncar a vírgula decimal como faria um type="number" nativo.
 function parseValorBR(texto) {
   let s = String(texto ?? '').trim();
   if (!s) return 0;

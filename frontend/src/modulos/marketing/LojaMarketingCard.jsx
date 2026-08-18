@@ -1,8 +1,3 @@
-// style-system: Tailwind
-// Um card por loja, com a UI variando conforme a aba ativa (`aba`, "marketing" ou
-// "retorno" — ver MarketingPage.jsx): os dois inputs editáveis e o campo somente-leitura
-// mudam de campo/rótulo, mas o estado por trás (valorCampo/setCampo, vindo da página) é o
-// MESMO objeto por loja nas duas abas — ver "Estado compartilhado" no pedido original.
 import { useEffect, useId, useRef } from 'react';
 import {
   extrairDigitos,
@@ -36,20 +31,6 @@ export default function LojaMarketingCard({
   const blurTimerRef = useRef(null);
   useEffect(() => () => clearTimeout(blurTimerRef.current), []);
 
-  // Consolida o blur dos campos editáveis do card num único disparo de `onBlurLoja`, só
-  // quando o foco realmente sai do card inteiro — antes cada um dos até 3 inputs tinha seu
-  // próprio onBlur chamando onBlurLoja direto, então tabular pelos campos da mesma loja
-  // disparava (até) 3 blurs seguidos pro mesmo card (idempotente, mas redundante; o
-  // dirty-check em MarketingPage.jsx já evita grande parte disso, mas evitar aqui também
-  // simplifica o gate).
-  //
-  // Mecanismo primário: `e.relatedTarget` (síncrono, sem race condition de timer) — se o
-  // próximo elemento focado ainda está dentro deste card (ex.: Tab de "Faturamento Geral"
-  // pra "Faturamento Marketing" da MESMA loja), não dispara nada; se saiu do card (ou foi
-  // pra um elemento fora dele), dispara handleCampoBlur -> onBlurLoja imediatamente.
-  // Fallback: `relatedTarget` pode vir `null` em alguns cenários (clique fora da janela,
-  // alguns navegadores/mobile não preenchem) — nesse caso usa um debounce curto (200ms),
-  // cancelado por handleCampoFocus se o foco voltar pro mesmo card dentro da janela.
   function handleCampoBlur(e) {
     const relatedTarget = e.relatedTarget;
     if (relatedTarget && cardRef.current?.contains(relatedTarget)) return;
@@ -153,8 +134,6 @@ export default function LojaMarketingCard({
   );
 }
 
-// campo monetário BR editável, com label acessível (htmlFor/id) — mesma máscara/handlers
-// já usados no restante do sistema (ver comentário de origem em marketingFormat.js).
 function CampoFaturamento({ id, label, valor, onChange, onBackspace, onBlur, disabled }) {
   return (
     <label htmlFor={id} className="flex flex-col gap-1">
@@ -179,8 +158,6 @@ function CampoFaturamento({ id, label, valor, onChange, onBackspace, onBlur, dis
   );
 }
 
-// exibição somente-leitura de um valor monetário já formatado — usada pro Faturamento
-// Geral na aba Retorno/Indicação (item 5: editável só na aba Marketing).
 function CampoSomenteLeitura({ label, valorFormatado }) {
   return (
     <div className="flex flex-col gap-1">

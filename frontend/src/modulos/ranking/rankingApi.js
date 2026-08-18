@@ -1,15 +1,4 @@
-// style-system: n/a (módulo de dados, sem JSX)
-// Camada de acesso à API real do módulo Ranking.
-// Isola todas as chamadas fetch para manter RankingPage.jsx focado em UI/estado.
-// Todas as rotas de /api/ranking/* exigem autenticação — `apiRequest` (ver
-// src/lib/apiClient.js) já anexa o header `Authorization: Bearer <token>`
-// lendo o token salvo (mesmo lugar que AuthContext usa) e dispara o logout
-// global se a API responder 401 (token ausente/expirado).
-//
-// CRUD de Diretor/Rede/Responsavel foi extraído para src/lib/cadastrosApi.js
-// (cadastro compartilhado com o módulo Margens) — ver CONTRATO-RANKING-API.md
-// v3 e CONTRATO-CADASTROS-API.md. Este arquivo é dono só de
-// Categorias/Entradas e do envio de relatório por e-mail.
+
 import { apiRequest } from '../../lib/apiClient.js';
 
 function request(path, options) {

@@ -4,17 +4,10 @@ function isPositiveInteger(value) {
   return Number.isInteger(value) && value > 0;
 }
 
-/**
- * Valida `ano`/`mes` (já convertidos com `Number(...)`): ambos precisam ser
- * inteiros, `mes` entre 1 e 12.
- */
 function isAnoMesValido(anoNum, mesNum) {
   return Number.isInteger(anoNum) && Number.isInteger(mesNum) && mesNum >= 1 && mesNum <= 12;
 }
 
-/**
- * GET /api/marketing/entradas?ano=YYYY&mes=MM
- */
 async function listarEntradas(req, res) {
   const { ano, mes } = req.query;
   const anoNum = Number(ano);
@@ -34,16 +27,6 @@ async function listarEntradas(req, res) {
     return res.status(500).json({ error: 'Erro interno ao listar entradas de marketing.' });
   }
 }
-
-/**
- * POST /api/marketing/entradas
- * Body: { lojaId, ano, mes, faturamentoGeral, faturamentoMarketing, faturamentoRetornoIndicacao }
- * Cria ou atualiza (upsert) a entrada correspondente a (ano, mes, lojaId).
- *
- * Ordem de validação 400 (CONTRATO-MARKETING-API.md, seção 2): lojaId ->
- * ano/mes -> faturamentoGeral -> faturamentoMarketing ->
- * faturamentoRetornoIndicacao.
- */
 async function criarOuAtualizarEntrada(req, res) {
   const body = req.body || {};
   const { lojaId, ano, mes, faturamentoGeral, faturamentoMarketing, faturamentoRetornoIndicacao } = body;
@@ -115,13 +98,6 @@ async function criarOuAtualizarEntrada(req, res) {
     return res.status(500).json({ error: 'Erro interno ao salvar entrada de marketing.' });
   }
 }
-
-/**
- * DELETE /api/marketing/entradas?ano=YYYY&mes=MM&lojaId=X
- * Remove a entrada de (ano, mes, lojaId). Idempotente: 204 tanto se a linha
- * existia quanto se não existia (ver CONTRATO-MARKETING-API.md, seção 3) —
- * não valida se a loja existe antes de excluir, diferente do POST.
- */
 async function excluirEntrada(req, res) {
   const { ano, mes, lojaId } = req.query;
   const anoNum = Number(ano);

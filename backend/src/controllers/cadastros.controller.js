@@ -8,9 +8,6 @@ function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-/**
- * GET /api/cadastros/diretores
- */
 async function listarDiretores(req, res) {
   try {
     const diretores = await cadastrosService.getDiretoresComRedes();
@@ -21,10 +18,7 @@ async function listarDiretores(req, res) {
   }
 }
 
-/**
- * POST /api/cadastros/diretores
- * Body: { nome: string }
- */
+
 async function criarDiretor(req, res) {
   const body = req.body || {};
   const { nome } = body;
@@ -49,11 +43,6 @@ async function criarDiretor(req, res) {
   }
 }
 
-/**
- * PUT /api/cadastros/diretores/:id
- * Body: { nome: string } — atualização parcial, mas só `nome` existe neste
- * nível, então é obrigatório.
- */
 async function atualizarDiretor(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {
@@ -89,9 +78,6 @@ async function atualizarDiretor(req, res) {
   }
 }
 
-/**
- * DELETE /api/cadastros/diretores/:id
- */
 async function excluirDiretor(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {
@@ -121,10 +107,6 @@ async function excluirDiretor(req, res) {
   }
 }
 
-/**
- * GET /api/cadastros/redes
- * Redes visíveis com diretor + responsável + lojas físicas aninhadas.
- */
 async function listarRedes(req, res) {
   try {
     const redes = await cadastrosService.getRedesComDiretorResponsavelLojas();
@@ -135,10 +117,6 @@ async function listarRedes(req, res) {
   }
 }
 
-/**
- * POST /api/cadastros/redes
- * Body: { diretorId: number, nome: string, emoji?: string }
- */
 async function criarRede(req, res) {
   const body = req.body || {};
   const { diretorId, nome, emoji } = body;
@@ -174,15 +152,6 @@ async function criarRede(req, res) {
   }
 }
 
-/**
- * PUT /api/cadastros/redes/:id
- * Body parcial: { nome?: string, emoji?: string, responsavelId?: number|null,
- * ativo?: boolean, visivel?: boolean, diretorId?: number } — ao menos um
- * campo é obrigatório. `responsavelId` aceita `null` explícito para
- * desatribuir; ausência do campo no corpo preserva o valor atual (mesmo
- * princípio de `nome`/`emoji`/`ativo`/`visivel`). `diretorId` reatribui a
- * rede a outro diretor.
- */
 async function atualizarRede(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {
@@ -320,10 +289,6 @@ async function excluirRede(req, res) {
   }
 }
 
-/**
- * POST /api/cadastros/lojas
- * Body: { redeId: number, nome: string }
- */
 async function criarLoja(req, res) {
   const body = req.body || {};
   const { redeId, nome } = body;
@@ -359,11 +324,6 @@ async function criarLoja(req, res) {
   }
 }
 
-/**
- * PUT /api/cadastros/lojas/:id
- * Body parcial: { nome?: string, ativo?: boolean, redeId?: number } — ao
- * menos um campo é obrigatório. `redeId` reatribui a loja a outra rede.
- */
 async function atualizarLoja(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {
@@ -426,9 +386,6 @@ async function atualizarLoja(req, res) {
   }
 }
 
-/**
- * GET /api/cadastros/responsaveis
- */
 async function listarResponsaveis(req, res) {
   try {
     const responsaveis = await cadastrosService.getResponsaveis();
@@ -439,11 +396,6 @@ async function listarResponsaveis(req, res) {
   }
 }
 
-/**
- * POST /api/cadastros/responsaveis
- * Body: { nome: string }
- * Restrito a admin (adminMiddleware aplicado na rota).
- */
 async function criarResponsavel(req, res) {
   const body = req.body || {};
   const { nome } = body;
@@ -468,10 +420,6 @@ async function criarResponsavel(req, res) {
   }
 }
 
-/**
- * DELETE /api/cadastros/responsaveis/:id
- * Restrito a admin (adminMiddleware aplicado na rota).
- */
 async function excluirResponsavel(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {

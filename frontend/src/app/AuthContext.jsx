@@ -1,4 +1,4 @@
-// style-system: n/a (contexto/estado, sem JSX de UI)
+
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login as loginRequest, getMe } from '../modulos/auth/authApi.js';
@@ -11,8 +11,6 @@ export function AuthProvider({ children }) {
   const navigate = useNavigate();
   const [token, setToken] = useState(null);
   const [usuario, setUsuario] = useState(null);
-  // true até a validação do token salvo (GET /auth/me) terminar — evita
-  // "piscar" a tela de login antes de saber se já existe uma sessão válida.
   const [loadingAuth, setLoadingAuth] = useState(true);
 
   const clearSession = useCallback(() => {
@@ -21,7 +19,6 @@ export function AuthProvider({ children }) {
     setUsuario(null);
   }, []);
 
-  // valida o token salvo (se houver) uma única vez, ao montar a app
   useEffect(() => {
     let cancelled = false;
     const stored = loadAuth();
@@ -34,7 +31,6 @@ export function AuthProvider({ children }) {
           setUsuario(me);
         })
         .catch(() => {
-          // token inválido/expirado (401) ou erro de rede: trata como deslogado
           clearAuth();
         })
       : Promise.resolve();
@@ -45,10 +41,6 @@ export function AuthProvider({ children }) {
 
     return () => { cancelled = true; };
   }, []);
-
-  // qualquer chamada de API (de qualquer módulo) que receba 401 dispara este
-  // evento global — encerra a sessão local e manda o usuário pro login,
-  // mesmo que ele já estivesse navegando dentro da área autenticada.
   useEffect(() => {
     return onUnauthorized(() => {
       clearSession();
@@ -81,7 +73,6 @@ export function AuthProvider({ children }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-// eslint-disable-next-line react-refresh/only-export-components -- hook precisa viver junto do Provider/Context
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) {

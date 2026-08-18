@@ -1,13 +1,5 @@
 const jwt = require('jsonwebtoken');
 
-/**
- * Middleware de autenticação. Lê o header `Authorization: Bearer <token>`,
- * valida o token JWT com `process.env.JWT_SECRET` e, se válido, popula
- * `req.usuario = { id, email, isAdmin }` a partir do payload decodificado.
- *
- * Ver seção "authMiddleware" de CONTRATO-AUTH-API.md para as mensagens de
- * erro exatas.
- */
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
 

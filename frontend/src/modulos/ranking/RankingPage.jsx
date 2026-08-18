@@ -1,4 +1,3 @@
-// style-system: Tailwind
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
@@ -14,17 +13,12 @@ import {
 import { useAuth } from '../../app/AuthContext.jsx';
 import ConfigView from './ConfigView.jsx';
 
-// estado inicial vazio: diretores/categorias agora vêm da API (ver useEffect de carga em RankingPage)
-// hierarquia: Diretor -> Rede (o Ranking não opera no nível Loja física, ver CLAUDE.md/CONTRATO-RANKING-API.md)
 const emptyState = () => ({ diretores: [], categorias: [] });
 
 function toBRL(n) {
   n = Number(n) || 0;
   return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-// interpreta texto digitado/colado no formato brasileiro (ex: "1.730,00" ou "1730,5")
-// como número — inputs de valor são type="text" justamente para não deixar o navegador
-// truncar a vírgula decimal como faria um type="number" nativo.
 function parseValorBR(texto) {
   let s = String(texto ?? '').trim();
   if (!s) return 0;
@@ -38,13 +32,9 @@ function parseValorBR(texto) {
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : 0;
 }
-// máscara monetária ao vivo (estilo app bancário): dígitos digitados são tratados da
-// direita pra esquerda como centavos — "173000" digitado vira "1.730,00" exibido.
-// extrai só os dígitos (0-9) de um texto — usado a cada tecla pra achar a base em centavos
 function extrairDigitos(texto) {
   return String(texto ?? '').replace(/\D/g, '');
 }
-// formata a base de dígitos (centavos) no padrão BR: "173000" -> "1.730,00"
 function formatarDigitosBR(digitos) {
   if (!digitos) return '';
   const n = parseInt(digitos, 10) || 0;
@@ -52,21 +42,15 @@ function formatarDigitosBR(digitos) {
   const inteiro = String(Math.floor(n / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   return `${inteiro},${centavos}`;
 }
-// base de dígitos -> valor float guardado em `entries` (nunca a string formatada); base
-// vazia representa campo vazio, não zero — preserva a distinção "nunca digitado" vs "digitou 0"
 function digitosParaValor(digitos) {
   if (!digitos) return '';
   return (parseInt(digitos, 10) || 0) / 100;
 }
-// caminho inverso: reconstrói a base de dígitos a partir do valor float em `entries` —
-// usado a cada render pra formatar o input e pelo backspace pra saber o que remover
 function valorParaDigitos(valor) {
   if (valor === '' || valor === undefined || valor === null) return '';
   const n = Math.round(Number(valor) * 100);
   return Number.isFinite(n) ? String(n) : '';
 }
-// força o cursor pro final do campo após a formatação reescrever o texto — mantém o
-// comportamento "digita da direita pra esquerda" de uma máscara de app bancário
 function moveCaretToEnd(el) {
   requestAnimationFrame(() => {
     const len = el.value.length;
@@ -78,10 +62,6 @@ function formatDatePt(iso) {
   return d + '/' + m;
 }
 function dataKey(date, catId) { return date + '|' + catId; }
-// busca as entradas de TODAS as categorias em paralelo — reutilizada tanto pelo fetch
-// inicial (ao trocar de data/carregar categorias) quanto pelo polling de sincronização
-// multi-usuário (ver useEffect de polling em RankingPage). Não conhece estado do
-// componente; recebe tudo por parâmetro para poder ficar fora do componente.
 function fetchAllEntradas(date, categorias) {
   return Promise.all(
     categorias.map(c =>
@@ -89,11 +69,6 @@ function fetchAllEntradas(date, categorias) {
     )
   );
 }
-// funde o resultado de fetchAllEntradas no estado `entries` existente. `protect`
-// (opcional, { catId, redeId }) evita sobrescrever, na categoria indicada, o valor da
-// rede indicada — usado só pelo polling em background pra não sobrescrever o input que
-// o usuário está editando neste exato momento; o fetch inicial ao trocar de data não
-// passa `protect` e sobrescreve tudo, como sempre fez.
 function mergeEntradasResults(prev, results, date, protect) {
   const next = { ...prev };
   results.forEach(({ catId, lista }) => {
@@ -110,9 +85,6 @@ function mergeEntradasResults(prev, results, date, protect) {
   });
   return next;
 }
-// ordem fixa de exibição no relatório gerado (buildFullReport) — não afeta a ordem
-// das abas na tela nem config.categorias em si. Comparação é insensível a acento/caixa
-// para tolerar pequenas divergências de digitação no cadastro da categoria.
 const ORDEM_RELATORIO = ['Receita Bruta', 'Correção', 'Acessórios'];
 function normalizeNomeCategoria(nome) {
   return String(nome || '')
@@ -126,21 +98,16 @@ function prioridadeCategoria(nome) {
   const idx = ORDEM_RELATORIO_NORMALIZADA.indexOf(normalizeNomeCategoria(nome));
   return idx === -1 ? Infinity : idx;
 }
-// nomes de aba do Excel: máx. 31 caracteres, sem / \ ? * [ ] :
 function sanitizeSheetName(nome) {
   const cleaned = String(nome).replace(/[/\\?*[\]:]/g, '').trim();
   return (cleaned || 'Categoria').slice(0, 31);
 }
-// ordena as redes (Delta, Lendários...) de um diretor por valor lançado e atribui
-// posição/medalha — mesma lógica de antes (quando operava sobre lojas de uma rede),
-// só que agora opera um nível acima na hierarquia Diretor -> Rede.
 function rankRede(values, redes) {
   const withVal = redes.map(r => ({ ...r, valor: Number(values[r.id]) || 0 }));
   withVal.sort((a, b) => b.valor - a.valor);
   return withVal.map((r, i) => ({ ...r, pos: i, medal: i === 0 ? '🥇' : (i === 1 ? '🥈' : '🍍') }));
 }
 
-// classes reaproveitadas (evita repetição, mesma filosofia de variável CSS do protótipo original)
 const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110";
 const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110";
 const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-5 pt-5 pb-[22px]";
@@ -151,17 +118,6 @@ export default function RankingPage() {
   const [entries, setEntries] = useState({});
   const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [currentCatId, setCurrentCatId] = useState(null);
-  // RankingPage é montado por DUAS rotas (ver moduleRegistry.js): '/ranking' (placar do
-  // dia) e '/ranking/configuracoes' (ConfigView), rota real e admin-only (RequireAdmin já
-  // bloqueia acesso direto pela URL pra quem não é admin — não precisa duplicar essa
-  // checagem aqui). currentView é derivado do pathname atual a cada render — de propósito
-  // NÃO é useState nem useLocation(): lido direto de window.location.pathname (API do
-  // browser, sem precisar de contexto de Router) pra continuar funcionando nos testes que
-  // renderizam <RankingPage/> sem um <Router> em volta, e ainda assim reagir corretamente
-  // quando o Sidebar navega pra essa rota (React Router re-renderiza o RankingPage já
-  // montado ao trocar de rota-irmã, então este valor fica sempre atualizado). Não existe
-  // mais nenhum jeito de trocar de view por estado interno — o único caminho é navegação
-  // de verdade (link do Sidebar, ou "Ranking" pra voltar).
   const currentView = window.location.pathname === '/ranking/configuracoes' ? 'config' : 'report';
   const [reportText, setReportText] = useState('');
   const [copyShown, setCopyShown] = useState(false);
@@ -170,13 +126,10 @@ export default function RankingPage() {
   const flashTimer = useRef(null);
   const copyTimer = useRef(null);
 
-  // ---------- carga inicial (redes + categorias) via API ----------
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [configError, setConfigError] = useState(null);
-  // erro pontual ao buscar entradas da categoria/data atual (não bloqueia a tela)
   const [entriesError, setEntriesError] = useState(null);
 
-  // dispara o fetch em si; não reseta loading/error (isso é feito por quem chama, fora do efeito)
   function runLoadConfig() {
     Promise.all([fetchDiretores(), fetchCategorias()])
       .then(([diretores, categorias]) => {
@@ -188,7 +141,6 @@ export default function RankingPage() {
       .finally(() => setLoadingConfig(false));
   }
 
-  // handler do botão "Tentar novamente" (evento de UI, não roda dentro de um efeito)
   function loadConfig() {
     setLoadingConfig(true);
     setConfigError(null);
@@ -196,35 +148,20 @@ export default function RankingPage() {
   }
 
   useEffect(() => {
-    // estados iniciais (loadingConfig=true, configError=null) já cobrem a primeira carga
     runLoadConfig();
   }, []);
 
-  // abas do placar do dia mostram só categorias visivel!==false (categorias com
-  // visivel:false só aparecem na ConfigView, pra poder "Mostrar" de novo) — config.categorias
-  // (lista completa) continua sendo usado por buildFullReport/buildWorkbook/ConfigView.
   const categoriasVisiveis = useMemo(
     () => config.categorias.filter(c => c.visivel !== false),
     [config.categorias]
   );
 
-  // enquanto o usuário não escolheu uma aba (currentCatId ainda null, ou aponta
-  // pra uma categoria que não existe mais/ficou oculta), cai na principal — valor
-  // totalmente derivado, sem precisar de um efeito só para inicializar/corrigir currentCatId.
   const cat = useMemo(() => (
     categoriasVisiveis.find(c => c.id === currentCatId)
     || categoriasVisiveis.find(c => c.principal)
     || categoriasVisiveis[0]
   ), [categoriasVisiveis, currentCatId]);
 
-  // a tela de configuração é restrita a admins; a única forma de currentView
-  // virar 'config' é o clique no botão abaixo, que só é renderizado quando
-  // isAdmin é true — não há outro caminho no código que a defina.
-
-  // ---------- carga de entradas de TODAS as categorias para a data atual ----------
-  // roda sempre que a data mudar ou a lista de categorias for carregada (não mais ao trocar de aba),
-  // assim o relatório completo (buildFullReport) sempre reflete o que está salvo no banco,
-  // independente de quais categorias o usuário visitou nesta sessão.
   useEffect(() => {
     if (!config.categorias.length) return;
     let cancelled = false;
@@ -241,10 +178,6 @@ export default function RankingPage() {
     return () => { cancelled = true; };
   }, [currentDate, config.categorias]);
 
-  // ---------- polling de sincronização multi-usuário (a cada 5s, só na tela de relatório) ----------
-  // refs para acessar sempre os valores mais recentes de dentro do setInterval sem precisar
-  // reiniciar o intervalo a cada mudança de aba/foco (o efeito abaixo só depende de
-  // currentDate/config.categorias/currentView, conforme pedido).
   const [focusedRedeId, setFocusedRedeId] = useState(null);
   const catRef = useRef(cat);
   useEffect(() => { catRef.current = cat; }, [cat]);
@@ -265,8 +198,6 @@ export default function RankingPage() {
           }));
         })
         .catch(() => {
-          // falha de polling em background é ignorada silenciosamente — não usamos
-          // entriesError aqui pra não incomodar o usuário a cada 5s numa instabilidade de rede.
         });
     }
 
@@ -294,8 +225,6 @@ export default function RankingPage() {
     };
   }, [currentDate, config.categorias, currentView]);
 
-  // type 'success' (padrão, usado ex. em "Salvo") some rápido; type 'error' (mensagens do backend,
-  // incluindo bloqueios 409, que podem ser mais longas) fica visível por mais tempo.
   function flash(msg, type = 'success') {
     setFlashMsg({ msg, type });
     clearTimeout(flashTimer.current);
@@ -325,8 +254,6 @@ export default function RankingPage() {
       .catch(err => flash(err.message || 'Erro ao salvar', 'error'));
   }
 
-  // marca/desmarca qual rede está com o input focado — usado pelo polling de sincronização
-  // acima pra não sobrescrever, a cada 5s, o valor que o usuário está digitando agora mesmo.
   function handleValueFocus(redeId) {
     setFocusedRedeId(redeId);
   }
@@ -335,8 +262,6 @@ export default function RankingPage() {
     setFocusedRedeId(null);
   }
 
-  // `nome` opcional: o "+" da barra de abas chama sem argumento (preserva o prompt() de
-  // sempre); o formulário "Adicionar categoria" da ConfigView chama com o valor do input.
   function addCategoria(nome) {
     const nomeFinal = (nome ?? prompt('Nome da nova categoria (ex: Frete, Trocas...):') ?? '').trim();
     if (!nomeFinal) return;
@@ -348,8 +273,6 @@ export default function RankingPage() {
       .catch(err => flash(err.message || 'Erro ao criar categoria', 'error'));
   }
 
-  // ocultar/mostrar categoria nas abas do placar (campo `visivel`) — categorias padrão
-  // só podem ser ocultadas, nunca excluídas (ver removeCategoria abaixo).
   function updateCategoriaVisivel(catId, novoValor) {
     atualizarCategoria(catId, { visivel: novoValor })
       .then(categoriaAtualizada => {
@@ -358,10 +281,6 @@ export default function RankingPage() {
       .catch(err => flash(err.message || 'Erro ao atualizar categoria', 'error'));
   }
 
-  // categorias padrão (padrao:true) são bloqueadas com 409 pelo backend, assim como
-  // categorias com lançamentos vinculados — ambos os casos só mostram a mensagem de erro
-  // via flash(), sem tentar forçar (ConfigView já não renderiza o botão de remover pra
-  // categorias padrão, mas o backend é quem garante a regra de verdade).
   function removeCategoria(catId) {
     removerCategoria(catId)
       .then(() => {
@@ -373,9 +292,6 @@ export default function RankingPage() {
 
   function buildFullReport() {
     const parts = [];
-    // cópia ordenada (não muta config.categorias): Receita Bruta, Correção, Acessórios
-    // primeiro, nessa ordem, seguidas de qualquer categoria extra na ordem de criação —
-    // essa ordem afeta só o texto do relatório, não as abas da UI.
     const categoriasOrdenadas = config.categorias
       .map((c, index) => ({ c, index }))
       .sort((a, b) => {
@@ -385,8 +301,6 @@ export default function RankingPage() {
       .map(({ c }) => c);
     for (const c of categoriasOrdenadas) {
       const vals = entries[dataKey(currentDate, c.id)] || {};
-      // `visivel` (antes filtro de Diretor) e `ativo` (antes filtro de Loja) agora são
-      // ambos campos de Rede — uma rede oculta/inativa nunca aparece no relatório.
       const hasAny = config.diretores.some(d => d.redes.some(r => r.ativo !== false && r.visivel !== false && vals[r.id] !== undefined && vals[r.id] !== ''));
       if (!hasAny) continue;
       const titulo = `*RELATÓRIO ${c.nome.toUpperCase()} — ${formatDatePt(currentDate)}*`;
@@ -420,11 +334,6 @@ export default function RankingPage() {
       .catch(err => flash(err.message || 'Erro ao enviar relatório por e-mail', 'error'))
       .finally(() => setSendingEmail(false));
   }
-
-  // gera uma aba por categoria (config.categorias), com todas as redes de cada diretor
-  // empilhadas na mesma tabela (Diretor | Posição | Rede | Valor) e uma linha de total por
-  // diretor — mesmo total já exibido no total-pill do card daquele diretor na tela.
-  // Sem filtro por ativo/visivel, igual ao comportamento anterior (exporta tudo).
   function buildWorkbook() {
     const wb = XLSX.utils.book_new();
     const usedNames = new Set();
@@ -438,7 +347,6 @@ export default function RankingPage() {
         rows.push([diretor.nome, '', `Total ${diretor.nome}`, total]);
       });
       const ws = XLSX.utils.aoa_to_sheet(rows);
-      // coluna D (Valor) como número em formato de moeda BRL, pulando o cabeçalho
       for (let r = 1; r < rows.length; r++) {
         const cell = ws[XLSX.utils.encode_cell({ r, c: 3 })];
         if (cell) cell.z = '"R$" #,##0.00';
@@ -468,12 +376,6 @@ export default function RankingPage() {
     copyTimer.current = setTimeout(() => setCopyShown(false), 1500);
   }
 
-  // ---------- mutações de Rede (Delta, Lendários...) ----------
-  // helper genérico: `visivel` e `ativo` moraram no Diretor/Loja do modelo antigo e agora
-  // são ambos campos de Rede — todos os toggles/edições de Rede passam por aqui, seguindo
-  // a mesma filosofia não-otimista de sempre: só troca o estado local depois que a API
-  // confirma, substituindo a rede pelo objeto real retornado (usa `diretor_id` da resposta
-  // para achar o diretor-pai, já que quem chama nem sempre tem esse id à mão).
   function updateRedeCampo(redeId, patch, fallbackMsg = 'Erro ao atualizar rede') {
     atualizarRede(redeId, patch)
       .then(redeAtualizada => {
@@ -487,20 +389,14 @@ export default function RankingPage() {
       .catch(err => flash(err.message || fallbackMsg, 'error'));
   }
 
-  // ocultar/mostrar rede no grid principal e no relatório (campo `visivel`).
   function toggleRedeVisivel(redeId, novoValor) {
     updateRedeCampo(redeId, { visivel: novoValor }, 'Erro ao atualizar visibilidade da rede');
   }
 
-  // ativar/desativar rede (soft-delete, campo `ativo`) — ação separada de `visivel`,
-  // ver decisão de UX documentada no topo de ConfigView.
   function toggleRedeAtivo(redeId, novoValor) {
     updateRedeCampo(redeId, { ativo: novoValor }, 'Erro ao atualizar status da rede');
   }
 
-  // atribui/desatribui o GG (responsável) de uma rede via <select> (ConfigView).
-  // `responsavelId` já vem convertido para number ou null por quem chama (a opção
-  // "Nenhum" do <select> vira null).
   function updateRedeResponsavel(redeId, responsavelId) {
     updateRedeCampo(redeId, { responsavelId }, 'Erro ao atualizar GG da rede');
   }
@@ -514,10 +410,6 @@ export default function RankingPage() {
     updateRedeCampo(redeId, { emoji: emoji.trim() }, 'Erro ao atualizar emoji da rede');
   }
 
-  // move a rede pra outro diretor via <select> (ConfigView). Diferente de
-  // updateRedeCampo (que só troca a rede DENTRO do diretor que já a contém),
-  // reatribuição precisa remover a rede do diretor de origem e inseri-la no de
-  // destino — os dois nunca são o mesmo array quando o diretor muda de fato.
   function updateRedeDiretor(redeId, diretorId) {
     atualizarRede(redeId, { diretorId })
       .then(redeAtualizada => {
@@ -558,7 +450,6 @@ export default function RankingPage() {
       .catch(err => flash(err.message || 'Erro ao criar rede', 'error'));
   }
 
-  // ---------- mutações de Diretor ----------
   function updateDiretorNome(diretorId, nome) {
     if (!nome.trim()) return;
     atualizarDiretor(diretorId, { nome: nome.trim() })
@@ -693,9 +584,6 @@ function ReportView({ config, categoriasVisiveis, cat, values, setValue, onBlurS
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-[18px]">
         {config.diretores.map(diretor => {
-          // uma rede oculta (visivel=false) ou inativa (ativo=false) não aparece ranqueada
-          // aqui nem no relatório — mesmo filtro que antes existia em dois níveis diferentes,
-          // agora unificado no nível Rede (ver buildFullReport/CLAUDE.md).
           const redesRankeaveis = diretor.redes.filter(r => r.ativo !== false && r.visivel !== false);
           const ranked = rankRede(values, redesRankeaveis);
           const total = ranked.reduce((s, r) => s + r.valor, 0);

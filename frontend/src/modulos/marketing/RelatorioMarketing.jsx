@@ -1,22 +1,3 @@
-// style-system: Tailwind
-// View de topo "Relatório de visão geral" do módulo Marketing — multi-mês, só percentual
-// (`percentualMarketing`), acessada por um botão no cabeçalho de MarketingPage.jsx (mesmo
-// mecanismo de troca de view — state + botão `btnGhost` — já usado em MargensPage.jsx entre
-// "Lançamento" e "Relatório de período"). SEM endpoint novo: reaproveita
-// GET /api/marketing/entradas?ano=&mes= (fetchEntradas, já existente em marketingApi.js)
-// chamado uma vez por mês do intervalo, mais UM mês extra ANTES do início só pra poder
-// colorir a 1ª coluna visível (nunca vira coluna da tabela) — ver useEffect abaixo.
-//
-// Diferente do fetch de apoio do mês anterior em MarketingPage.jsx (`.catch(() => [])`, só
-// apoio visual da linha de TOTAL), aqui TODOS os meses buscados (inclusive o extra) são
-// conteúdo necessário pra montar a tabela inteira — se qualquer chamada falhar, o relatório
-// inteiro vira erro com "Tentar novamente" (mesmo padrão visual de EstadoCarregamento já
-// usado em MarketingPage.jsx, replicado aqui porque não está exportado de lá).
-//
-// Não recebe estado de diretor próprio: `diretorId` vem do MESMO <select> compartilhado no
-// cabeçalho de MarketingPage.jsx (não duplicamos esse estado aqui) — a seleção persiste ao
-// alternar entre "lancamento" e "relatorio". `diretores` (lista já agrupada por
-// MarketingPage.jsx) é usado só pra exibir o nome do diretor selecionado no subtítulo.
 import { useEffect, useMemo, useState, Fragment } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -31,18 +12,11 @@ import {
   SETA_PERCENTUAL,
 } from './marketingFormat.js';
 
-// cores RGB usadas no PDF (jspdf-autotable, célula por célula), separadas das classes
-// Tailwind usadas na tela porque o PDF é desenhado fora do DOM e não enxerga CSS — mesmo
-// princípio de COR_PDF em MargensPage.jsx. Tons -600 do Tailwind (emerald/orange), mais
-// saturados que o emerald-400/orange-400 usados na tela, pra manter contraste de texto
-// branco legível no PDF.
 const COR_PDF = {
   subiu: { fillColor: [5, 150, 105], textColor: [255, 255, 255] },
   caiu: { fillColor: [234, 88, 12], textColor: [255, 255, 255] },
 };
 
-// remove acentuação e caracteres não alfanuméricos pro nome do arquivo do PDF (ex.: "João
-// Hugo" -> "joao-hugo") — só usado no nome do arquivo, não afeta nenhum texto exibido.
 function slugify(texto) {
   return String(texto || '')
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -50,8 +24,7 @@ function slugify(texto) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'diretor';
 }
-// "YYYY-MM" com mês sempre com 2 dígitos, pro nome do arquivo (chavePeriodo abaixo não
-// preenche zero à esquerda no mês, o que ficaria estranho num nome de arquivo).
+
 function formatMesArquivo({ ano, mes }) {
   return `${ano}-${String(mes).padStart(2, '0')}`;
 }
@@ -64,9 +37,7 @@ function mesAnoAtual() {
   const hoje = new Date();
   return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
 }
-// mês/ano `qtd` meses antes de `mesAno` ("YYYY-MM") — usado só pro default de mesInicio
-// (janela padrão de 6 meses terminando no mês atual; não há um período "oficial" pedido pra
-// este relatório, ver resumo da tarefa).
+
 function subtrairMeses(mesAno, qtd) {
   const [anoStr, mesStr] = mesAno.split('-');
   let ano = Number(anoStr);
@@ -80,10 +51,6 @@ function labelMes({ ano, mes }) {
 function chavePeriodo({ ano, mes }) {
   return `${ano}-${mes}`;
 }
-
-// index lojaId -> loja (percentualMarketing/faturamentoGeral/faturamentoMarketing etc.) a
-// partir do array flat de blocos de UM período — usado pra procurar o valor de uma loja
-// específica em cada coluna/mês sem refazer a hierarquia inteira a cada célula.
 function indexarLojasPorId(blocos) {
   const map = new Map();
   (blocos || []).forEach(bloco => {
@@ -92,12 +59,6 @@ function indexarLojasPorId(blocos) {
   return map;
 }
 
-// célula de percentual (item 5 do pedido): sem dado no mês atual -> "—", sem cor; com dado
-// no atual mas sem dado no anterior -> percentual sem cor; com dado nos dois -> cor conforme
-// compararTotais (subiu = verde/SETA_PERCENTUAL.subiu, caiu = laranja/SETA_PERCENTUAL.caiu,
-// igual = sem classe, já que SETA_PERCENTUAL não tem entrada pra "igual"). Reaproveita
-// compararTotais/SETA_PERCENTUAL/formatPercentualBR já existentes em marketingFormat.js —
-// não duplica lógica de comparação/cor.
 function calcularCelula(percentualAtual, percentualAnterior) {
   if (percentualAtual === null || percentualAtual === undefined) {
     return { texto: '—', classe: '' };
@@ -106,9 +67,6 @@ function calcularCelula(percentualAtual, percentualAnterior) {
   return { texto: formatPercentualBR(percentualAtual), classe: SETA_PERCENTUAL[estado]?.classe ?? '' };
 }
 
-// mesma regra de cor de calcularCelula acima, só que devolvendo estilo pro jspdf-autotable
-// (fillColor/textColor RGB, ver COR_PDF) em vez de classe Tailwind — célula "crua" (string)
-// quando não há cor a aplicar (sem dado, ou percentual igual ao mês anterior).
 function celulaPdf(percentualAtual, percentualAnterior) {
   if (percentualAtual === null || percentualAtual === undefined) return '—';
   const estado = compararTotais(percentualAtual, percentualAnterior);
@@ -117,10 +75,6 @@ function celulaPdf(percentualAtual, percentualAnterior) {
   return cores ? { content: texto, styles: cores } : texto;
 }
 
-// linha de subtotal (por Rede) ou total geral (por Diretor) pro PDF — MESMA agregação
-// SOMA/SOMA de LinhaTotal abaixo (somarCampoLojas + percentualSobreTotal, reaproveitadas de
-// marketingFormat.js), só que devolvendo um array de células pro body do autoTable em vez de
-// JSX, já que autoTable roda fora do DOM.
 function linhaTotalPdf(label, lojas, periodosVisiveis, indicesPorPeriodo) {
   const linha = [{ content: label, styles: { fontStyle: 'bold' } }];
   periodosVisiveis.forEach((periodo, i) => {
@@ -142,8 +96,6 @@ function linhaTotalPdf(label, lojas, periodosVisiveis, indicesPorPeriodo) {
   return linha;
 }
 
-// mesmo bloco de loading/erro de MarketingPage.jsx (EstadoCarregamento, não exportado de
-// lá) — duplicado aqui de propósito, ver comentário no topo do arquivo.
 function EstadoCarregamento({ loading, error, onRetry }) {
   if (loading) {
     return <div className="text-[var(--muted)] text-sm px-1 py-10 text-center">Carregando...</div>;
@@ -162,8 +114,6 @@ function EstadoCarregamento({ loading, error, onRetry }) {
 export default function RelatorioMarketing({ diretorId, diretores }) {
   const [mesInicio, setMesInicio] = useState(() => subtrairMeses(mesAnoAtual(), 5));
   const [mesFim, setMesFim] = useState(mesAnoAtual);
-  // paralelo a [periodoAnterior(periodosVisiveis[0]), ...periodosVisiveis] — um array de
-  // blocos (o mesmo formato flat que fetchEntradas devolve) por posição.
   const [dadosPorPeriodo, setDadosPorPeriodo] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -177,24 +127,11 @@ export default function RelatorioMarketing({ diretorId, diretores }) {
     ? 'Selecione o mês inicial e o mês final.'
     : 'O mês final não pode ser anterior ao mês inicial.';
 
-  // `loading`/`error` só são resetados de forma síncrona nos handlers de evento que disparam
-  // este efeito (handleMesInicioChange/handleMesFimChange/handleRetry, abaixo) — mesmo padrão
-  // de MarketingPage.jsx, e nunca dentro do próprio corpo do efeito (regra do
-  // react-hooks/set-state-in-effect). Período inválido (fim < início, ou algum dos dois
-  // vazio) simplesmente não dispara fetch nenhum: `loading`/`dadosPorPeriodo` ficam parados
-  // no último valor, mas isso é inofensivo porque o branch de render que os usa
-  // (EstadoCarregamento/tabela) só aparece quando `periodoValido` é true — a mensagem de
-  // período inválido é um branch à parte que não depende de `loading`.
   useEffect(() => {
     if (!periodoValido) return;
     let cancelled = false;
-    // um mês ANTES do início do intervalo, só pra poder colorir a 1ª coluna visível — nunca
-    // vira coluna da tabela (ver item 3 do pedido original).
     const anterior = periodoAnterior(periodosVisiveis[0].ano, periodosVisiveis[0].mes);
     const periodosBusca = [anterior, ...periodosVisiveis];
-    // TODOS os meses (inclusive o extra) são conteúdo principal do relatório — diferente do
-    // fetch de apoio do mês anterior em MarketingPage.jsx, aqui não há `.catch(() => [])` por
-    // chamada individual: qualquer falha vira erro do relatório inteiro.
     Promise.all(periodosBusca.map(p => fetchEntradas({ ano: p.ano, mes: p.mes })))
       .then(resultados => {
         if (cancelled) return;
@@ -208,7 +145,6 @@ export default function RelatorioMarketing({ diretorId, diretores }) {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mesInicio, mesFim, reloadToken]);
 
   function handleMesInicioChange(valor) {
@@ -227,13 +163,8 @@ export default function RelatorioMarketing({ diretorId, diretores }) {
     setReloadToken(t => t + 1);
   }
 
-  // um índice (lojaId -> loja) por período buscado, na mesma ordem de dadosPorPeriodo —
-  // reconstruído só quando os dados mudam, não a cada célula renderizada.
   const indicesPorPeriodo = useMemo(() => dadosPorPeriodo.map(indexarLojasPorId), [dadosPorPeriodo]);
 
-  // hierarquia Diretor->Rede->Loja vem SEMPRE do mês MAIS RECENTE do intervalo (mesFim,
-  // último item de dadosPorPeriodo) — evita mostrar uma loja/rede desativada depois (item 4
-  // do pedido). Filtra só o diretor selecionado no cabeçalho de MarketingPage.jsx.
   const redesDoDiretor = useMemo(() => {
     if (!periodoValido || !diretorSelecionado) return null;
     const blocosMesFim = dadosPorPeriodo[dadosPorPeriodo.length - 1] || [];
@@ -253,11 +184,6 @@ export default function RelatorioMarketing({ diretorId, diretores }) {
 
   const temDadosParaExportar = !!redesDoDiretor && redesDoDiretor.length > 0;
 
-  // monta o PDF inteiramente no navegador (jsPDF + jspdf-autotable, sem rota nova no
-  // backend — mesma abordagem de handleBaixarPdf em MargensPage.jsx), com a MESMA tabela
-  // exibida na tela: lojas agrupadas por Rede, uma coluna por mês, subtotal por Rede e total
-  // do diretor ao final — reaproveitando os mesmos índices/agregações já calculados pro
-  // render (indicesPorPeriodo, somarCampoLojas, percentualSobreTotal), não uma cópia deles.
   function handleBaixarPdf() {
     if (!temDadosParaExportar) return;
 
@@ -334,10 +260,7 @@ export default function RelatorioMarketing({ diretorId, diretores }) {
             className={input}
           />
         </label>
-        {/* Sem um botão "Gerar relatório" próprio nesta tela (a busca já dispara sozinha ao
-            trocar mês inicial/final, ver useEffect acima) — "Baixar PDF" fica ao lado dos
-            filtros de período, mesmo componente de botão (`btnGhost`) e mesma regra de
-            desabilitado de MargensPage.jsx: sem dado carregado, não tem o que exportar. */}
+        {}
         <button type="button" className={btnGhost} onClick={handleBaixarPdf} disabled={!temDadosParaExportar}>
           Baixar PDF
         </button>
@@ -437,13 +360,6 @@ export default function RelatorioMarketing({ diretorId, diretores }) {
   );
 }
 
-// linha de subtotal (por Rede) ou total geral (por Diretor) — SOMA/SOMA por mês
-// (somarCampoLojas + percentualSobreTotal, ambas reaproveitadas de marketingFormat.js, MESMA
-// lógica já usada em TotalGeralRow.jsx pro total do Diretor na view de Lançamento — nunca
-// média de percentuais individuais). `lojas` é a lista CANÔNICA (do mês mais recente, id +
-// nome); os valores de faturamento de cada mês são buscados no índice daquele período —
-// uma loja sem lançamento num mês específico simplesmente não contribui pra soma daquele mês
-// (mesmo critério de somarCampoLojas, que ignora campo null/undefined).
 function LinhaTotal({ label, lojas, periodosVisiveis, indicesPorPeriodo, destaque = false }) {
   return (
     <tr

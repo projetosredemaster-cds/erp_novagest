@@ -1,35 +1,4 @@
 const { sql, getPool } = require('../config/db');
-
-/**
- * Camada de acesso a dados (data access) do módulo Marketing.
- *
- * Dono só de `MarketingEntradas` (lançamento mensal de faturamento
- * geral/marketing/retorno-indicação por Loja física). Diretor/Rede/Loja
- * são cadastro compartilhado — o CRUD deles vive em `cadastros.model.js`;
- * este model só faz JOIN de LEITURA nessas tabelas para montar a listagem
- * agrupada (Diretor -> Rede -> Loja) e para validar a existência de
- * `lojaId` no upsert de entrada (mesmo princípio de `margens.model.js`).
- *
- *   - MarketingEntradas (id, data_ref, loja_id -> FK Lojas,
- *                        faturamento_geral, faturamento_marketing,
- *                        faturamento_retorno_indicacao, atualizado_em;
- *                        UNIQUE em data_ref+loja_id).
- *
- * `data_ref` é sempre o dia 1 do mês/ano do lançamento (convenção de "mês
- * como data", mesmo padrão de outras tabelas do sistema).
- *
- * Todas as queries são parametrizadas via `request.input(...)` — nunca
- * concatenar valores vindos do usuário diretamente na string SQL.
- */
-
-/**
- * Lista todas as Lojas ativas, já com Rede + Diretor (JOIN de leitura), e o
- * lançamento de marketing do mês pedido (`dataRef`) e do mês anterior
- * (`dataRefAnterior`), via LEFT JOIN duplo em `MarketingEntradas` — uma loja
- * sem lançamento em um dos dois meses simplesmente vem com essas colunas
- * `NULL`. Quem calcula percentuais/comparação/agrupamento é o service (ver
- * CONTRATO-MARKETING-API.md, seção 1).
- */
 async function listLojasAtivasComEntradas({ dataRef, dataRefAnterior }) {
   const pool = await getPool();
   const result = await pool
@@ -64,11 +33,6 @@ async function listLojasAtivasComEntradas({ dataRef, dataRefAnterior }) {
   return result.recordset;
 }
 
-/**
- * Verifica se existe uma loja com o `id` informado. Usada pela validação de
- * `lojaId` no upsert de entrada de marketing (ver CONTRATO-MARKETING-API.md,
- * seção 2). Só leitura — o CRUD de Loja é do módulo Cadastros.
- */
 async function existeLoja(id) {
   const pool = await getPool();
   const result = await pool
@@ -78,11 +42,6 @@ async function existeLoja(id) {
   return result.recordset.length > 0;
 }
 
-/**
- * Cria ou atualiza (upsert) uma entrada de marketing, identificada pela
- * combinação (data_ref, loja_id), usando MERGE dentro de uma transação
- * (mesmo padrão de `upsertEntrada` em `margens.model.js`/`ranking.model.js`).
- */
 async function upsertEntrada({ dataRef, lojaId, faturamentoGeral, faturamentoMarketing, faturamentoRetornoIndicacao }) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
@@ -128,13 +87,6 @@ async function upsertEntrada({ dataRef, lojaId, faturamentoGeral, faturamentoMar
     throw err;
   }
 }
-
-/**
- * Remove a entrada correspondente a (data_ref, loja_id), se existir.
- * Idempotente por design — não lança/sinaliza erro se a linha não existir
- * (ver CONTRATO-MARKETING-API.md, seção 3), mesmo padrão de
- * `ranking.model.js: deleteEntrada`.
- */
 async function deleteEntrada({ dataRef, lojaId }) {
   const pool = await getPool();
   const request = pool.request();

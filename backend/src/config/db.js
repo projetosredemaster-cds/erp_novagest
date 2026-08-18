@@ -1,13 +1,7 @@
 require('dotenv').config();
 const sql = require('mssql');
 
-/**
- * Configuração de conexão com o Azure SQL Database, compartilhado por
- * todos os módulos do ERP (ex: Ranking).
- *
- * Todas as credenciais vêm de variáveis de ambiente (.env) — nunca hardcode
- * valores aqui. Veja backend/.env.example para a lista de variáveis esperadas.
- */
+
 const dbConfig = {
   server: process.env.DB_SERVER,
   database: process.env.DB_DATABASE,
@@ -15,8 +9,6 @@ const dbConfig = {
   password: process.env.DB_PASSWORD,
   port: Number(process.env.DB_PORT) || 1433,
   options: {
-    // Azure SQL exige encrypt=true. trustServerCertificate deve ficar false
-    // em produção (só usar true para debug local com certificado autoassinado).
     encrypt: process.env.DB_ENCRYPT !== 'false',
     trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE === 'true',
   },
@@ -33,11 +25,6 @@ const REQUIRED_ENV_VARS = ['DB_SERVER', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD']
 
 let poolPromise = null;
 
-/**
- * Retorna uma Promise resolvida com um pool de conexão reutilizável.
- * Reaproveita a mesma pool entre chamadas; se a conexão falhar, permite
- * que a próxima chamada tente novamente (não fica "travado" com erro).
- */
 function getPool() {
   const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
   if (missing.length > 0) {
@@ -57,7 +44,7 @@ function getPool() {
         return pool;
       })
       .catch((err) => {
-        poolPromise = null; // permite nova tentativa na próxima chamada
+        poolPromise = null;
         throw err;
       });
   }

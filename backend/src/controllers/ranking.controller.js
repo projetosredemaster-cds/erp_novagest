@@ -10,9 +10,6 @@ function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-/**
- * GET /api/ranking/entradas?data=YYYY-MM-DD&categoriaId=X
- */
 async function listarEntradas(req, res) {
   const { data, categoriaId } = req.query;
 
@@ -38,11 +35,6 @@ async function listarEntradas(req, res) {
   }
 }
 
-/**
- * POST /api/ranking/entradas
- * Body: { data: 'YYYY-MM-DD', categoriaId: number, redeId: number, valor: number }
- * Cria ou atualiza (upsert) a entrada correspondente a (data, categoriaId, redeId).
- */
 async function criarOuAtualizarEntrada(req, res) {
   const body = req.body || {};
   const { data, categoriaId, redeId, valor } = body;
@@ -88,11 +80,6 @@ async function criarOuAtualizarEntrada(req, res) {
   }
 }
 
-/**
- * DELETE /api/ranking/entradas?data=YYYY-MM-DD&categoriaId=X&redeId=Y
- * Remove a entrada de (data, categoriaId, redeId). Idempotente: 204 tanto se
- * a linha existia quanto se não existia (ver CONTRATO-RANKING-API.md, 4).
- */
 async function excluirEntrada(req, res) {
   const { data, categoriaId, redeId } = req.query;
 
@@ -129,9 +116,6 @@ async function excluirEntrada(req, res) {
   }
 }
 
-/**
- * GET /api/ranking/categorias
- */
 async function listarCategorias(req, res) {
   try {
     const categorias = await rankingService.getCategorias();
@@ -142,10 +126,6 @@ async function listarCategorias(req, res) {
   }
 }
 
-/**
- * POST /api/ranking/categorias
- * Body: { nome: string }
- */
 async function criarCategoria(req, res) {
   const body = req.body || {};
   const { nome } = body;
@@ -170,11 +150,6 @@ async function criarCategoria(req, res) {
   }
 }
 
-/**
- * PUT /api/ranking/categorias/:id
- * Body parcial: { nome?: string, visivel?: boolean } — ignora silenciosamente
- * `padrao`/`principal`, caso enviados.
- */
 async function atualizarCategoria(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {
@@ -215,10 +190,6 @@ async function atualizarCategoria(req, res) {
     return res.status(500).json({ error: 'Erro interno ao atualizar categoria.' });
   }
 }
-
-/**
- * DELETE /api/ranking/categorias/:id
- */
 async function excluirCategoria(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {
@@ -254,12 +225,6 @@ async function excluirCategoria(req, res) {
     return res.status(500).json({ error: 'Erro interno ao excluir categoria.' });
   }
 }
-
-/**
- * POST /api/ranking/relatorio/email
- * Body: { texto: string, assunto?: string }
- * Envia o texto do relatório (já montado no frontend) por e-mail via Brevo.
- */
 async function enviarRelatorioEmail(req, res) {
   const body = req.body || {};
   const { texto, assunto } = body;

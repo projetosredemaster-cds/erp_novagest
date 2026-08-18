@@ -1,15 +1,3 @@
-// Teste unitário de `ranking.service` — só as funções de Categorias
-// (`criarCategoria`/`atualizarCategoria`/`excluirCategoria`), isolado do
-// Express e do banco real via `vi.spyOn` no model (ver nota detalhada em
-// `../controllers/ranking.controller.test.js` sobre por que `vi.mock()` não
-// é seguro aqui).
-//
-// Arquivo separado de `ranking.service.test.js` de propósito: aquele arquivo
-// testa `criarDiretor`/`atualizarDiretor`/`criarRede`/`atualizarRede`, que
-// NÃO existem mais em `ranking.service.js` (migraram para
-// `cadastros.service.js`) — está 100% quebrado, débito técnico pré-existente
-// fora do escopo desta validação.
-
 const rankingModel = require('../models/ranking.model');
 const rankingService = require('./ranking.service');
 

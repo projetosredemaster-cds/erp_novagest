@@ -8,10 +8,6 @@ function isPositiveInteger(value) {
   return Number.isInteger(value) && value > 0;
 }
 
-/**
- * GET /api/admin/usuarios
- * Protegida por authMiddleware + adminMiddleware.
- */
 async function listarUsuarios(req, res) {
   try {
     const usuarios = await usuarioService.listarUsuarios();
@@ -22,11 +18,6 @@ async function listarUsuarios(req, res) {
   }
 }
 
-/**
- * POST /api/admin/usuarios
- * Body: { email: string, senha: string }
- * Protegida por authMiddleware + adminMiddleware.
- */
 async function criarUsuario(req, res) {
   const body = req.body || {};
   const { email, senha } = body;
@@ -52,11 +43,6 @@ async function criarUsuario(req, res) {
     return res.status(500).json({ error: 'Erro interno ao criar usuário.' });
   }
 }
-
-/**
- * DELETE /api/admin/usuarios/:id
- * Protegida por authMiddleware + adminMiddleware.
- */
 async function excluirUsuario(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {

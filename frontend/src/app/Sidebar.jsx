@@ -7,12 +7,6 @@ export default function Sidebar() {
   const { isAdmin, logout } = useAuth();
   const [configOpen, setConfigOpen] = useState(false);
   const configMenuRef = useRef(null);
-
-  // itens adminOnly nunca chegam a ser renderizados para usuário comum — não é só um
-  // `hidden` de CSS, o link simplesmente não existe no DOM. Convenção deste Sidebar:
-  // todo item adminOnly mora dentro do menu "Configurações" (popover abaixo), nunca na
-  // nav principal — hoje são exatamente "usuarios" e "ranking-configuracoes" ("Diretores
-  // e redes"), mas qualquer módulo adminOnly futuro cai automaticamente lá também.
   const visibleModules = moduleRegistry.filter((mod) => !mod.adminOnly);
   const configModules = moduleRegistry.filter((mod) => mod.adminOnly);
 
@@ -57,10 +51,7 @@ export default function Sidebar() {
       </nav>
 
       <div className="mt-auto flex flex-col gap-1">
-        {/* menu "Configurações": agrupa os itens adminOnly (hoje: Usuários + Diretores e
-            redes) num só item, expandido como um popover pra cima (o botão fica no canto
-            inferior esquerdo) — o bloco inteiro só renderiza pra admin, e cada link é uma
-            rota real (RequireAdmin também bloqueia acesso direto pela URL). */}
+        {}
         {isAdmin && configModules.length ? (
           <div className="relative" ref={configMenuRef}>
             {configOpen ? (

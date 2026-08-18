@@ -13,8 +13,6 @@ const authMiddleware = require('./middlewares/authMiddleware');
 
 const app = express();
 
-// Origens autorizadas a chamar a API via CORS. Em produção, só o domínio
-// real do frontend (FRONTEND_URL); em desenvolvimento, também o Vite local.
 const allowedOrigins = process.env.NODE_ENV === 'production'
   ? [process.env.FRONTEND_URL].filter(Boolean)
   : [process.env.FRONTEND_URL, 'http://localhost:5173'].filter(Boolean);
@@ -33,48 +31,25 @@ if (process.env.NODE_ENV !== 'development') {
   app.use('/api/auth/login', loginLimiter);
 }
 
-// Rota simples de healthcheck da API
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Rotas de autenticação (login público, /me protegida por authMiddleware
-// dentro do próprio router) e de administração de usuários (todas
-// protegidas por authMiddleware + adminMiddleware dentro do router).
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Rotas dos módulos Ranking e Cadastros. Futuros módulos do erp_Novagest
-// devem ser montados aqui seguindo o mesmo padrão: app.use('/api/<modulo>',
-// rotas). Protegidas por authMiddleware — qualquer usuário autenticado
-// (admin ou não) pode usá-las; ver CONTRATO-AUTH-API.md, seção "Rotas
-// protegidas do resto do sistema".
 app.use('/api/ranking', authMiddleware, rankingRoutes);
 
-// Cadastros compartilhados (Diretor/Rede/Loja/Responsavel) — ver
-// CONTRATO-CADASTROS-API.md. Consumido pelo Ranking e pelo Margens (e
-// módulos futuros); não pertence a nenhum módulo de negócio específico.
 app.use('/api/cadastros', authMiddleware, cadastrosRoutes);
 
-// Módulo Margens (lançamentos diários de margem por Loja + relatório de
-// período) — ver CONTRATO-MARGENS-API.md. Lê Diretor/Rede/Loja/Responsavel
-// só via JOIN (dado compartilhado do módulo Cadastros).
 app.use('/api/margens', authMiddleware, margensRoutes);
 
-// Módulo Marketing (lançamento mensal de faturamento geral/marketing/
-// retorno-indicação por Loja) — ver CONTRATO-MARKETING-API.md. Lê
-// Diretor/Rede/Loja só via JOIN (dado compartilhado do módulo Cadastros).
 app.use('/api/marketing', authMiddleware, marketingRoutes);
 
-// 404 — rota não encontrada
 app.use((req, res) => {
   res.status(404).json({ error: 'Rota não encontrada.' });
 });
 
-// Middleware de tratamento de erro genérico (fallback de segurança;
-// os controllers já tratam seus próprios erros, mas isso evita que
-// qualquer exceção não tratada quebre o processo ou vaze stack trace).
-// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('[app] Erro não tratado:', err);
   res.status(500).json({ error: 'Erro interno no servidor.' });

@@ -1,8 +1,3 @@
-// Testes unitários das funções puras de frontend/src/modulos/marketing/marketingFormat.js.
-// Foco nas funções de agregação (somarCampoLojas/percentualSobreTotal) usadas por
-// TotalGeralRow.jsx, DashboardMarketing.jsx e RelatorioMarketing.jsx para calcular
-// SOMA/SOMA (nunca média de percentuais individuais — bug conhecido da planilha original,
-// ver comentário de origem no topo do arquivo), e nas funções de comparação/observação.
 import { describe, it, expect } from 'vitest';
 import {
   somarCampoLojas,
@@ -16,8 +11,6 @@ import {
 
 describe('somarCampoLojas / percentualSobreTotal — agregação SOMA/SOMA, nunca média', () => {
   it('soma faturamentoGeral/faturamentoMarketing de 3 lojas com percentuais MUITO diferentes entre si e calcula o percentual sobre o TOTAL somado (não a média dos percentuais individuais)', () => {
-    // Loja A: 90/100 = 90%; Loja B: 9/900 = 1%; Loja C: 100/1000 = 10%
-    // Média simples dos 3 percentuais seria (90+1+10)/3 = 33,67% — errado, é o bug da planilha.
     const lojas = [
       { faturamentoGeral: 100, faturamentoMarketing: 90 },
       { faturamentoGeral: 900, faturamentoMarketing: 9 },
@@ -30,17 +23,15 @@ describe('somarCampoLojas / percentualSobreTotal — agregação SOMA/SOMA, nunc
     expect(totalMarketing).toBe(199);
 
     const percentual = percentualSobreTotal(totalMarketing, totalGeral);
-    // SOMA/SOMA correto: 199 / 2000 * 100 = 9,95%
     expect(percentual).toBeCloseTo(9.95, 2);
-    // garante que NÃO é a média ingênua dos percentuais individuais (33,67%)
     expect(percentual).not.toBeCloseTo(33.67, 1);
   });
 
   it('ignora lojas com o campo null/undefined (sem lançamento no período) — não soma como zero, mas dá o mesmo resultado numérico', () => {
     const lojas = [
       { faturamentoGeral: 500, faturamentoMarketing: 50 },
-      { faturamentoGeral: null, faturamentoMarketing: null }, // sem lançamento
-      { faturamentoGeral: undefined, faturamentoMarketing: undefined }, // sem lançamento
+      { faturamentoGeral: null, faturamentoMarketing: null }, 
+      { faturamentoGeral: undefined, faturamentoMarketing: undefined }, 
     ];
     expect(somarCampoLojas(lojas, 'faturamentoGeral')).toBe(500);
     expect(somarCampoLojas(lojas, 'faturamentoMarketing')).toBe(50);
@@ -113,17 +104,17 @@ describe('variacaoPercentual / variacaoPontosPercentuais', () => {
 describe('calcularRankingVariacao', () => {
   it('só inclui lojas com dado NOS DOIS meses e anterior != 0, ordenadas por variação', () => {
     const itens = [
-      { id: 1, nome: 'A', atual: 200, anterior: 100 }, // +100%
-      { id: 2, nome: 'B', atual: 50, anterior: 100 }, // -50%
-      { id: 3, nome: 'C', atual: 300, anterior: 100 }, // +200%
-      { id: 4, nome: 'D', atual: 100, anterior: null }, // sem anterior — descartada
-      { id: 5, nome: 'E', atual: 100, anterior: 0 }, // anterior 0 — descartada (sem base)
-      { id: 6, nome: 'F', atual: undefined, anterior: 100 }, // sem atual — descartada
+      { id: 1, nome: 'A', atual: 200, anterior: 100 },
+      { id: 2, nome: 'B', atual: 50, anterior: 100 },
+      { id: 3, nome: 'C', atual: 300, anterior: 100 },
+      { id: 4, nome: 'D', atual: 100, anterior: null },
+      { id: 5, nome: 'E', atual: 100, anterior: 0 }, 
+      { id: 6, nome: 'F', atual: undefined, anterior: 100 }, 
     ];
 
     const { altas, quedas } = calcularRankingVariacao(itens);
 
-    expect(altas.map(i => i.id)).toEqual([3, 1]); // C (+200%) antes de A (+100%)
+    expect(altas.map(i => i.id)).toEqual([3, 1]);
     expect(quedas.map(i => i.id)).toEqual([2]);
   });
 

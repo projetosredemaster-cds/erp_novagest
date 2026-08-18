@@ -1,24 +1,5 @@
 const { sql, getPool } = require('../config/db');
 
-/**
- * Camada de acesso a dados (data access) do módulo Ranking.
- *
- * Depois da extração do CRUD de Diretor/Rede/Responsavel para o módulo
- * Cadastros (ver CONTRATO-RANKING-API.md v3 e CONTRATO-CADASTROS-API.md),
- * este model é dono só de `Entradas` (lançamento diário por Rede) e
- * `Categorias`. O JOIN com `Redes` em `listEntradas` é só LEITURA (para
- * montar `rede_nome`/`rede_emoji`/`diretor_id` nas Entradas) — CRUD de Rede
- * vive em `cadastros.model.js`.
- *
- *   - Categorias  (id, nome, principal, criado_em) — sem mudança.
- *   - Entradas    (id, data_ref, categoria_id -> FK Categorias, rede_id -> FK
- *                 Redes, valor, atualizado_em; UNIQUE em
- *                 data_ref+categoria_id+rede_id).
- *
- * Todas as queries são parametrizadas via `request.input(...)` — nunca
- * concatenar valores vindos do usuário diretamente na string SQL.
- */
-
 async function listEntradas({ data, categoriaId }) {
   const pool = await getPool();
   const request = pool.request();
@@ -46,11 +27,6 @@ async function listEntradas({ data, categoriaId }) {
   return result.recordset;
 }
 
-/**
- * Remove a entrada correspondente a (data_ref, categoria_id, rede_id), se
- * existir. Idempotente por design — não lança/sinaliza erro se a linha não
- * existir (ver CONTRATO-RANKING-API.md, seção 4).
- */
 async function deleteEntrada({ data, categoriaId, redeId }) {
   const pool = await getPool();
   const request = pool.request();
@@ -65,11 +41,6 @@ async function deleteEntrada({ data, categoriaId, redeId }) {
       AND rede_id = @redeId
   `);
 }
-
-/**
- * Cria ou atualiza (upsert) uma entrada, identificada pela combinação
- * (data_ref, categoria_id, rede_id), usando MERGE dentro de uma transação.
- */
 async function upsertEntrada({ data, categoriaId, redeId, valor }) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
@@ -120,12 +91,6 @@ async function listCategorias() {
   `);
   return result.recordset;
 }
-
-/**
- * Verifica se já existe uma categoria com o mesmo `nome` (case-insensitive,
- * ignorando espaços extras no início/fim). Se `excludeId` for informado, a
- * própria categoria com esse id é excluída da checagem (usado no PUT).
- */
 async function existeCategoriaComNome(nome, excludeId = null) {
   const pool = await getPool();
   const result = await pool
@@ -140,12 +105,6 @@ async function existeCategoriaComNome(nome, excludeId = null) {
     `);
   return result.recordset[0].total > 0;
 }
-
-/**
- * Insere uma nova categoria. Sempre `padrao = 0`, `principal = 0`,
- * `visivel = 1` — não existe forma de criar uma categoria já como padrão ou
- * principal por essa rota.
- */
 async function insertCategoria({ nome }) {
   const pool = await getPool();
   const result = await pool
@@ -159,10 +118,6 @@ async function insertCategoria({ nome }) {
     `);
   return result.recordset[0];
 }
-
-/**
- * Busca uma categoria por id. Retorna `undefined` se não existir.
- */
 async function findCategoriaById(id) {
   const pool = await getPool();
   const result = await pool
@@ -175,11 +130,6 @@ async function findCategoriaById(id) {
     `);
   return result.recordset[0];
 }
-
-/**
- * Atualização parcial de uma categoria: só `nome`/`visivel` — `padrao` e
- * `principal` nunca mudam via API.
- */
 async function updateCategoria(id, { nome, visivel }) {
   const pool = await getPool();
   await pool
@@ -196,13 +146,6 @@ async function updateCategoria(id, { nome, visivel }) {
       WHERE id = @id
     `);
 }
-
-/**
- * Verifica existência + bloqueio (padrao, depois lançamentos vinculados) e
- * exclui a categoria, tudo dentro de uma transação, para evitar condição de
- * corrida entre os SELECTs de checagem e o DELETE.
- * Retorna 'not_found' | 'is_padrao' | 'has_entradas' | 'deleted'.
- */
 async function deleteCategoriaIfAllowed(id) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);

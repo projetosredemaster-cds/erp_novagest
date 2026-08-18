@@ -1,31 +1,3 @@
-// Testes de integração de rota (Supertest, sem subir o servidor de verdade,
-// sem tocar o Azure SQL real) para o módulo Ranking (Entradas/Categorias —
-// ver CONTRATO-RANKING-API.md). CRUD de Diretor/Rede/Responsavel foi
-// extraído para o módulo Cadastros (ver cadastros.controller.test.js) e não
-// é mais coberto aqui. Cobre:
-//   - GET/POST     /api/ranking/entradas
-//   - autenticação (401 sem token / token inválido)
-//
-// NOTA DE IMPLEMENTAÇÃO — por que `require()` (CJS puro) em vez de `import`:
-// `vi.mock('../models/ranking.model', factory)` com sintaxe `import` só
-// intercepta o require feito DENTRO do próprio arquivo de teste; como
-// `ranking.service.js`/`ranking.controller.js`/`app.js` são CommonJS puro
-// (sem `import`/`export`), o require interno deles não passa pelo grafo de
-// módulos do Vite e continua resolvendo para o model REAL — confirmado
-// experimentalmente: com `vi.mock`, uma chamada apontou de fato para o
-// Azure SQL real ("Invalid column name 'visivel'"), o que é uma violação
-// direta da regra "nunca testar contra produção" (ver nota no relatório
-// final de QA). A alternativa segura usada aqui é obter a MESMA referência
-// de objeto que `ranking.service.js` usa (garantida pelo cache de módulos
-// do Node, que é compartilhado entre requires em CJS puro) e sobrescrever
-// cada método com `vi.spyOn(...).mockImplementation(...)` — isso funciona
-// porque o objeto é mutado por referência, não depende do grafo do Vite.
-//
-// Rede de segurança: todo método do model recebe, por padrão, uma
-// implementação-guarda que lança erro se for chamada sem um mock explícito
-// no teste — qualquer teste que acidentalmente dependa de um método não
-// mockado falha ALTO E CLARO em vez de silenciosamente tentar uma conexão
-// real com o Azure SQL de produção.
 
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
@@ -42,8 +14,6 @@ function tokenFor({ isAdmin = false } = {}) {
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  // guarda: qualquer método do model chamado sem mock explícito no teste
-  // lança, em vez de tentar se conectar ao Azure SQL real.
   for (const key of Object.keys(rankingModel)) {
     if (typeof rankingModel[key] === 'function') {
       vi.spyOn(rankingModel, key).mockImplementation(() => {

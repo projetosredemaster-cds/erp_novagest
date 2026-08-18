@@ -1,4 +1,3 @@
-// style-system: Tailwind
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../app/AuthContext.jsx';
@@ -7,7 +6,6 @@ import { moduleRegistry } from '../../app/moduleRegistry.js';
 const btn = "w-full bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-2.5 text-sm font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
 const input = "w-full bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:border-[var(--teal)]";
 
-// rota padrão pós-login: primeiro módulo não-restrito do registro central
 const defaultPath = moduleRegistry.find((mod) => !mod.adminOnly)?.path || '/ranking';
 
 export default function LoginPage() {

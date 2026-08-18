@@ -1,22 +1,4 @@
-// Testes de integração de rota (Supertest, sem subir o servidor de verdade,
-// sem tocar o Azure SQL real) para o módulo Cadastros
-// (`/api/cadastros/*` — ver CONTRATO-CADASTROS-API.md), incluindo o CRUD de
-// Diretor/Rede/Loja/Responsavel migrado de `/api/ranking/*` e as
-// funcionalidades NOVAS desta rodada:
-//   - PUT /api/cadastros/redes/:id aceita "diretorId" (reatribuição)
-//   - PUT /api/cadastros/lojas/:id aceita "redeId" (reatribuição)
-//   - GET /api/cadastros/redes e /diretores NÃO filtram mais por visivel/ativo
-//   - DELETE /api/cadastros/lojas/:id NÃO EXISTE MAIS (removida por completo)
-//
-// Cadastros "ainda não tem suíte própria" era verdade até esta rodada — este
-// arquivo é a suíte inicial completa do módulo (o CLAUDE.md/plano de QA
-// aponta a lacuna explicitamente).
-//
-// NOTA DE IMPLEMENTAÇÃO — por que `require()` (CJS puro) em vez de `import`:
-// mesmo motivo documentado em `ranking.controller.test.js`/
-// `margens.controller.test.js`: `vi.mock()` não intercepta requires internos
-// de módulos CJS puros; a alternativa segura é `vi.spyOn` na MESMA
-// referência de objeto usada por `cadastros.service.js`.
+
 
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
@@ -45,9 +27,7 @@ beforeEach(() => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Diretores
-// ---------------------------------------------------------------------------
+
 
 describe('GET /api/cadastros/diretores', () => {
   it('401 sem header Authorization', async () => {
@@ -173,9 +153,6 @@ describe('DELETE /api/cadastros/diretores/:id', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Redes
-// ---------------------------------------------------------------------------
 
 describe('GET /api/cadastros/redes — sem filtro de ativo/visivel no servidor', () => {
   it('401 sem token', async () => {
@@ -374,10 +351,6 @@ describe('DELETE /api/cadastros/redes/:id', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Lojas
-// ---------------------------------------------------------------------------
-
 describe('POST /api/cadastros/lojas', () => {
   it('400 quando redeId ausente/inválido', async () => {
     const res = await request(app)
@@ -526,23 +499,15 @@ describe('DELETE /api/cadastros/lojas/:id — a rota FOI REMOVIDA', () => {
 
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: 'Rota não encontrada.' });
-    // nenhum método do model foi chamado — a rota não existe, nem chega no
-    // controller/service.
+
     expect(cadastrosModel.findLojaById).not.toHaveBeenCalled();
   });
 
   it('mesmo sem token — 404 antes até de autenticar, porque authMiddleware roda no mount do router inteiro e o path não bate com nenhuma rota registrada', async () => {
     const res = await request(app).delete('/api/cadastros/lojas/40');
-    // authMiddleware está no mount de /api/cadastros (app.js), então roda
-    // ANTES do router encontrar rota (ou não). Como authMiddleware está
-    // registrado no app antes do 404 handler, sem token o 401 vem primeiro.
     expect(res.status).toBe(401);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Responsaveis (GG)
-// ---------------------------------------------------------------------------
 
 describe('GET /api/cadastros/responsaveis', () => {
   it('401 sem token', async () => {

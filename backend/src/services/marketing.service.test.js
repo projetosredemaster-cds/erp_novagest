@@ -1,16 +1,3 @@
-// Teste unitário de `marketing.service`, isolado do Express e do banco real —
-// `marketing.model` é substituído por spies (`vi.spyOn`) que sobrescrevem os
-// métodos no MESMO objeto que `marketing.service.js` usa internamente
-// (garantido pelo cache de módulos do Node, compartilhado entre requires
-// CJS) — ver nota detalhada em `../controllers/ranking.controller.test.js`
-// sobre por que `vi.mock()` não é confiável aqui.
-//
-// Foco: a ramificação de cálculo de comparação (subiu/caiu/igual/null) e o
-// cálculo de percentual (incluindo o caso extremo faturamentoGeral = 0), que
-// são a lógica de negócio de maior risco deste módulo (histórico: o caso
-// "sem mês anterior -> comparacao: null" ficou sem confirmação em um resumo
-// anterior do backend-architect que implementou a feature).
-
 const marketingModel = require('../models/marketing.model');
 const marketingService = require('./marketing.service');
 

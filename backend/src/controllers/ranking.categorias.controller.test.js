@@ -1,29 +1,3 @@
-// Testes de integração de rota (Supertest, sem subir o servidor de verdade,
-// sem tocar o Azure SQL real) para o CRUD real de Categorias do módulo
-// Ranking (ver CONTRATO-RANKING-API.md v4, seções 1-4, e
-// MIGRATION-CATEGORIAS-PADRAO.sql). Categorias deixaram de ser 100% em
-// memória — agora têm `padrao`/`visivel` persistidos no banco.
-//
-// Arquivo separado de `ranking.controller.test.js` de propósito: aquele
-// arquivo cobre rotas de Diretor/Rede/Responsavel que MIGRARAM para
-// `/api/cadastros/*` e está com 79/137 testes quebrados (mocka funções que
-// não existem mais em `ranking.model.js`) — débito técnico pré-existente,
-// fora do escopo desta validação (ver relatório final de QA). Este arquivo
-// novo cobre só o que continua genuinamente em `/api/ranking/categorias`,
-// contra o código REAL e atual do controller/service/model.
-//
-// NOTA DE IMPLEMENTAÇÃO — por que `require()` (CJS puro) em vez de `import`:
-// mesmo motivo documentado no topo de `ranking.controller.test.js` /
-// `margens.controller.test.js`: `vi.mock()` com sintaxe `import` não
-// intercepta o require interno feito por módulos CJS puros (service/
-// controller/app.js), então a alternativa segura é `vi.spyOn` na MESMA
-// referência de objeto usada por `ranking.service.js` (garantida pelo cache
-// de módulos do Node).
-//
-// Rede de segurança: todo método do model recebe, por padrão, uma
-// implementação-guarda que lança erro se for chamada sem mock explícito no
-// teste — evita qualquer tentativa acidental de conexão real com o Azure
-// SQL.
 
 const request = require('supertest');
 const jwt = require('jsonwebtoken');

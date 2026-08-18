@@ -1,16 +1,3 @@
-// style-system: Tailwind
-// Ranking e Margens (os dois módulos de negócio já existentes, ambos com grid
-// aninhado Diretor->Rede->Loja parecido com este) são 100% Tailwind — segue o
-// mesmo caminho por consistência visual do sistema. Avaliei o DataGrid do MUI
-// para este grid (tem bastante linha: Diretor->Rede->Loja) e descartei: aqui
-// cada "loja" é um cartão com 2 inputs + percentual + observação + cor
-// condicional (ver item 4 do redesign), hierarquia visual em 3 níveis
-// (Diretor/Rede/Loja) e onBlur por card — o DataGrid é ótimo pra tabela
-// tabular densa com edição célula a célula, mas obrigaria a achatar essa
-// hierarquia em colunas artificiais ou a usar renderCell customizado em quase
-// toda coluna, perdendo a vantagem do componente pronto. Também misturaria MUI
-// com o restante 100% Tailwind do sistema (regra rígida do projeto: nunca no
-// mesmo componente) — teria que isolar em arquivo próprio, sem ganho real.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchEntradas, salvarEntrada, removerEntrada } from './marketingApi.js';
 import LojaMarketingCard from './LojaMarketingCard.jsx';
@@ -24,11 +11,6 @@ function mesAnoAtual() {
   return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// agrupa o array flat de GET /api/marketing/entradas (um bloco por Rede, com diretor{id,nome}
-// e lojas[] aninhado) na hierarquia visual Diretor -> Rede -> Loja — mesmo princípio de
-// agruparRedesPorDiretor em MargensPage.jsx, adaptado pro formato já-aninhado deste endpoint.
-// Também é a fonte da lista de diretores usada no filtro do topo (item 1 do redesign) —
-// não há chamada de API nova pra isso, o mesmo GET já traz diretor{id,nome} em cada bloco.
 function agruparBlocosPorDiretor(blocos) {
   const map = new Map();
   (blocos || []).forEach(bloco => {
@@ -41,9 +23,6 @@ function agruparBlocosPorDiretor(blocos) {
     .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
-// substitui, de forma imutável, uma loja específica dentro do array flat de blocos —
-// usado depois de um POST bem-sucedido pra atualizar só a linha salva (ver comentário em
-// handleBlurLoja sobre por que não refazemos o GET inteiro a cada blur).
 function atualizarLojaNosBlocos(blocos, lojaId, updater) {
   return (blocos || []).map(bloco => ({
     ...bloco,
@@ -51,9 +30,6 @@ function atualizarLojaNosBlocos(blocos, lojaId, updater) {
   }));
 }
 
-// monta o estado editável (valoresPorLoja) a partir do array flat de blocos vindo da API —
-// campos `null` (loja sem lançamento no mês, ver contrato) viram '' (campo vazio no input,
-// nunca "0" pré-preenchido).
 function construirValoresIniciais(blocos) {
   const map = {};
   (blocos || []).forEach(bloco => {
@@ -68,19 +44,12 @@ function construirValoresIniciais(blocos) {
   return map;
 }
 
-// mesma fórmula do backend (CONTRATO-MARKETING-API.md, seção "Schema novo"):
-// percentual = parte / faturamentoGeral * 100, null quando faturamentoGeral é 0/vazio.
 function calcularPercentual(parte, faturamentoGeral) {
   const geral = numOrZero(faturamentoGeral);
   if (!geral) return null;
   return (numOrZero(parte) / geral) * 100;
 }
 
-// achata as lojas de todas as Redes vinculadas a um Diretor específico, a partir do array
-// flat de blocos (mesmo formato de `blocos`/`blocosAnteriores`) — usado pra alimentar
-// TotalGeralRow (item 1 do incremento) tanto com o mês atual quanto com o anterior, sem
-// duplicar a lógica de agrupamento de agruparBlocosPorDiretor (que monta a árvore
-// Diretor->Rede->Loja completa pro render principal, incluindo Redes sem loja nenhuma).
 function lojasDoDiretor(blocos, diretorId) {
   if (diretorId === '' || diretorId === null || diretorId === undefined) return [];
   return (blocos || [])
@@ -88,22 +57,10 @@ function lojasDoDiretor(blocos, diretorId) {
     .flatMap(bloco => bloco.lojas || []);
 }
 
-// `periodoAnterior` (usado pra buscar o segundo GET que alimenta a linha de TOTAL (item 1) e
-// a aba "Resumo Geral" (item 2)) foi movida para marketingFormat.js — RelatorioMarketing.jsx
-// (view "Relatório de visão geral") também precisa dela, pra achar o mês imediatamente
-// anterior ao início do intervalo selecionado.
-
 const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-5 pt-5 pb-[22px]";
 const input = "bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)] px-3 py-2 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed";
 const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed";
 
-// abas "Marketing" / "Cliente Retorno-Indicação" (item 5 do redesign) — botões simples com
-// role="tab", não uma lib de tabs: mesmo espírito do toggle "Ver relatório de período" já
-// usado em MargensPage.jsx, só que aqui são duas opções sempre visíveis lado a lado (em vez
-// de um botão só que troca de rótulo) porque o usuário pode querer comparar as duas abas
-// olhando o rótulo de qual está ativa, não só alternar - ARIA completo (role=tablist/tab/
-// aria-selected) porque já são só dois <button>s fixos, custo baixo, ganho de
-// acessibilidade/anunciabilidade real.
 const tabBase = "px-4 py-2 rounded-lg text-[13px] font-bold cursor-pointer transition-colors border";
 const tabAtiva = "bg-[var(--teal)] text-[#0b1010] border-[var(--teal)]";
 const tabInativa = "bg-transparent text-[var(--text)] border-[var(--border)] hover:brightness-110";
@@ -114,11 +71,6 @@ const ABAS = [
   { id: 'resumo', label: 'Resumo Geral' },
 ];
 
-// bloco de loading/erro idêntico nas 3 abas — extraído pra não divergir entre a renderização
-// de "Marketing"/"Cliente Retorno-Indicação" (lista de lojas do diretor) e "Resumo Geral"
-// (dashboard sem filtro de diretor), que passaram a ter blocos de conteúdo bem diferentes
-// depois do item 2 do incremento. Retorna null quando não há nada a mostrar (nem loading
-// nem erro), pra quem chama decidir o que renderizar em seguida.
 function EstadoCarregamento({ loading, error, onRetry }) {
   if (loading) {
     return <div className="text-[var(--muted)] text-sm px-1 py-10 text-center">Carregando...</div>;
@@ -137,41 +89,19 @@ function EstadoCarregamento({ loading, error, onRetry }) {
 export default function MarketingPage() {
   const [mesAno, setMesAno] = useState(mesAnoAtual);
   const [blocos, setBlocos] = useState([]);
-  // blocos do mês ANTERIOR ao selecionado — buscados junto do mês atual (mesmo período,
-  // mesmo efeito, ver useEffect abaixo) só pra alimentar comparação/soma client-side na
-  // linha de TOTAL (item 1) e na aba "Resumo Geral" (item 2); nunca editado pelo usuário.
   const [blocosAnteriores, setBlocosAnteriores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
 
-  // valoresPorLoja: lojaId -> { faturamentoGeral, faturamentoMarketing, faturamentoRetornoIndicacao }
-  // (estado editável ÚNICO por loja/mês — as duas abas leem/escrevem no MESMO objeto, só
-  // mudam quais campos ficam editáveis/visíveis em cada card; ver "Estado compartilhado" no
-  // pedido original). '' representa campo vazio/sem lançamento.
   const [valoresPorLoja, setValoresPorLoja] = useState({});
   const [salvandoLojaId, setSalvandoLojaId] = useState(null);
 
-  // referência de "último valor conhecido como salvo" por loja — usada só pro dirty-check
-  // do blur (ver handleBlurLoja abaixo), NUNCA lida pelo render. É um ref (não state) de
-  // propósito: mudar não deve re-renderizar a tela, só orientar se um blur vira POST ou não.
-  // Populada na carga inicial/reload (mesmos valores de construirValoresIniciais, incluindo
-  // '' quando a API mandou null) e atualizada após cada POST bem-sucedido, pra não reenviar
-  // no próximo blur se nada mudou depois do save.
   const valoresSalvosRef = useRef({});
 
-  // filtro por Diretor (item 1) e aba ativa (item 5) — sem diretor selecionado a tela mostra
-  // um estado vazio orientando a escolher um, em vez de listar tudo de uma vez (resolve o
-  // scroll infinito relatado pelo usuário).
   const [diretorId, setDiretorId] = useState('');
   const [aba, setAba] = useState('marketing');
 
-  // view de topo, separada de `aba` — `aba` continua controlando só as 3 abas
-  // Marketing/Retorno-Indicação/Resumo Geral DENTRO da view "lancamento" (padrão); "relatorio"
-  // troca a tela inteira pro Relatório de visão geral (RelatorioMarketing.jsx, multi-mês, só
-  // percentual), mesmo mecanismo (state + botão `btnGhost`) já usado em MargensPage.jsx entre
-  // "Lançamento" e "Relatório de período". `diretorId` é compartilhado entre as duas views de
-  // propósito — a seleção de diretor não se perde ao alternar.
   const [view, setView] = useState('lancamento');
 
   const [flashMsg, setFlashMsg] = useState(null);
@@ -187,17 +117,10 @@ export default function MarketingPage() {
   const mes = Number(mesStr);
   const periodoValido = Number.isFinite(ano) && Number.isFinite(mes);
 
-  // `loading`/`error` só são resetados de forma síncrona nos handlers de evento que
-  // disparam este efeito (handleMesAnoChange/handleRetry, abaixo) — nunca dentro do
-  // próprio corpo do efeito, mesmo padrão de RankingPage.jsx/MargensPage.jsx.
   useEffect(() => {
     if (!periodoValido) return;
     let cancelled = false;
     const anterior = periodoAnterior(ano, mes);
-    // Promise.all busca os dois períodos em paralelo (não serializa as duas chamadas). O
-    // fetch do mês ANTERIOR é só apoio de comparação (linha de TOTAL / dashboard) — se ele
-    // falhar, resolve pra [] em vez de propagar o erro, pra não derrubar a tela principal
-    // (loading/error continuam refletindo só o fetch do mês atual, que é o obrigatório).
     Promise.all([
       fetchEntradas({ ano, mes }),
       fetchEntradas({ ano: anterior.ano, mes: anterior.mes }).catch(() => []),
@@ -208,8 +131,6 @@ export default function MarketingPage() {
         setBlocos(dadosAtual || []);
         setBlocosAnteriores(dadosAnterior || []);
         setValoresPorLoja(valoresIniciais);
-        // referência "salvo" nasce igual ao estado editável recém-carregado — é o que a API
-        // já tem gravado (ou '' quando não tem lançamento nenhum).
         valoresSalvosRef.current = valoresIniciais;
         setError(null);
       })
@@ -223,7 +144,6 @@ export default function MarketingPage() {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ano, mes, reloadToken]);
 
   function handleMesAnoChange(valor) {
@@ -249,31 +169,6 @@ export default function MarketingPage() {
     setCampo(lojaId, campo, digitosParaValor(digitosAtuais.slice(0, -1)));
   }
 
-  // dispara quando o foco sai do CARD inteiro de uma loja (consolidado em
-  // LojaMarketingCard.jsx via relatedTarget/debounce — ver comentário lá), em QUALQUER uma
-  // das duas abas (ver CONTRATO-MARKETING-API.md, seções 2 e 3, e item 2 do redesign) —
-  // sempre lê os 3 valores atuais do estado ÚNICO da loja, não só o campo que perdeu foco,
-  // pra nunca mandar POST/DELETE com base num valor desatualizado (mesmo se o valor veio de
-  // uma edição feita na outra aba).
-  //
-  // Bugfix histórico: antes disparava POST incondicionalmente a cada blur, então só encostar
-  // num campo e dar Tab sem digitar nada (loja nunca lançada) gravava uma linha zerada no
-  // banco (numOrZero('') === 0). Isso continua coberto pelo dirty-check abaixo (só prossegue
-  // se pelo menos um dos 3 valores atuais é diferente do último valor conhecido como salvo,
-  // `valoresSalvosRef`, populado na carga inicial e após cada save/exclusão bem-sucedidos) —
-  // se nada mudou, não faz NENHUMA chamada de rede (nem POST, nem DELETE).
-  //
-  // Com o DELETE idempotente do backend (seção 3 do contrato), a escolha de rota passou a
-  // ser: quando os 3 valores atuais ficam todos zero/vazios (`numOrZero` de cada um dá 0),
-  // chama `removerEntrada` — exclui de fato a linha em vez de persistir um lançamento
-  // zerado (idempotente: sem problema chamar mesmo se a loja nunca teve lançamento nenhum,
-  // só não faz nada no banco). Em qualquer outro caso (pelo menos um dos 3 é diferente de
-  // zero) é POST normal — isso substitui o antigo gate `preenchidosNaAba`, que bloqueava
-  // envio quando algum campo da aba ativa ainda estava vazio: o cenário que esse gate existia
-  // pra evitar (persistir zerado sem querer) agora tem tratamento próprio no branch de
-  // DELETE, então não faz mais sentido bloquear "usuário preencheu só 1 dos 3 campos e
-  // saiu" — zero pode ser um dado real num dos outros campos (ex.: nenhum retorno/indicação
-  // naquele mês), e o contrato (seção 2) trata isso como POST normal.
   function handleBlurLoja(lojaId) {
     const atual = {
       faturamentoGeral: valorCampo(lojaId, 'faturamentoGeral'),
@@ -300,9 +195,6 @@ export default function MarketingPage() {
       const vazio = { faturamentoGeral: '', faturamentoMarketing: '', faturamentoRetornoIndicacao: '' };
       removerEntrada({ ano, mes, lojaId })
         .then(() => {
-          // volta a linha pro shape "sem lançamento" que a API devolve pra loja nunca
-          // lançada (ver seção 1 do contrato) — todos os campos de valor/percentual/
-          // comparacao/atualizadoEm em null, preservando id/nome da loja.
           setBlocos(prev => atualizarLojaNosBlocos(prev, lojaId, loja => ({
             ...loja,
             faturamentoGeral: null,
@@ -331,13 +223,6 @@ export default function MarketingPage() {
     };
     salvarEntrada(payload)
       .then(entrada => {
-        // Atualiza só a linha salva (percentuais recalculados aqui mesmo, com a mesma
-        // fórmula do backend) em vez de refazer o GET inteiro — evitar refetch aqui é
-        // proposital: um refetch completo sobrescreveria o campo que o usuário já esteja
-        // digitando em outra linha/campo nesse meio-tempo. `comparacao` (subiu/caiu/igual)
-        // fica com o valor anterior até o próximo carregamento do período — não dá pra
-        // recalculá-la no cliente sem os valores crus do mês anterior, que a API não
-        // devolve (mesma limitação de antes do redesign).
         setBlocos(prev => atualizarLojaNosBlocos(prev, lojaId, loja => ({
           ...loja,
           faturamentoGeral: payload.faturamentoGeral,
@@ -347,8 +232,6 @@ export default function MarketingPage() {
           percentualRetornoIndicacao: calcularPercentual(payload.faturamentoRetornoIndicacao, payload.faturamentoGeral),
           atualizadoEm: entrada?.atualizadoEm ?? loja.atualizadoEm,
         })));
-        // referência "salvo" acompanha o que acabou de ser persistido, pra não reenviar no
-        // próximo blur se nada mudar depois deste save.
         valoresSalvosRef.current = { ...valoresSalvosRef.current, [lojaId]: atual };
         flash('Salvo');
       })
@@ -362,16 +245,10 @@ export default function MarketingPage() {
     [diretores],
   );
 
-  // se o diretor selecionado sumir da lista (ex.: trocou de mês e por algum motivo os dados
-  // vieram diferentes, ou a seleção ficou "presa" de uma sessão anterior), trata como
-  // "nenhum selecionado" — derivado no próprio render, sem efeito, pra não disparar
-  // setState em cascata (o <select> também usa esse id "efetivo" como value).
   const diretorIdEfetivo = diretorId !== '' && diretores.some(d => d.id === diretorId) ? diretorId : '';
   const diretorAtual = diretorIdEfetivo === '' ? null : diretores.find(d => d.id === diretorIdEfetivo) || null;
   const labelParte = aba === 'marketing' ? 'MARKETING' : 'RETORNO/INDICAÇÃO';
 
-  // lojas do diretor selecionado, achatadas (mês atual e mês anterior) — alimentam
-  // TotalGeralRow (item 1); recalculadas só quando blocos/blocosAnteriores/diretor mudam.
   const lojasAtualDiretor = useMemo(
     () => lojasDoDiretor(blocos, diretorIdEfetivo),
     [blocos, diretorIdEfetivo],
@@ -404,17 +281,12 @@ export default function MarketingPage() {
                   <option key={d.id} value={d.id}>{d.nome}</option>
                 ))}
               </select>
-              {/* aba "Resumo Geral" (item 2) mostra todos os diretores consolidados de
-                  propósito — filtro fica desabilitado nela em vez de escondido, pra deixar
-                  claro que ele existe mas não se aplica, e reaparece já com a seleção
-                  preservada ao voltar pra Marketing/Retorno-Indicação. */}
+              {}
               {view === 'lancamento' && aba === 'resumo' ? (
                 <span className="text-[11px] text-[var(--muted)]">Não se aplica ao Resumo Geral</span>
               ) : null}
             </label>
-            {/* Mês/Ano é só do lançamento (um mês por vez) — a view "relatorio" tem seu
-                próprio par de filtros de período (mês inicial/final), dentro de
-                RelatorioMarketing.jsx, então este input some quando ela está ativa. */}
+            {}
             {view === 'lancamento' ? (
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] text-[var(--muted)] font-semibold" id="marketing-mes-label">Mês/Ano</span>
@@ -525,9 +397,7 @@ export default function MarketingPage() {
                         )}
                       </div>
                     ))}
-                    {/* linha de TOTAL do diretor (item 1) — abaixo da lista de redes/lojas,
-                        dentro do mesmo diretor selecionado; some junto com a lista quando
-                        nenhum diretor está selecionado (branch acima). */}
+                    {}
                     <TotalGeralRow
                       lojasAtual={lojasAtualDiretor}
                       lojasAnteriores={lojasAnteriorDiretor}
