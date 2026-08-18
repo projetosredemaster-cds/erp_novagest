@@ -27,7 +27,14 @@ const loginLimiter = rateLimit({
   message: { error: 'Muitas tentativas de login. Tente novamente em alguns minutos.' },
 });
 
+const esqueciSenhaLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Muitas tentativas. Tente novamente em alguns minutos.' },
+});
+
 app.use('/api/auth/login', loginLimiter);
+app.use('/api/auth/esqueci-senha', esqueciSenhaLimiter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });

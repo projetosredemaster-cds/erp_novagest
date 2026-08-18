@@ -12,6 +12,19 @@ async function findByEmailForLogin(email) {
   return result.recordset[0];
 }
 
+async function findByEmail(email) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('email', sql.NVarChar, email)
+    .query(`
+      SELECT id, email, is_admin AS isAdmin
+      FROM Usuarios
+      WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(@email)))
+    `);
+  return result.recordset[0];
+}
+
 async function findById(id) {
   const pool = await getPool();
   const result = await pool
@@ -73,6 +86,7 @@ async function deleteById(id) {
 
 module.exports = {
   findByEmailForLogin,
+  findByEmail,
   findById,
   listAll,
   existeEmail,

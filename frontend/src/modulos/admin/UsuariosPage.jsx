@@ -111,13 +111,18 @@ export default function UsuariosPage() {
               onChange={(e) => setNovoEmail(e.target.value)}
               className={inputCls}
             />
-            <input
-              type="password"
-              placeholder="Senha"
-              value={novaSenha}
-              onChange={(e) => setNovaSenha(e.target.value)}
-              className={inputCls}
-            />
+            <div className="min-w-[200px] flex-1">
+              <input
+                type="password"
+                placeholder="Senha"
+                value={novaSenha}
+                onChange={(e) => setNovaSenha(e.target.value)}
+                className={inputCls}
+              />
+              <p className="mt-1.5 text-[11.5px] text-[var(--muted)]">
+                Mínimo de 6 caracteres, com pelo menos 1 letra maiúscula, 1 número e 1 caractere especial.
+              </p>
+            </div>
             <button type="submit" className={btn} disabled={creating}>
               {creating ? 'Criando...' : 'Adicionar usuário'}
             </button>

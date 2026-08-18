@@ -13,6 +13,24 @@ export function getMe(token) {
   return apiRequest('/api/auth/me', { token, emitOn401: false });
 }
 
+export function esqueciSenha({ email }) {
+  return apiRequest('/api/auth/esqueci-senha', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+    token: null,
+    emitOn401: false,
+  });
+}
+
+export function redefinirSenha({ token, novaSenha }) {
+  return apiRequest('/api/auth/redefinir-senha', {
+    method: 'POST',
+    body: JSON.stringify({ token, novaSenha }),
+    token: null,
+    emitOn401: false,
+  });
+}
+
 export function listarUsuarios(token) {
   return apiRequest('/api/admin/usuarios', { token });
 }

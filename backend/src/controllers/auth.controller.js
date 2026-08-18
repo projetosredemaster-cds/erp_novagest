@@ -1,4 +1,5 @@
 const authService = require('../services/auth.service');
+const { senhaAtendeComplexidade, MENSAGEM_SENHA_FRACA } = require('../utils/senhaValidator');
 
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
@@ -40,7 +41,58 @@ async function me(req, res) {
   }
 }
 
+async function esqueciSenha(req, res) {
+  const body = req.body || {};
+  const { email } = body;
+
+  if (!isNonEmptyString(email)) {
+    return res.status(400).json({ error: 'Campo "email" é obrigatório.' });
+  }
+
+  try {
+    await authService.esqueciSenha({ email });
+    return res.status(200).json({
+      message: 'Se o e-mail informado estiver cadastrado, você receberá um link de recuperação em instantes.',
+    });
+  } catch (err) {
+    console.error('[auth.controller] Erro ao processar solicitação de recuperação de senha:', err);
+    return res.status(500).json({ error: 'Erro interno ao processar solicitação.' });
+  }
+}
+
+async function redefinirSenha(req, res) {
+  const body = req.body || {};
+  const { token, novaSenha } = body;
+
+  if (!isNonEmptyString(token)) {
+    return res.status(400).json({ error: 'Campo "token" é obrigatório.' });
+  }
+
+  if (!isNonEmptyString(novaSenha)) {
+    return res.status(400).json({ error: 'Campo "novaSenha" é obrigatório.' });
+  }
+
+  if (!senhaAtendeComplexidade(novaSenha)) {
+    return res.status(400).json({ error: MENSAGEM_SENHA_FRACA });
+  }
+
+  try {
+    const resultado = await authService.redefinirSenha({ token, novaSenha });
+
+    if (resultado === 'token_invalido') {
+      return res.status(400).json({ error: 'Link de recuperação inválido ou expirado.' });
+    }
+
+    return res.status(200).json({ message: 'Senha redefinida com sucesso.' });
+  } catch (err) {
+    console.error('[auth.controller] Erro ao redefinir senha:', err);
+    return res.status(500).json({ error: 'Erro interno ao redefinir senha.' });
+  }
+}
+
 module.exports = {
   login,
   me,
+  esqueciSenha,
+  redefinirSenha,
 };

@@ -3,6 +3,8 @@ import AppShell from '../app/AppShell.jsx';
 import RequireAuth from '../app/RequireAuth.jsx';
 import RequireAdmin from '../app/RequireAdmin.jsx';
 import LoginPage from '../modulos/auth/LoginPage.jsx';
+import EsqueciSenhaPage from '../modulos/auth/EsqueciSenhaPage.jsx';
+import RedefinirSenhaPage from '../modulos/auth/RedefinirSenhaPage.jsx';
 import { moduleRegistry } from '../app/moduleRegistry.js';
 
 export default function AppRoutes() {
@@ -12,6 +14,8 @@ export default function AppRoutes() {
     <Routes>
       {}
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/esqueci-senha" element={<EsqueciSenhaPage />} />
+      <Route path="/redefinir-senha" element={<RedefinirSenhaPage />} />
 
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../app/AuthContext.jsx';
 import { moduleRegistry } from '../../app/moduleRegistry.js';
 
@@ -73,6 +73,13 @@ export default function LoginPage() {
           <button type="submit" className={btn} disabled={submitting}>
             {submitting ? 'Entrando...' : 'Entrar'}
           </button>
+
+          <Link
+            to="/esqueci-senha"
+            className="text-center text-[12.5px] font-semibold text-[var(--teal)] hover:underline"
+          >
+            Esqueci minha senha
+          </Link>
         </form>
       </div>
     </div>

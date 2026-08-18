@@ -1,4 +1,5 @@
 const usuarioService = require('../services/usuario.service');
+const { senhaAtendeComplexidade, MENSAGEM_SENHA_FRACA } = require('../utils/senhaValidator');
 
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
@@ -28,6 +29,10 @@ async function criarUsuario(req, res) {
 
   if (!isNonEmptyString(senha)) {
     return res.status(400).json({ error: 'Campo "senha" é obrigatório.' });
+  }
+
+  if (!senhaAtendeComplexidade(senha)) {
+    return res.status(400).json({ error: MENSAGEM_SENHA_FRACA });
   }
 
   try {
