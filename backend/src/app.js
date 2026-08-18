@@ -27,9 +27,7 @@ const loginLimiter = rateLimit({
   message: { error: 'Muitas tentativas de login. Tente novamente em alguns minutos.' },
 });
 
-if (process.env.NODE_ENV !== 'development') {
-  app.use('/api/auth/login', loginLimiter);
-}
+app.use('/api/auth/login', loginLimiter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
