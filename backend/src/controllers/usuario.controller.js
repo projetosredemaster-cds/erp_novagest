@@ -21,7 +21,7 @@ async function listarUsuarios(req, res) {
 
 async function criarUsuario(req, res) {
   const body = req.body || {};
-  const { email, senha } = body;
+  const { email, senha, operadorCobranca } = body;
 
   if (!isNonEmptyString(email)) {
     return res.status(400).json({ error: 'Campo "email" é obrigatório.' });
@@ -36,7 +36,11 @@ async function criarUsuario(req, res) {
   }
 
   try {
-    const resultado = await usuarioService.criarUsuario({ email, senha });
+    const resultado = await usuarioService.criarUsuario({
+      email,
+      senha,
+      operadorCobranca: operadorCobranca === true,
+    });
 
     if (resultado === 'email_duplicado') {
       return res.status(409).json({ error: 'Já existe um usuário com esse e-mail.' });

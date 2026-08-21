@@ -1,6 +1,7 @@
 import { Navigate, Outlet } from 'react-router-dom';
-import { useAuth } from './AuthContext.jsx';
-export default function RequireAuth() {
+import { useAuth } from '../app/AuthContext.jsx';
+
+export default function RequireOperadorCobranca() {
   const { isAuthenticated, isOperadorCobranca, loadingAuth } = useAuth();
 
   if (loadingAuth) {
@@ -11,14 +12,8 @@ export default function RequireAuth() {
     );
   }
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !isOperadorCobranca) {
     return <Navigate to="/login" replace />;
-  }
-
-  // Operador de cobrança nunca acessa o ERP normal, mesmo sabendo a URL
-  // direta — o shell dele mora em /controle-ligacoes.
-  if (isOperadorCobranca) {
-    return <Navigate to="/controle-ligacoes" replace />;
   }
 
   return <Outlet />;

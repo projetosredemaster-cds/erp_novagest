@@ -2,9 +2,14 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import AppShell from '../app/AppShell.jsx';
 import RequireAuth from '../app/RequireAuth.jsx';
 import RequireAdmin from '../app/RequireAdmin.jsx';
+import ControleLigacoesShell from '../app/ControleLigacoesShell.jsx';
+import RequireOperadorCobranca from './RequireOperadorCobranca.jsx';
 import LoginPage from '../modulos/auth/LoginPage.jsx';
 import EsqueciSenhaPage from '../modulos/auth/EsqueciSenhaPage.jsx';
 import RedefinirSenhaPage from '../modulos/auth/RedefinirSenhaPage.jsx';
+import ControleLigacoesHomePage from '../modulos/controle-ligacoes/ControleLigacoesHomePage.jsx';
+import NumerosRemetentesPage from '../modulos/controle-ligacoes/configuracoes/NumerosRemetentesPage.jsx';
+import ImportacaoPage from '../modulos/controle-ligacoes/importacao/ImportacaoPage.jsx';
 import { moduleRegistry } from '../app/moduleRegistry.js';
 
 export default function AppRoutes() {
@@ -42,6 +47,14 @@ export default function AppRoutes() {
 
             return route;
           })}
+        </Route>
+      </Route>
+
+      <Route element={<RequireOperadorCobranca />}>
+        <Route path="controle-ligacoes" element={<ControleLigacoesShell />}>
+          <Route index element={<ControleLigacoesHomePage />} />
+          <Route path="configuracoes/numeros-remetentes" element={<NumerosRemetentesPage />} />
+          <Route path="importacao" element={<ImportacaoPage />} />
         </Route>
       </Route>
     </Routes>

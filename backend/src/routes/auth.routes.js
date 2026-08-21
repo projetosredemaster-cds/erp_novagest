@@ -6,6 +6,8 @@ const router = express.Router();
 
 router.post('/login', authController.login);
 
+router.post('/reativacao/login', authController.loginReativacao);
+
 router.post('/esqueci-senha', authController.esqueciSenha);
 
 router.post('/redefinir-senha', authController.redefinirSenha);

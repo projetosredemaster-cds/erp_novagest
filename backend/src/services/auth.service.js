@@ -7,7 +7,7 @@ const brevoEmailService = require('./brevoEmail.service');
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 
-async function login({ email, senha }) {
+async function autenticarCredenciais({ email, senha }) {
   const usuario = await usuarioModel.findByEmailForLogin(email);
   if (!usuario) {
     return null;
@@ -18,15 +18,46 @@ async function login({ email, senha }) {
     return null;
   }
 
+  return usuario;
+}
+
+function gerarSessao(usuario) {
   const payload = {
     id: usuario.id,
     email: usuario.email,
     isAdmin: usuario.isAdmin === true,
+    role: usuario.role,
   };
 
   const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '12h' });
 
   return { token, usuario: payload };
+}
+
+async function login({ email, senha }) {
+  const usuario = await autenticarCredenciais({ email, senha });
+  if (!usuario) {
+    return null;
+  }
+
+  if (usuario.role === 'operador_cobranca') {
+    return 'role_incompativel';
+  }
+
+  return gerarSessao(usuario);
+}
+
+async function loginReativacao({ email, senha }) {
+  const usuario = await autenticarCredenciais({ email, senha });
+  if (!usuario) {
+    return null;
+  }
+
+  if (usuario.role !== 'operador_cobranca') {
+    return 'role_incompativel';
+  }
+
+  return gerarSessao(usuario);
 }
 
 async function esqueciSenha({ email }) {
@@ -76,6 +107,7 @@ async function redefinirSenha({ token, novaSenha }) {
 
 module.exports = {
   login,
+  loginReativacao,
   esqueciSenha,
   redefinirSenha,
 };

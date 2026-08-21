@@ -4,17 +4,27 @@ import userEvent from '@testing-library/user-event';
 import RankingPage from './RankingPage.jsx';
 
 vi.mock('./rankingApi', () => ({
-  fetchDiretores: vi.fn(),
   fetchCategorias: vi.fn(),
   fetchEntradas: vi.fn(),
   salvarEntrada: vi.fn(),
+  enviarRelatorioPorEmail: vi.fn(),
+}));
+
+// fetchDiretores/criarDiretor/atualizarDiretor/removerDiretor/criarRede/
+// atualizarRede/removerRede/fetchResponsaveis/criarResponsavel/
+// removerResponsavel vêm de ../../lib/cadastrosApi (módulo compartilhado,
+// ver CLAUDE.md) — RankingPage.jsx NÃO os importa de ./rankingApi. Mockar o
+// módulo errado faz esse teste chamar o fetch real e bater no backend de
+// verdade (violação da regra "nunca teste contra serviço real"); corrigido
+// aqui na revisão de QA do módulo Controle de Ligações.
+vi.mock('../../lib/cadastrosApi', () => ({
+  fetchDiretores: vi.fn(),
   criarDiretor: vi.fn(),
   atualizarDiretor: vi.fn(),
   removerDiretor: vi.fn(),
   criarRede: vi.fn(),
   atualizarRede: vi.fn(),
   removerRede: vi.fn(),
-  enviarRelatorioPorEmail: vi.fn(),
   fetchResponsaveis: vi.fn(),
   criarResponsavel: vi.fn(),
   removerResponsavel: vi.fn(),
@@ -25,6 +35,7 @@ vi.mock('../../app/AuthContext.jsx', () => ({
 }));
 
 import * as rankingApi from './rankingApi';
+import * as cadastrosApi from '../../lib/cadastrosApi';
 import { useAuth } from '../../app/AuthContext.jsx';
 
 const CATEGORIA_PRINCIPAL = { id: 1, nome: 'Vendas', principal: true };
@@ -79,7 +90,7 @@ function diretorMisto() {
 }
 
 function mockDadosRedeInativa({ valores } = {}) {
-  rankingApi.fetchDiretores.mockResolvedValue([diretorMisto()]);
+  cadastrosApi.fetchDiretores.mockResolvedValue([diretorMisto()]);
   rankingApi.fetchCategorias.mockResolvedValue([CATEGORIA_PRINCIPAL]);
   rankingApi.fetchEntradas.mockResolvedValue(
     valores || [
@@ -87,14 +98,14 @@ function mockDadosRedeInativa({ valores } = {}) {
       { rede_id: 301, valor: 999 },
     ]
   );
-  rankingApi.fetchResponsaveis.mockResolvedValue([]);
+  cadastrosApi.fetchResponsaveis.mockResolvedValue([]);
 }
 
 function mockDadosIniciais({ diretores, responsaveis, entradas }) {
-  rankingApi.fetchDiretores.mockResolvedValue(diretores);
+  cadastrosApi.fetchDiretores.mockResolvedValue(diretores);
   rankingApi.fetchCategorias.mockResolvedValue([CATEGORIA_PRINCIPAL]);
   rankingApi.fetchEntradas.mockResolvedValue(entradas || [{ rede_id: 10, valor: 50 }]);
-  rankingApi.fetchResponsaveis.mockResolvedValue(responsaveis || []);
+  cadastrosApi.fetchResponsaveis.mockResolvedValue(responsaveis || []);
 }
 
 async function renderPage() {
@@ -164,7 +175,7 @@ describe('RankingPage — toggleRedeVisivel (clique em Ocultar, isAdmin:true)', 
     mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
 
     let resolvePromise;
-    rankingApi.atualizarRede.mockImplementation(
+    cadastrosApi.atualizarRede.mockImplementation(
       () => new Promise((resolve) => { resolvePromise = resolve; })
     );
 
@@ -173,7 +184,7 @@ describe('RankingPage — toggleRedeVisivel (clique em Ocultar, isAdmin:true)', 
 
     await user.click(screen.getByRole('button', { name: 'Ocultar' }));
 
-    expect(rankingApi.atualizarRede).toHaveBeenCalledWith(10, { visivel: false });
+    expect(cadastrosApi.atualizarRede).toHaveBeenCalledWith(10, { visivel: false });
     expect(screen.getByText('Delta')).toBeInTheDocument();
 
     resolvePromise({ ...redeVisivel(), visivel: false });
@@ -184,7 +195,7 @@ describe('RankingPage — toggleRedeVisivel (clique em Ocultar, isAdmin:true)', 
   it('se a promise rejeitar, o estado local NÃO muda e o flash de erro aparece', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
     mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })] });
-    rankingApi.atualizarRede.mockRejectedValue(new Error('Falha simulada ao atualizar rede'));
+    cadastrosApi.atualizarRede.mockRejectedValue(new Error('Falha simulada ao atualizar rede'));
 
     const user = userEvent.setup();
     await renderPage();
@@ -200,7 +211,7 @@ describe('RankingPage — ConfigView (tela "⚙ Configurar diretores/redes")', (
   it('isAdmin:true — rede oculta mostra "(oculta)" e o botão "Mostrar rede ... no relatório"; clicar chama atualizarRede com { visivel: true }', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
     mockDadosIniciais({ diretores: [diretor1()] });
-    rankingApi.atualizarRede.mockResolvedValue({ ...redeOculta(), visivel: true });
+    cadastrosApi.atualizarRede.mockResolvedValue({ ...redeOculta(), visivel: true });
 
     const user = userEvent.setup();
     await renderPage();
@@ -214,7 +225,7 @@ describe('RankingPage — ConfigView (tela "⚙ Configurar diretores/redes")', (
 
     await user.click(mostrarBtn);
 
-    expect(rankingApi.atualizarRede).toHaveBeenCalledWith(20, { visivel: true });
+    expect(cadastrosApi.atualizarRede).toHaveBeenCalledWith(20, { visivel: true });
   });
 
   it('isAdmin:false — a ConfigView não é acessível (sem botão de navegação) e nenhum botão Ocultar/Mostrar existe em nenhum lugar', async () => {
@@ -255,7 +266,7 @@ describe('RankingPage — GG de rede (formato aninhado { id, nome }, rótulo vis
       diretores: [diretor1({ redes: [redeVisivel()] })],
       responsaveis: [{ id: 1, nome: 'Ana' }, { id: 2, nome: 'Beto' }],
     });
-    rankingApi.atualizarRede.mockResolvedValue({ ...redeVisivel(), responsavel: { id: 2, nome: 'Beto' } });
+    cadastrosApi.atualizarRede.mockResolvedValue({ ...redeVisivel(), responsavel: { id: 2, nome: 'Beto' } });
 
     const user = userEvent.setup();
     await renderPage();
@@ -264,7 +275,7 @@ describe('RankingPage — GG de rede (formato aninhado { id, nome }, rótulo vis
     const select = await screen.findByLabelText('GG da rede Delta');
     await user.selectOptions(select, '2');
 
-    expect(rankingApi.atualizarRede).toHaveBeenCalledWith(10, { responsavelId: 2 });
+    expect(cadastrosApi.atualizarRede).toHaveBeenCalledWith(10, { responsavelId: 2 });
   });
 
   it('isAdmin:true — selecionar "Nenhum" chama atualizarRede com { responsavelId: null }', async () => {
@@ -273,7 +284,7 @@ describe('RankingPage — GG de rede (formato aninhado { id, nome }, rótulo vis
       diretores: [diretor1({ redes: [redeVisivel()] })],
       responsaveis: [{ id: 1, nome: 'Ana' }],
     });
-    rankingApi.atualizarRede.mockResolvedValue({ ...redeVisivel(), responsavel: null });
+    cadastrosApi.atualizarRede.mockResolvedValue({ ...redeVisivel(), responsavel: null });
 
     const user = userEvent.setup();
     await renderPage();
@@ -282,7 +293,7 @@ describe('RankingPage — GG de rede (formato aninhado { id, nome }, rótulo vis
     const select = await screen.findByLabelText('GG da rede Delta');
     await user.selectOptions(select, '');
 
-    expect(rankingApi.atualizarRede).toHaveBeenCalledWith(10, { responsavelId: null });
+    expect(cadastrosApi.atualizarRede).toHaveBeenCalledWith(10, { responsavelId: null });
   });
 
   it('isAdmin:false — a ConfigView não é acessível, então nenhum <select> de GG aparece fora dela', async () => {
@@ -299,7 +310,7 @@ describe('RankingPage — cadastro/remoção de GGs (seção "GGs" da ConfigView
   it('isAdmin:true — lista os GGs cadastrados e permite cadastrar um novo', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
     mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })], responsaveis: [{ id: 1, nome: 'Ana' }] });
-    rankingApi.criarResponsavel.mockResolvedValue({ id: 2, nome: 'Beto' });
+    cadastrosApi.criarResponsavel.mockResolvedValue({ id: 2, nome: 'Beto' });
 
     const user = userEvent.setup();
     await renderPage();
@@ -310,7 +321,7 @@ describe('RankingPage — cadastro/remoção de GGs (seção "GGs" da ConfigView
     await user.type(screen.getByPlaceholderText('Nome do GG'), 'Beto');
     await user.click(screen.getByRole('button', { name: 'Adicionar GG' }));
 
-    expect(rankingApi.criarResponsavel).toHaveBeenCalledWith({ nome: 'Beto' });
+    expect(cadastrosApi.criarResponsavel).toHaveBeenCalledWith({ nome: 'Beto' });
     expect(await screen.findByRole('button', { name: 'Remover GG Beto' })).toBeInTheDocument();
   });
 
@@ -325,14 +336,14 @@ describe('RankingPage — cadastro/remoção de GGs (seção "GGs" da ConfigView
     await screen.findByText('Nenhum GG cadastrado ainda');
     await user.click(screen.getByRole('button', { name: 'Adicionar GG' }));
 
-    expect(rankingApi.criarResponsavel).not.toHaveBeenCalled();
+    expect(cadastrosApi.criarResponsavel).not.toHaveBeenCalled();
     expect(screen.getByText('Informe um nome para o GG.')).toBeInTheDocument();
   });
 
   it('isAdmin:true — remover um GG vinculado a uma rede (409) mostra a mensagem de erro da API e não some da lista', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
     mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })], responsaveis: [{ id: 1, nome: 'Ana' }] });
-    rankingApi.removerResponsavel.mockRejectedValue(
+    cadastrosApi.removerResponsavel.mockRejectedValue(
       new Error('Não é possível excluir este responsável pois há redes vinculadas a ele. Remova a atribuição primeiro.')
     );
 
@@ -352,7 +363,7 @@ describe('RankingPage — cadastro/remoção de GGs (seção "GGs" da ConfigView
   it('isAdmin:true — remover um GG sem vínculo remove da lista sem esperar reload da página', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
     mockDadosIniciais({ diretores: [diretor1({ redes: [redeVisivel()] })], responsaveis: [{ id: 1, nome: 'Ana' }] });
-    rankingApi.removerResponsavel.mockResolvedValue(undefined);
+    cadastrosApi.removerResponsavel.mockResolvedValue(undefined);
 
     const user = userEvent.setup();
     await renderPage();
@@ -362,7 +373,7 @@ describe('RankingPage — cadastro/remoção de GGs (seção "GGs" da ConfigView
     await user.click(screen.getByRole('button', { name: 'Remover GG Ana' }));
 
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Remover GG Ana' })).not.toBeInTheDocument());
-    expect(rankingApi.removerResponsavel).toHaveBeenCalledWith(1);
+    expect(cadastrosApi.removerResponsavel).toHaveBeenCalledWith(1);
   });
 
   it('isAdmin:false — a seção "GGs" não é renderizada', async () => {
@@ -380,7 +391,7 @@ describe('RankingPage — POST /redes não envia responsavel (nasce sempre sem G
   it('addRede chama criarRede com { diretorId, nome, emoji }, sem campo de responsável no formulário de criação', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
     mockDadosIniciais({ diretores: [diretor1({ redes: [] })], responsaveis: [] });
-    rankingApi.criarRede.mockResolvedValue({
+    cadastrosApi.criarRede.mockResolvedValue({
       id: 30, diretor_id: 1, nome: 'Rede Nova', emoji: '', ativo: true, visivel: true, responsavel: null,
     });
 
@@ -395,7 +406,7 @@ describe('RankingPage — POST /redes não envia responsavel (nasce sempre sem G
     await user.type(screen.getByPlaceholderText('Nome da rede (ex: Delta)'), 'Rede Nova');
     await user.click(screen.getByRole('button', { name: 'Adicionar rede' }));
 
-    expect(rankingApi.criarRede).toHaveBeenCalledWith({ diretorId: 1, nome: 'Rede Nova', emoji: '' });
+    expect(cadastrosApi.criarRede).toHaveBeenCalledWith({ diretorId: 1, nome: 'Rede Nova', emoji: '' });
   });
 });
 
@@ -405,12 +416,12 @@ describe('RankingPage — ordem fixa de categorias no relatório gerado (buildFu
   const CATEGORIA_RECEITA_BRUTA = { id: 1, nome: 'Receita Bruta', principal: true };
 
   function mockDadosOrdenacao({ categorias, valoresPorCategoria }) {
-    rankingApi.fetchDiretores.mockResolvedValue([diretor1({ redes: [redeVisivel()] })]);
+    cadastrosApi.fetchDiretores.mockResolvedValue([diretor1({ redes: [redeVisivel()] })]);
     rankingApi.fetchCategorias.mockResolvedValue(categorias);
     rankingApi.fetchEntradas.mockImplementation((_data, catId) =>
       Promise.resolve(valoresPorCategoria[catId] || [])
     );
-    rankingApi.fetchResponsaveis.mockResolvedValue([]);
+    cadastrosApi.fetchResponsaveis.mockResolvedValue([]);
   }
 
   it('"Gerar relatório do dia" mostra Receita Bruta antes de Acessórios mesmo lançando valor em Acessórios primeiro e com a API retornando as categorias fora de ordem', async () => {
@@ -600,7 +611,7 @@ describe('RankingPage — ConfigView: botão Desativar/Reativar rede (Redes.ativ
     mockDadosRedeInativa();
 
     let resolvePromise;
-    rankingApi.atualizarRede.mockImplementation(
+    cadastrosApi.atualizarRede.mockImplementation(
       () => new Promise((resolve) => { resolvePromise = resolve; })
     );
 
@@ -610,7 +621,7 @@ describe('RankingPage — ConfigView: botão Desativar/Reativar rede (Redes.ativ
 
     await user.click(screen.getByRole('button', { name: 'Desativar rede Rede Ativa' }));
 
-    expect(rankingApi.atualizarRede).toHaveBeenCalledWith(300, { ativo: false });
+    expect(cadastrosApi.atualizarRede).toHaveBeenCalledWith(300, { ativo: false });
     expect(screen.getByRole('button', { name: 'Desativar rede Rede Ativa' })).toBeInTheDocument();
 
     resolvePromise({ ...redeAtiva(), ativo: false });
@@ -621,7 +632,7 @@ describe('RankingPage — ConfigView: botão Desativar/Reativar rede (Redes.ativ
   it('se a promise rejeitar, o estado local NÃO muda e o flash de erro aparece', async () => {
     useAuth.mockReturnValue({ isAdmin: true });
     mockDadosRedeInativa();
-    rankingApi.atualizarRede.mockRejectedValue(new Error('Falha simulada ao atualizar rede'));
+    cadastrosApi.atualizarRede.mockRejectedValue(new Error('Falha simulada ao atualizar rede'));
 
     const user = userEvent.setup();
     await renderPage();

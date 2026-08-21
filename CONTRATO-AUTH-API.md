@@ -8,10 +8,13 @@
 ## Contexto e decisões de design
 
 - A tabela `Usuarios` **já existe** no Azure SQL, com colunas `id`,
-  `email`, `senha_hash`, `is_admin`, `criado_em`. **Não recrie a tabela nem
-  insira nenhum usuário admin novo** — já existe um usuário com
-  `is_admin = 1` cadastrado manualmente, com `senha_hash` em bcrypt. O
-  código deve apenas ler/gravar nessa tabela como está.
+  `email`, `senha_hash`, `is_admin`, `role`, `criado_em` (`role` foi
+  adicionada depois, pela migration documentada em
+  `CONTRATO-CONTROLE-LIGACOES-API.md` — `'admin' | 'usuario' |
+  'operador_cobranca'`, convive com `is_admin` sem substituí-lo).
+  **Não recrie a tabela nem insira nenhum usuário admin novo** — já existe
+  um usuário com `is_admin = 1` cadastrado manualmente, com `senha_hash` em
+  bcrypt. O código deve apenas ler/gravar nessa tabela como está.
 - **Hash de senha**: sempre `bcrypt`, `bcrypt.hash(senha, 10)` na gravação e
   `bcrypt.compare(senha, senha_hash)` na checagem de login. Nunca comparar
   senha em texto puro.
@@ -19,12 +22,17 @@
   `process.env.JWT_SECRET` (nova variável de ambiente — ver seção
   "Variáveis de ambiente novas" abaixo). Payload:
   ```json
-  { "id": 7, "email": "admin@novagest.com", "isAdmin": true }
+  { "id": 7, "email": "admin@novagest.com", "isAdmin": true, "role": "admin" }
   ```
   (mais os claims automáticos `iat`/`exp` do `jsonwebtoken`). Expira em
   **12 horas** (`expiresIn: '12h'`) — decisão registrada aqui porque não é
   um requisito explícito do pedido original; 12h cobre um turno de trabalho
   sem exigir refresh token, que está fora do escopo desta implementação.
+  `role` (`'admin' | 'usuario' | 'operador_cobranca'`) foi adicionado ao
+  payload junto com o papel novo `operador_cobranca` do Controle de
+  Ligações — ver `CONTRATO-CONTROLE-LIGACOES-API.md` para o contrato
+  completo desse módulo (schema da coluna, rota de login alternativa,
+  middleware novo).
 - **Nomenclatura de campo**: por consistência com o resto deste contrato
   (e com o payload do JWT), toda resposta que carrega o status de
   administrador usa a chave `isAdmin` (camelCase, booleano), mesmo que a
@@ -72,7 +80,7 @@ Aplicado a toda rota protegida. Lê o header `Authorization: Bearer <token>`.
   401 Unauthorized
   { "error": "Token de autenticação inválido ou expirado." }
   ```
-- Se válido, popula `req.usuario = { id, email, isAdmin }` (payload
+- Se válido, popula `req.usuario = { id, email, isAdmin, role }` (payload
   decodificado do token) e chama `next()`.
 
 ### `adminMiddleware` (autorização)
@@ -85,6 +93,10 @@ Aplicado **depois** de `authMiddleware`, só nas rotas de
   { "error": "Acesso restrito a administradores." }
   ```
 - Se `isAdmin === true`, chama `next()`.
+
+Existe também `operadorCobrancaMiddleware`, análogo ao `adminMiddleware`
+mas checando `req.usuario.role === 'operador_cobranca'` em vez de
+`isAdmin` — contrato completo em `CONTRATO-CONTROLE-LIGACOES-API.md`.
 
 ## Rotas protegidas do resto do sistema
 
@@ -133,21 +145,43 @@ Se o `email` não existir na tabela `Usuarios`, **ou** existir mas
 { "error": "E-mail ou senha inválidos." }
 ```
 
+### Papel incompatível — `403 Forbidden`
+Se `email`/`senha` estão corretos mas `role === 'operador_cobranca'`
+(usuário do Controle de Ligações tentando entrar pelo login normal do
+ERP — ver `CONTRATO-CONTROLE-LIGACOES-API.md`, seção 2, para o contexto
+completo dessa decisão de isolamento):
+```json
+{ "error": "Este usuário deve acessar pelo login do Controle de Ligações." }
+```
+
 ### Resposta de sucesso — `200 OK`
+Passa a incluir `role` (`'admin' | 'usuario' | 'operador_cobranca'`),
+junto de `isAdmin` — nenhum dos dois campos foi removido. Na prática,
+`role` nunca é `'operador_cobranca'` numa resposta de sucesso desta rota,
+por causa do `403` acima:
 ```json
 {
   "token": "eyJhbGciOiJIUzI1NiIs...",
   "usuario": {
     "id": 7,
     "email": "admin@novagest.com",
-    "isAdmin": true
+    "isAdmin": true,
+    "role": "admin"
   }
 }
 ```
 
+O payload do JWT ganha o mesmo campo `role`, mesma expiração de 12h.
+
+Existe também `POST /api/auth/reativacao/login`, rota pública separada
+para o papel `operador_cobranca` (mesmo corpo/validações, checagem de
+papel invertida) — contrato completo em
+`CONTRATO-CONTROLE-LIGACOES-API.md`, seção 1.
+
 ### Erros
 - `400 Bad Request` — campos ausentes (mensagens acima).
 - `401 Unauthorized` — credenciais inválidas (mensagem acima).
+- `403 Forbidden` — papel incompatível (mensagem acima).
 - `500 Internal Server Error`:
   ```json
   { "error": "Erro interno ao autenticar." }
@@ -166,8 +200,9 @@ sem precisar guardar o payload decodificado manualmente. Protegida por
 Sem body. Header `Authorization: Bearer <token>` obrigatório.
 
 ### Resposta de sucesso — `200 OK`
+Passa a incluir `role`, junto de `isAdmin`:
 ```json
-{ "id": 7, "email": "admin@novagest.com", "isAdmin": true }
+{ "id": 7, "email": "admin@novagest.com", "isAdmin": true, "role": "admin" }
 ```
 
 ### Erros
@@ -189,20 +224,31 @@ Lista todos os usuários cadastrados. Protegida por `authMiddleware` +
 Sem parâmetros de query nem body.
 
 ### Resposta de sucesso — `200 OK`
-Array plano, ordenado por `email`, **sem** `senha_hash`:
+Array plano, ordenado por `email`, **sem** `senha_hash`. Cada item passa a
+incluir também `role` (`'admin'`, `'usuario'` ou `'operador_cobranca'`),
+junto de `isAdmin` — nenhum dos dois campos foi removido:
 ```json
 [
   {
     "id": 7,
     "email": "admin@novagest.com",
     "isAdmin": true,
+    "role": "admin",
     "criado_em": "2026-01-10T12:00:00.000Z"
   },
   {
     "id": 12,
     "email": "vendedor@novagest.com",
     "isAdmin": false,
+    "role": "usuario",
     "criado_em": "2026-07-17T14:00:00.000Z"
+  },
+  {
+    "id": 15,
+    "email": "cobranca@novagest.com",
+    "isAdmin": false,
+    "role": "operador_cobranca",
+    "criado_em": "2026-08-21T09:00:00.000Z"
   }
 ]
 ```
@@ -224,13 +270,25 @@ admin por essa rota; qualquer usuário criado aqui é sempre gravado com
 `is_admin = 0`). Protegida por `authMiddleware` + `adminMiddleware`.
 
 ### Corpo da requisição
-| Campo   | Tipo   | Obrigatório | Validação |
-|---------|--------|-------------|-----------|
-| `email` | string | sim | não pode ser vazio/só espaços |
-| `senha` | string | sim | não pode ser vazio |
+| Campo               | Tipo    | Obrigatório | Validação |
+|---------------------|---------|-------------|-----------|
+| `email`             | string  | sim | não pode ser vazio/só espaços |
+| `senha`             | string  | sim | não pode ser vazio |
+| `operadorCobranca`  | boolean | não | truthy exato `true` (não string `"true"`); qualquer outro valor, incluindo ausente, equivale a `false` |
+
+`operadorCobranca` controla o `role` gravado: `true` grava
+`role = 'operador_cobranca'`; ausente, `false`, ou qualquer outro valor
+grava `role = 'usuario'` (comportamento atual, sem mudança visível quando o
+campo não é enviado). **Não existe** opção para criar `role = 'admin'` por
+essa rota — admin continua sendo só cadastro manual direto no banco.
 
 ```json
 { "email": "vendedor@novagest.com", "senha": "senha123" }
+```
+
+Exemplo criando um operador de cobrança:
+```json
+{ "email": "cobranca@novagest.com", "senha": "senha123", "operadorCobranca": true }
 ```
 
 ### Validações — `400 Bad Request`
@@ -254,15 +312,29 @@ ver decisão registrada no topo do documento):
 
 ### Comportamento no banco
 - Gera o hash: `bcrypt.hash(senha, 10)`.
-- `INSERT INTO Usuarios (email, senha_hash, is_admin, criado_em) VALUES (@email, @senhaHash, 0, SYSUTCDATETIME())`.
+- Calcula `role`: `operadorCobranca === true ? 'operador_cobranca' : 'usuario'`.
+- `INSERT INTO Usuarios (email, senha_hash, is_admin, role, criado_em) VALUES (@email, @senhaHash, 0, @role, SYSUTCDATETIME())`.
 
 ### Resposta de sucesso — `201 Created`
+Passa a incluir `role`, junto de `isAdmin`:
 ```json
 {
   "id": 12,
   "email": "vendedor@novagest.com",
   "isAdmin": false,
+  "role": "usuario",
   "criado_em": "2026-07-17T14:00:00.000Z"
+}
+```
+
+Ou, com `operadorCobranca: true`:
+```json
+{
+  "id": 15,
+  "email": "cobranca@novagest.com",
+  "isAdmin": false,
+  "role": "operador_cobranca",
+  "criado_em": "2026-08-21T09:00:00.000Z"
 }
 ```
 

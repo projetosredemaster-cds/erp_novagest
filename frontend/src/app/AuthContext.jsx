@@ -1,7 +1,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { login as loginRequest, getMe } from '../modulos/auth/authApi.js';
+import { login as loginRequest, loginReativacao as loginReativacaoRequest, getMe } from '../modulos/auth/authApi.js';
 import { loadAuth, saveAuth, clearAuth } from './authStorage.js';
 import { onUnauthorized } from './authEvents.js';
 
@@ -53,6 +53,15 @@ export function AuthProvider({ children }) {
     saveAuth({ token: resposta.token, usuario: resposta.usuario });
     setToken(resposta.token);
     setUsuario(resposta.usuario);
+    return resposta.usuario;
+  }
+
+  async function loginReativacao(email, senha) {
+    const resposta = await loginReativacaoRequest({ email, senha });
+    saveAuth({ token: resposta.token, usuario: resposta.usuario });
+    setToken(resposta.token);
+    setUsuario(resposta.usuario);
+    return resposta.usuario;
   }
 
   function logout() {
@@ -65,8 +74,10 @@ export function AuthProvider({ children }) {
     usuario,
     isAuthenticated: Boolean(token && usuario),
     isAdmin: Boolean(usuario?.isAdmin),
+    isOperadorCobranca: Boolean(usuario?.role === 'operador_cobranca'),
     loadingAuth,
     login,
+    loginReativacao,
     logout,
   };
 

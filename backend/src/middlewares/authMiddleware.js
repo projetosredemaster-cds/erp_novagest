@@ -18,6 +18,7 @@ function authMiddleware(req, res, next) {
       id: payload.id,
       email: payload.email,
       isAdmin: payload.isAdmin,
+      role: payload.role,
     };
     return next();
   } catch (err) {

@@ -5,17 +5,27 @@ function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function validarCredenciaisBody(body) {
+  const { email, senha } = body;
+
+  if (!isNonEmptyString(email)) {
+    return 'Campo "email" é obrigatório.';
+  }
+
+  if (!isNonEmptyString(senha)) {
+    return 'Campo "senha" é obrigatório.';
+  }
+
+  return null;
+}
 
 async function login(req, res) {
   const body = req.body || {};
   const { email, senha } = body;
 
-  if (!isNonEmptyString(email)) {
-    return res.status(400).json({ error: 'Campo "email" é obrigatório.' });
-  }
-
-  if (!isNonEmptyString(senha)) {
-    return res.status(400).json({ error: 'Campo "senha" é obrigatório.' });
+  const erroValidacao = validarCredenciaisBody(body);
+  if (erroValidacao) {
+    return res.status(400).json({ error: erroValidacao });
   }
 
   try {
@@ -25,9 +35,44 @@ async function login(req, res) {
       return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
     }
 
+    if (resultado === 'role_incompativel') {
+      return res.status(403).json({
+        error: 'Este usuário deve acessar pelo login do Controle de Ligações.',
+      });
+    }
+
     return res.status(200).json(resultado);
   } catch (err) {
     console.error('[auth.controller] Erro ao autenticar:', err);
+    return res.status(500).json({ error: 'Erro interno ao autenticar.' });
+  }
+}
+
+async function loginReativacao(req, res) {
+  const body = req.body || {};
+  const { email, senha } = body;
+
+  const erroValidacao = validarCredenciaisBody(body);
+  if (erroValidacao) {
+    return res.status(400).json({ error: erroValidacao });
+  }
+
+  try {
+    const resultado = await authService.loginReativacao({ email, senha });
+
+    if (resultado === null) {
+      return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
+    }
+
+    if (resultado === 'role_incompativel') {
+      return res.status(403).json({
+        error: 'Este usuário não tem acesso ao Controle de Ligações.',
+      });
+    }
+
+    return res.status(200).json(resultado);
+  } catch (err) {
+    console.error('[auth.controller] Erro ao autenticar (reativação):', err);
     return res.status(500).json({ error: 'Erro interno ao autenticar.' });
   }
 }
@@ -92,6 +137,7 @@ async function redefinirSenha(req, res) {
 
 module.exports = {
   login,
+  loginReativacao,
   me,
   esqueciSenha,
   redefinirSenha,

@@ -14,6 +14,16 @@ function formatData(iso) {
   return d.toLocaleDateString('pt-BR');
 }
 
+function perfilBadge(u) {
+  if (u.role === 'admin' || u.isAdmin) {
+    return { label: 'Admin', className: 'bg-[var(--teal)]/15 text-[var(--teal)]' };
+  }
+  if (u.role === 'operador_cobranca') {
+    return { label: 'Operador de Ligações', className: 'bg-[var(--gold)]/15 text-[var(--gold)]' };
+  }
+  return { label: 'Usuário comum', className: 'bg-[var(--panel-alt)] text-[var(--muted)]' };
+}
+
 export default function UsuariosPage() {
   const { token } = useAuth();
   const [usuarios, setUsuarios] = useState([]);
@@ -22,6 +32,7 @@ export default function UsuariosPage() {
 
   const [novoEmail, setNovoEmail] = useState('');
   const [novaSenha, setNovaSenha] = useState('');
+  const [operadorCobranca, setOperadorCobranca] = useState(false);
   const [formError, setFormError] = useState(null);
   const [creating, setCreating] = useState(false);
 
@@ -72,11 +83,12 @@ export default function UsuariosPage() {
     }
 
     setCreating(true);
-    criarUsuario(token, { email: novoEmail.trim(), senha: novaSenha })
+    criarUsuario(token, { email: novoEmail.trim(), senha: novaSenha, operadorCobranca })
       .then((usuarioCriado) => {
         setUsuarios((prev) => [...prev, usuarioCriado].sort((a, b) => a.email.localeCompare(b.email)));
         setNovoEmail('');
         setNovaSenha('');
+        setOperadorCobranca(false);
         flash('Usuário criado.');
       })
       .catch((err) => setFormError(err.message || 'Erro ao criar usuário.'))
@@ -127,12 +139,23 @@ export default function UsuariosPage() {
               {creating ? 'Criando...' : 'Adicionar usuário'}
             </button>
           </form>
+          <label className="mt-3 flex items-center gap-2 text-[13px] text-[var(--text)] cursor-pointer w-fit">
+            <input
+              type="checkbox"
+              checked={operadorCobranca}
+              onChange={(e) => setOperadorCobranca(e.target.checked)}
+              className="h-4 w-4 rounded border-[var(--border)] accent-[var(--teal)] cursor-pointer"
+            />
+            Cadastrar como Operador de Ligações
+          </label>
           {formError ? (
             <div className="mt-3 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3.5 py-2.5 text-[13px] text-[var(--danger)] break-words">
               {formError}
             </div>
           ) : null}
-          <p className="mt-3 text-[12px] text-[var(--muted)]">Novos usuários são sempre criados como usuários comuns.</p>
+          <p className="mt-3 text-[12px] text-[var(--muted)]">
+            Novos usuários são criados como usuários comuns, a menos que marcados como Operador de Ligações.
+          </p>
         </div>
 
         <div className={card}>
@@ -149,22 +172,23 @@ export default function UsuariosPage() {
           ) : (
             <>
               <div className="flex flex-col gap-3 sm:hidden">
-                {usuarios.map((u) => (
-                  <div
-                    key={u.id}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel-alt)] px-4 py-3"
-                  >
-                    <div className="flex min-w-0 flex-col gap-1.5">
-                      <span className="truncate text-sm font-medium text-[var(--text)]">{u.email}</span>
-                      {u.isAdmin ? (
-                        <span className="w-fit rounded-full bg-[var(--teal)]/15 px-2.5 py-0.5 text-[11.5px] font-semibold text-[var(--teal)]">
-                          Admin
+                {usuarios.map((u) => {
+                  const badge = perfilBadge(u);
+                  return (
+                    <div
+                      key={u.id}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel-alt)] px-4 py-3"
+                    >
+                      <div className="flex min-w-0 flex-col gap-1.5">
+                        <span className="truncate text-sm font-medium text-[var(--text)]">{u.email}</span>
+                        <span className={`w-fit rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${badge.className}`}>
+                          {badge.label}
                         </span>
-                      ) : null}
+                      </div>
+                      <button className={`${btnDanger} shrink-0`} onClick={() => handleRemove(u)}>Remover</button>
                     </div>
-                    <button className={`${btnDanger} shrink-0`} onClick={() => handleRemove(u)}>Remover</button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="hidden overflow-x-auto sm:block">
                 <table className="w-full border-collapse text-sm">
@@ -177,24 +201,23 @@ export default function UsuariosPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {usuarios.map((u) => (
-                      <tr key={u.id} className="border-t border-[var(--border)]">
-                        <td className="py-2.5">{u.email}</td>
-                        <td className="py-2.5">
-                          <span
-                            className={`rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${
-                              u.isAdmin ? 'bg-[var(--teal)]/15 text-[var(--teal)]' : 'bg-[var(--panel-alt)] text-[var(--muted)]'
-                            }`}
-                          >
-                            {u.isAdmin ? 'Admin' : 'Usuário comum'}
-                          </span>
-                        </td>
-                        <td className="py-2.5 text-[var(--muted)]">{formatData(u.criado_em)}</td>
-                        <td className="py-2.5 text-right">
-                          <button className={btnDanger} onClick={() => handleRemove(u)}>Remover</button>
-                        </td>
-                      </tr>
-                    ))}
+                    {usuarios.map((u) => {
+                      const badge = perfilBadge(u);
+                      return (
+                        <tr key={u.id} className="border-t border-[var(--border)]">
+                          <td className="py-2.5">{u.email}</td>
+                          <td className="py-2.5">
+                            <span className={`rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${badge.className}`}>
+                              {badge.label}
+                            </span>
+                          </td>
+                          <td className="py-2.5 text-[var(--muted)]">{formatData(u.criado_em)}</td>
+                          <td className="py-2.5 text-right">
+                            <button className={btnDanger} onClick={() => handleRemove(u)}>Remover</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

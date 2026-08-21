@@ -7,9 +7,11 @@ const rankingRoutes = require('./routes/ranking.routes');
 const cadastrosRoutes = require('./routes/cadastros.routes');
 const margensRoutes = require('./routes/margens.routes');
 const marketingRoutes = require('./routes/marketing.routes');
+const controleLigacoesRoutes = require('./routes/controleLigacoes.routes');
 const authRoutes = require('./routes/auth.routes');
 const adminRoutes = require('./routes/admin.routes');
 const authMiddleware = require('./middlewares/authMiddleware');
+const operadorCobrancaMiddleware = require('./middlewares/operadorCobrancaMiddleware');
 
 const app = express();
 
@@ -52,6 +54,8 @@ app.use('/api/cadastros', authMiddleware, cadastrosRoutes);
 app.use('/api/margens', authMiddleware, margensRoutes);
 
 app.use('/api/marketing', authMiddleware, marketingRoutes);
+
+app.use('/api/controle-ligacoes', authMiddleware, operadorCobrancaMiddleware, controleLigacoesRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Rota não encontrada.' });

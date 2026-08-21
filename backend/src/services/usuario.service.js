@@ -6,14 +6,15 @@ async function listarUsuarios() {
   return usuarioModel.listAll();
 }
 
-async function criarUsuario({ email, senha }) {
+async function criarUsuario({ email, senha, operadorCobranca }) {
   const duplicado = await usuarioModel.existeEmail(email);
   if (duplicado) {
     return 'email_duplicado';
   }
 
   const senhaHash = await bcrypt.hash(senha, 10);
-  return usuarioModel.insertUsuario({ email, senhaHash });
+  const role = operadorCobranca === true ? 'operador_cobranca' : 'usuario';
+  return usuarioModel.insertUsuario({ email, senhaHash, role });
 }
 
 async function excluirUsuario(id, usuarioAutenticadoId) {

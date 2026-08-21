@@ -28,13 +28,18 @@ async function parseJsonSafely(response) {
 export async function apiRequest(path, { method, body, token, emitOn401 = true } = {}) {
   const authToken = token !== undefined ? token : getToken();
 
+  // Upload multipart (ex.: importação de contatos do Controle de Ligações):
+  // quando `body` é um FormData, o próprio `fetch` define o header
+  // `Content-Type: multipart/form-data; boundary=...` — um `Content-Type:
+  // application/json` fixo por cima corromperia o envio. Todo o resto do
+  // projeto continua enviando `application/json` normalmente.
   let response;
   try {
     response = await fetch(`${BASE_URL}${path}`, {
       method,
       body,
       headers: {
-        'Content-Type': 'application/json',
+        ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
     });
