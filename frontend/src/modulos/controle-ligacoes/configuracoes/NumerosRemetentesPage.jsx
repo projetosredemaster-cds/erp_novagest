@@ -1,9 +1,11 @@
 // style-system: Tailwind
 import { useEffect, useRef, useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../../../app/AuthContext.jsx';
 import {
   fetchEstados, criarEstado,
   fetchNumerosRemetentes, criarNumeroRemetente, atualizarNumeroRemetente, removerNumeroRemetente,
+  desconectarNumeroRemetente, abrirStreamConexao,
 } from './controleLigacoesConfigApi.js';
 
 const btn = "bg-[var(--violet)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
@@ -27,6 +29,137 @@ function AtivoBadge({ ativo }) {
     <span className="w-fit rounded-full bg-[var(--violet)]/15 px-2.5 py-0.5 text-[11.5px] font-semibold text-[var(--violet)]">Ativo</span>
   ) : (
     <span className="w-fit rounded-full bg-[var(--panel-alt)] px-2.5 py-0.5 text-[11.5px] font-semibold text-[var(--muted)]">Inativo</span>
+  );
+}
+
+// Modal de conexão via QR Code (Baileys). Consome o stream SSE de
+// `GET .../conexao/stream` através de `abrirStreamConexao` (ver comentário
+// detalhado em controleLigacoesConfigApi.js sobre por que é fetch + parsing
+// manual em vez de EventSource nativo). `onConectado` é chamado tanto para
+// o evento `conectado` quanto `ja_conectado` (mesmo tratamento) — a decisão
+// de UX aqui é: o componente pai fecha o modal, mostra um flash de sucesso
+// na tela principal e rebusca a lista completa (não faz patch otimista com
+// o `numero` do payload do evento), por ser mais simples e mais correto
+// (reflete exatamente o que o servidor persistiu).
+function ConexaoWhatsAppModal({ numero, token, onClose, onConectado }) {
+  const [status, setStatus] = useState('conectando'); // 'conectando' | 'qr' | 'conectado' | 'erro'
+  const [qr, setQr] = useState(null);
+  const [erro, setErro] = useState(null);
+  const abortRef = useRef(null);
+
+  // Só inicia a leitura do stream — nenhum setState síncrono aqui (os
+  // `setQr`/`setStatus`/`setErro` só acontecem dentro dos callbacks
+  // assíncronos `onEvent`/`catch`), pra não disparar setState direto dentro
+  // do corpo do efeito abaixo (react-hooks/set-state-in-effect).
+  function abrirConexao() {
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    abrirStreamConexao(token, numero.id, {
+      signal: controller.signal,
+      onEvent: (event, data) => {
+        if (event === 'qr') {
+          setQr(data?.qr || null);
+          setStatus('qr');
+        } else if (event === 'conectado' || event === 'ja_conectado') {
+          setStatus('conectado');
+          onConectado();
+        } else if (event === 'erro') {
+          setErro(data?.mensagem || 'Erro ao conectar ao WhatsApp.');
+          setStatus('erro');
+        }
+      },
+    }).catch((err) => {
+      // requisição cancelada pelo próprio usuário (fechou o modal) — não é
+      // um erro a ser exibido.
+      if (controller.signal.aborted) return;
+      setErro(err.message || 'Erro ao conectar ao WhatsApp.');
+      setStatus('erro');
+    });
+  }
+
+  useEffect(() => {
+    abrirConexao();
+    // cancela a leitura do stream tanto ao fechar o modal (handleClose,
+    // abaixo) quanto por qualquer outro motivo de desmonte do componente.
+    return () => {
+      abortRef.current?.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleClose() {
+    abortRef.current?.abort();
+    onClose();
+  }
+
+  // "Tentar novamente" (fora do efeito, disparado por clique) — aqui sim
+  // reseta o estado visível antes de reabrir o stream do zero.
+  function handleRetry() {
+    setStatus('conectando');
+    setQr(null);
+    setErro(null);
+    abrirConexao();
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="conexao-modal-title"
+      onClick={handleClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 id="conexao-modal-title" className="font-display text-[19px] font-bold">
+            Conectar WhatsApp
+          </h2>
+          <button
+            type="button"
+            aria-label="Fechar"
+            onClick={handleClose}
+            className="text-xl leading-none text-[var(--muted)] hover:text-[var(--text)]"
+          >
+            ✕
+          </button>
+        </div>
+
+        <p className="mb-4 text-[13px] text-[var(--muted)]">{numero.apelido}</p>
+
+        {status === 'conectando' ? (
+          <div className="px-1 py-8 text-center text-sm text-[var(--muted)]">Aguardando QR Code...</div>
+        ) : status === 'qr' ? (
+          <div className="flex flex-col items-center gap-3">
+            <div className="rounded-xl bg-white p-4" data-testid="qr-code-container">
+              <QRCodeSVG value={qr || ''} size={220} />
+            </div>
+            <p className="text-center text-[12.5px] text-[var(--muted)]">
+              Abra o WhatsApp no celular, vá em Aparelhos conectados e escaneie o QR Code. Um novo código é
+              gerado automaticamente a cada ~20 segundos.
+            </p>
+          </div>
+        ) : status === 'conectado' ? (
+          <div className="px-1 py-8 text-center text-sm font-semibold text-[var(--violet)]">
+            WhatsApp conectado com sucesso!
+          </div>
+        ) : status === 'erro' ? (
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-full rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3.5 py-2.5 text-[13px] text-[var(--danger)] break-words">
+              {erro}
+            </div>
+            <button type="button" className={btn} onClick={handleRetry}>Tentar novamente</button>
+          </div>
+        ) : null}
+
+        <div className="mt-5 flex justify-end">
+          <button type="button" className={btnGhost} onClick={handleClose}>Fechar</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -84,8 +217,12 @@ export default function NumerosRemetentesPage() {
   const [editingNumero, setEditingNumero] = useState(null);
   const [apelido, setApelido] = useState('');
   const [estadoId, setEstadoId] = useState('');
+  const [nomeColaboradora, setNomeColaboradora] = useState('');
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
+
+  // --- modal de conexão WhatsApp (QR Code via Baileys) ---
+  const [conexaoNumero, setConexaoNumero] = useState(null);
 
   // --- mini-formulário inline "Cadastrar novo estado" ---
   const [showEstadoForm, setShowEstadoForm] = useState(false);
@@ -109,6 +246,10 @@ export default function NumerosRemetentesPage() {
     setEditingNumero(null);
     setApelido('');
     setEstadoId('');
+    // POST não aceita nomeColaboradora (nasce sempre null) — o campo fica
+    // desabilitado no modo de criação (ver JSX abaixo) e só é preenchível
+    // depois, editando o número já criado.
+    setNomeColaboradora('');
     setFormError(null);
     resetEstadoForm();
     setFormOpen(true);
@@ -118,6 +259,7 @@ export default function NumerosRemetentesPage() {
     setEditingNumero(numero);
     setApelido(numero.apelido);
     setEstadoId(String(numero.estado.id));
+    setNomeColaboradora(numero.nomeColaboradora || '');
     setFormError(null);
     resetEstadoForm();
     setFormOpen(true);
@@ -142,6 +284,12 @@ export default function NumerosRemetentesPage() {
 
     setSaving(true);
     const payload = { apelido: apelido.trim(), estadoId: Number(estadoId) };
+    // nomeColaboradora só é enviado ao editar (POST não suporta o campo,
+    // ver openCreateForm acima); string vazia é convertida pra `null`
+    // (o backend também normaliza, mas evita mandar espaço à toa).
+    if (editingNumero) {
+      payload.nomeColaboradora = nomeColaboradora.trim() ? nomeColaboradora.trim() : null;
+    }
     const promise = editingNumero
       ? atualizarNumeroRemetente(token, editingNumero.id, payload)
       : criarNumeroRemetente(token, payload);
@@ -177,6 +325,33 @@ export default function NumerosRemetentesPage() {
         flash('Número remetente excluído.');
       })
       .catch((err) => flash(err.message || 'Erro ao excluir número remetente.', 'error'));
+  }
+
+  function openConexaoModal(numero) {
+    setConexaoNumero(numero);
+  }
+
+  function closeConexaoModal() {
+    setConexaoNumero(null);
+  }
+
+  // Rebusca a lista inteira (em vez de patch otimista com o payload do
+  // evento `conectado`, que só traz `numero`) — mais simples e reflete
+  // exatamente o que o servidor persistiu.
+  function handleConexaoConcluida() {
+    setConexaoNumero(null);
+    flash('WhatsApp conectado com sucesso.');
+    loadNumeros();
+  }
+
+  function handleDesconectar(numero) {
+    if (!confirm('Isso encerrará a sessão do WhatsApp. Será necessário escanear o QR novamente para reconectar. Continuar?')) return;
+    desconectarNumeroRemetente(token, numero.id)
+      .then((numeroAtualizado) => {
+        setNumeros((prev) => prev.map((n) => (n.id === numeroAtualizado.id ? numeroAtualizado : n)));
+        flash('WhatsApp desconectado.');
+      })
+      .catch((err) => flash(err.message || 'Erro ao desconectar WhatsApp.', 'error'));
   }
 
   // --- tags de DDD do mini-formulário de Estado ---
@@ -273,14 +448,23 @@ export default function NumerosRemetentesPage() {
                     </div>
                     <div className="mb-3 flex flex-wrap items-center gap-2">
                       <StatusConexaoBadge status={n.statusConexao} />
-                      <button
-                        type="button"
-                        className={`${btnGhost} px-2.5 py-1 text-[11.5px]`}
-                        disabled
-                        title="Disponível em breve"
-                      >
-                        Conectar WhatsApp
-                      </button>
+                      {n.statusConexao === 'conectado' ? (
+                        <button
+                          type="button"
+                          className={`${btnGhost} px-2.5 py-1 text-[11.5px]`}
+                          onClick={() => handleDesconectar(n)}
+                        >
+                          Desconectar
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className={`${btn} px-2.5 py-1 text-[11.5px]`}
+                          onClick={() => openConexaoModal(n)}
+                        >
+                          Conectar WhatsApp
+                        </button>
+                      )}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <button className={btnGhost} onClick={() => openEditForm(n)}>Editar</button>
@@ -310,14 +494,23 @@ export default function NumerosRemetentesPage() {
                         <td className="py-2.5">
                           <div className="flex items-center gap-2">
                             <StatusConexaoBadge status={n.statusConexao} />
-                            <button
-                              type="button"
-                              className={`${btnGhost} px-2.5 py-1 text-[11.5px]`}
-                              disabled
-                              title="Disponível em breve"
-                            >
-                              Conectar WhatsApp
-                            </button>
+                            {n.statusConexao === 'conectado' ? (
+                              <button
+                                type="button"
+                                className={`${btnGhost} px-2.5 py-1 text-[11.5px]`}
+                                onClick={() => handleDesconectar(n)}
+                              >
+                                Desconectar
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className={`${btn} px-2.5 py-1 text-[11.5px]`}
+                                onClick={() => openConexaoModal(n)}
+                              >
+                                Conectar WhatsApp
+                              </button>
+                            )}
                           </div>
                         </td>
                         <td className="py-2.5"><AtivoBadge ativo={n.ativo} /></td>
@@ -374,6 +567,25 @@ export default function NumerosRemetentesPage() {
                   placeholder="Ex.: CDC Cohatrac"
                   className={inputCls}
                 />
+              </div>
+
+              <div>
+                <label htmlFor="numero-nome-colaboradora" className="mb-1 block text-[12.5px] font-semibold text-[var(--muted)]">
+                  Nome da colaboradora (opcional)
+                </label>
+                <input
+                  id="numero-nome-colaboradora"
+                  value={nomeColaboradora}
+                  onChange={(e) => setNomeColaboradora(e.target.value)}
+                  placeholder="Ex.: Maria Silva"
+                  disabled={!editingNumero}
+                  className={inputCls}
+                />
+                {!editingNumero ? (
+                  <p className="mt-1 text-[11.5px] text-[var(--muted)]">
+                    Disponível para preencher depois de criar o número, na edição.
+                  </p>
+                ) : null}
               </div>
 
               <div>
@@ -495,6 +707,15 @@ export default function NumerosRemetentesPage() {
             </form>
           </div>
         </div>
+      ) : null}
+
+      {conexaoNumero ? (
+        <ConexaoWhatsAppModal
+          numero={conexaoNumero}
+          token={token}
+          onClose={closeConexaoModal}
+          onConectado={handleConexaoConcluida}
+        />
       ) : null}
 
       <div

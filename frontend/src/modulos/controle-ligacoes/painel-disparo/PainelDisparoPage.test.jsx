@@ -5,6 +5,7 @@ import PainelDisparoPage from './PainelDisparoPage.jsx';
 vi.mock('./painelDisparoApi.js', () => ({
   fetchPainelDisparo: vi.fn(),
   fetchContatosDisponiveis: vi.fn(),
+  verificarDisparo: vi.fn(),
   criarDisparo: vi.fn(),
 }));
 
@@ -269,49 +270,87 @@ describe('PainelDisparoPage — seleção de contatos (limite de 10)', () => {
 });
 
 describe('PainelDisparoPage — disparo', () => {
-  it('sucesso sem avisos: chama POST /disparos, mostra flash e limpa a seleção', async () => {
+  it('sucesso sem avisos: verifica, cria automaticamente sem segundo clique, mostra flash, limpa seleção e recarrega contatos', async () => {
     mockCargaBasica();
-    api.criarDisparo.mockResolvedValue({ disparoId: 42, totalContatos: 1, avisos: [] });
+    api.verificarDisparo.mockResolvedValue({ avisos: [] });
+    api.criarDisparo.mockResolvedValue({ disparoId: 42, totalContatos: 1 });
 
     await renderPage();
 
     fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    api.fetchContatosDisponiveis.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
 
+    await waitFor(() => expect(api.verificarDisparo).toHaveBeenCalledWith('token-teste', {
+      estadoId: 6, numeroRemetenteId: 3, contatoIds: [10],
+    }));
     await waitFor(() => expect(api.criarDisparo).toHaveBeenCalledWith('token-teste', {
       estadoId: 6, numeroRemetenteId: 3, contatoIds: [10],
     }));
 
     expect(await screen.findByText('Disparo registrado.')).toBeInTheDocument();
     expect(screen.getByText('0/10 selecionados')).toBeInTheDocument();
+    // Não deve nunca abrir o modal de avisos nesse caminho.
+    expect(screen.queryByText('Aviso antes de disparar')).not.toBeInTheDocument();
+    await waitFor(() => expect(api.fetchContatosDisponiveis).toHaveBeenCalledTimes(1));
   });
 
-  it('sucesso com avisos: abre modal informativo e não bloqueia (disparo já criado)', async () => {
+  it('com avisos + "Cancelar": não chama POST /disparos, não fecha com gravação e mantém a seleção', async () => {
     mockCargaBasica();
-    api.criarDisparo.mockResolvedValue({
-      disparoId: 42,
-      totalContatos: 1,
-      avisos: [{ id: 11, nome: 'João Souza', telefone: '5598900000001' }],
+    api.verificarDisparo.mockResolvedValue({
+      avisos: [{ contatoId: 11, nome: 'João Souza', telefone: '5598900000001' }],
     });
+
+    await renderPage();
+
+    const checkboxes = screen.getAllByRole('checkbox');
+    fireEvent.click(checkboxes[1]); // João Souza (id 11)
+    fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+
+    expect(await screen.findByText('Aviso antes de disparar')).toBeInTheDocument();
+    expect(screen.getByText(/já foram contatados nos últimos 3 dias/)).toBeInTheDocument();
+    expect(screen.getAllByText('João Souza').length).toBeGreaterThan(0);
+    expect(api.criarDisparo).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+
+    await waitFor(() => expect(screen.queryByText('Aviso antes de disparar')).not.toBeInTheDocument());
+    expect(api.criarDisparo).not.toHaveBeenCalled();
+    // Seleção permanece intacta — nada foi gravado.
+    expect(screen.getByText('1/10 selecionados')).toBeInTheDocument();
+    expect(checkboxes[1]).toBeChecked();
+  });
+
+  it('com avisos + "Disparar mesmo assim": chama POST /disparos, fecha modal, limpa seleção, mostra flash e recarrega contatos', async () => {
+    mockCargaBasica();
+    api.verificarDisparo.mockResolvedValue({
+      avisos: [{ contatoId: 11, nome: 'João Souza', telefone: '5598900000001' }],
+    });
+    api.criarDisparo.mockResolvedValue({ disparoId: 42, totalContatos: 1 });
 
     await renderPage();
 
     fireEvent.click(screen.getAllByRole('checkbox')[1]);
     fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
 
-    expect(await screen.findByText('Disparo registrado com avisos')).toBeInTheDocument();
-    expect(screen.getByText(/já foi registrado/)).toBeInTheDocument();
-    expect(screen.getAllByText('João Souza').length).toBeGreaterThan(0);
+    expect(await screen.findByText('Aviso antes de disparar')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Entendido' }));
+    api.fetchContatosDisponiveis.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Disparar mesmo assim' }));
 
-    await waitFor(() => expect(screen.queryByText('Disparo registrado com avisos')).not.toBeInTheDocument());
+    await waitFor(() => expect(api.criarDisparo).toHaveBeenCalledWith('token-teste', {
+      estadoId: 6, numeroRemetenteId: 3, contatoIds: [11],
+    }));
+
+    await waitFor(() => expect(screen.queryByText('Aviso antes de disparar')).not.toBeInTheDocument());
+    expect(await screen.findByText('Disparo registrado.')).toBeInTheDocument();
     expect(screen.getByText('0/10 selecionados')).toBeInTheDocument();
+    await waitFor(() => expect(api.fetchContatosDisponiveis).toHaveBeenCalledTimes(1));
   });
 
-  it('erro da API é mostrado no card sem travar a tela', async () => {
+  it('erro na verificação é mostrado no card sem gravar nada', async () => {
     mockCargaBasica();
-    api.criarDisparo.mockRejectedValue(new Error('Número remetente inválido para o estado informado.'));
+    api.verificarDisparo.mockRejectedValue(new Error('Número remetente inválido para o estado informado.'));
 
     await renderPage();
 
@@ -319,5 +358,28 @@ describe('PainelDisparoPage — disparo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
 
     expect(await screen.findByText('Número remetente inválido para o estado informado.')).toBeInTheDocument();
+    expect(api.criarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('erro ao confirmar "Disparar mesmo assim" mantém o modal aberto com feedback de erro', async () => {
+    mockCargaBasica();
+    api.verificarDisparo.mockResolvedValue({
+      avisos: [{ contatoId: 11, nome: 'João Souza', telefone: '5598900000001' }],
+    });
+    api.criarDisparo.mockRejectedValue(new Error('Erro ao registrar disparo.'));
+
+    await renderPage();
+
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+
+    expect(await screen.findByText('Aviso antes de disparar')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disparar mesmo assim' }));
+
+    expect(await screen.findByText('Erro ao registrar disparo.')).toBeInTheDocument();
+    // O modal continua aberto — usuário pode tentar de novo ou cancelar.
+    expect(screen.getByText('Aviso antes de disparar')).toBeInTheDocument();
+    expect(screen.getByText('1/10 selecionados')).toBeInTheDocument();
   });
 });

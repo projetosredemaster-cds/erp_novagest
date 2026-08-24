@@ -2,3 +2,7 @@ node_modules/
 .env
 npm-debug.log*
 *.log
+
+# Credenciais de sessão do WhatsApp (Baileys) — uma pasta por
+# numero_remetente_id, nunca deve ir pro repositório.
+sessions/

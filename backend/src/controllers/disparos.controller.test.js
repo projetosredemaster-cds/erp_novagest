@@ -250,12 +250,11 @@ describe('POST /api/controle-ligacoes/disparos', () => {
     expect(res.body).toEqual({ error: 'Todos os contatos devem pertencer ao estado informado.' });
   });
 
-  it('201 — cria o disparo e devolve avisos de contatos já disparados nos últimos 3 dias', async () => {
+  it('201 — cria o disparo e devolve só disparoId/totalContatos (sem avisos, ver POST /disparos/verificar)', async () => {
     disparosModel.criarDisparo.mockResolvedValue({
       status: 'criado',
       disparoId: 42,
       totalContatos: 2,
-      avisos: [{ id: 10, nome: 'Maria', telefone: '5598900000000' }],
     });
 
     const res = await request(app)
@@ -267,7 +266,6 @@ describe('POST /api/controle-ligacoes/disparos', () => {
     expect(res.body).toEqual({
       disparoId: 42,
       totalContatos: 2,
-      avisos: [{ id: 10, nome: 'Maria', telefone: '5598900000000' }],
     });
     expect(disparosModel.criarDisparo).toHaveBeenCalledWith({
       estadoId: 6,
@@ -287,5 +285,261 @@ describe('POST /api/controle-ligacoes/disparos', () => {
 
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'Erro interno ao criar disparo.' });
+  });
+});
+
+describe('POST /api/controle-ligacoes/disparos/verificar', () => {
+  const payloadValido = { estadoId: 6, numeroRemetenteId: 3, contatoIds: [10, 11] };
+
+  it('401 sem token', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .send(payloadValido);
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário não é operador_cobranca', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor({ role: 'admin' })}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('400 quando "contatoIds" está ausente', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ estadoId: 6, numeroRemetenteId: 3 });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Campo "contatoIds" é obrigatório.' });
+    expect(disparosModel.verificarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('400 quando "contatoIds" está vazio', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ estadoId: 6, numeroRemetenteId: 3, contatoIds: [] });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Campo "contatoIds" é obrigatório.' });
+  });
+
+  it('400 quando "contatoIds" tem mais de 10 itens', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ estadoId: 6, numeroRemetenteId: 3, contatoIds: Array.from({ length: 11 }, (_, i) => i + 1) });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Máximo de 10 contatos por disparo.' });
+  });
+
+  it('400 quando "estadoId"/"numeroRemetenteId" está em formato inválido (não chega a chamar o service)', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ estadoId: 'abc', numeroRemetenteId: 3, contatoIds: [10, 11] });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Número remetente inválido para o estado informado.' });
+    expect(disparosModel.verificarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('400 quando algum item de "contatoIds" está em formato inválido (não chega a chamar o service)', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ estadoId: 6, numeroRemetenteId: 3, contatoIds: [10, 'abc'] });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Todos os contatos devem pertencer ao estado informado.' });
+    expect(disparosModel.verificarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('400 quando o model recusa o número remetente (inexistente/inativo/estado errado)', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({ status: 'numero_invalido' });
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Número remetente inválido para o estado informado.' });
+  });
+
+  it('400 quando o model recusa algum contato (fora do estado informado)', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({ status: 'contatos_invalidos' });
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Todos os contatos devem pertencer ao estado informado.' });
+  });
+
+  it('200 — devolve avisos não-vazios sem gravar nada (não chama criarDisparo)', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({
+      status: 'ok',
+      avisos: [{ contatoId: 10, nome: 'Maria', telefone: '5598900000000' }],
+    });
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      avisos: [{ contatoId: 10, nome: 'Maria', telefone: '5598900000000' }],
+    });
+    expect(disparosModel.verificarDisparo).toHaveBeenCalledWith({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      contatoIds: [10, 11],
+    });
+    expect(disparosModel.criarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('200 — avisos vazio quando nenhum contato foi disparado nos últimos 3 dias', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({ status: 'ok', avisos: [] });
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ avisos: [] });
+  });
+
+  it('nunca grava nada no banco (contagem de Disparos não muda ao chamar verificar)', async () => {
+    let totalDisparosGravados = 0;
+    // Simula o mock do model: verificarDisparo nunca incrementa o contador;
+    // só criarDisparo (não chamado neste teste) incrementaria.
+    disparosModel.verificarDisparo.mockImplementation(async () => ({
+      status: 'ok',
+      avisos: [],
+    }));
+    disparosModel.criarDisparo.mockImplementation(async () => {
+      totalDisparosGravados += 1;
+      return { status: 'criado', disparoId: 1, totalContatos: 2 };
+    });
+
+    const contagemAntes = totalDisparosGravados;
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(200);
+    expect(totalDisparosGravados).toBe(contagemAntes);
+    expect(disparosModel.criarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('500 quando o model lança erro', async () => {
+    disparosModel.verificarDisparo.mockRejectedValue(new Error('boom'));
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao verificar disparo.' });
+  });
+});
+
+describe('GET /api/controle-ligacoes/disparos/:id', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).get('/api/controle-ligacoes/disparos/15');
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário não é operador_cobranca', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/disparos/15')
+      .set('Authorization', `Bearer ${tokenFor({ role: 'admin' })}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('400 quando ":id" não é um inteiro positivo', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/disparos/abc')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Parâmetro "id" deve ser um número inteiro positivo.' });
+    expect(disparosModel.findDisparoDetalhe).not.toHaveBeenCalled();
+  });
+
+  it('404 quando o disparo não existe', async () => {
+    disparosModel.findDisparoDetalhe.mockResolvedValue(null);
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/disparos/999')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Disparo não encontrado.' });
+  });
+
+  it('200 — devolve o detalhe completo do disparo', async () => {
+    disparosModel.findDisparoDetalhe.mockResolvedValue({
+      disparoId: 15,
+      estado: { id: 6, nome: 'Maranhão', uf: 'MA' },
+      numeroRemetente: { id: 3, apelido: 'CDC Cohatrac' },
+      contatos: [
+        {
+          nome: 'Maria Silva',
+          telefone: '5598900000000',
+          status: 'enviado',
+          mensagemEnviada: 'Olá Maria!',
+          enviadoEm: '2026-08-24T12:00:00.000Z',
+          erro: null,
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/disparos/15')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      disparoId: 15,
+      estado: { id: 6, nome: 'Maranhão', uf: 'MA' },
+      numeroRemetente: { id: 3, apelido: 'CDC Cohatrac' },
+      contatos: [
+        {
+          nome: 'Maria Silva',
+          telefone: '5598900000000',
+          status: 'enviado',
+          mensagemEnviada: 'Olá Maria!',
+          enviadoEm: '2026-08-24T12:00:00.000Z',
+          erro: null,
+        },
+      ],
+    });
+    expect(disparosModel.findDisparoDetalhe).toHaveBeenCalledWith(15);
+  });
+
+  it('500 quando o model lança erro', async () => {
+    disparosModel.findDisparoDetalhe.mockRejectedValue(new Error('boom'));
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/disparos/15')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao buscar detalhe do disparo.' });
   });
 });

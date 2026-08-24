@@ -67,7 +67,7 @@ describe('numerosRemetentes.service.atualizarNumero', () => {
 
     expect(numerosRemetentesModel.existeEstado).not.toHaveBeenCalled();
     expect(numerosRemetentesModel.updateNumero).toHaveBeenCalledWith(3, {
-      apelido: 'Novo', estadoId: undefined, ativo: undefined,
+      apelido: 'Novo', estadoId: undefined, ativo: undefined, nomeColaboradora: undefined,
     });
     expect(resultado).toEqual({ id: 3, apelido: 'Novo' });
   });
@@ -92,9 +92,23 @@ describe('numerosRemetentes.service.atualizarNumero', () => {
     const resultado = await numerosRemetentesService.atualizarNumero(3, { estadoId: 7 });
 
     expect(numerosRemetentesModel.updateNumero).toHaveBeenCalledWith(3, {
-      apelido: undefined, estadoId: 7, ativo: undefined,
+      apelido: undefined, estadoId: 7, ativo: undefined, nomeColaboradora: undefined,
     });
     expect(resultado).toEqual({ id: 3, apelido: 'CDC Cohatrac', estado: { id: 7 } });
+  });
+
+  it('repassa nomeColaboradora (inclusive null explícito) para o model sem transformação', async () => {
+    numerosRemetentesModel.findNumeroById
+      .mockResolvedValueOnce({ id: 3, apelido: 'CDC Cohatrac', nomeColaboradora: 'Ana' })
+      .mockResolvedValueOnce({ id: 3, apelido: 'CDC Cohatrac', nomeColaboradora: null });
+    numerosRemetentesModel.updateNumero.mockResolvedValue(undefined);
+
+    const resultado = await numerosRemetentesService.atualizarNumero(3, { nomeColaboradora: null });
+
+    expect(numerosRemetentesModel.updateNumero).toHaveBeenCalledWith(3, {
+      apelido: undefined, estadoId: undefined, ativo: undefined, nomeColaboradora: null,
+    });
+    expect(resultado).toEqual({ id: 3, apelido: 'CDC Cohatrac', nomeColaboradora: null });
   });
 });
 
@@ -106,5 +120,70 @@ describe('numerosRemetentes.service.excluirNumero', () => {
 
     expect(resultado).toBe('has_vinculos');
     expect(numerosRemetentesModel.deleteNumeroIfNoVinculos).toHaveBeenCalledWith(3);
+  });
+});
+
+describe('numerosRemetentes.service.obterNumeroPorId', () => {
+  it('delega direto para o model', async () => {
+    numerosRemetentesModel.findNumeroById.mockResolvedValue({ id: 3, statusConexao: 'aguardando_conexao' });
+
+    const resultado = await numerosRemetentesService.obterNumeroPorId(3);
+
+    expect(resultado).toEqual({ id: 3, statusConexao: 'aguardando_conexao' });
+    expect(numerosRemetentesModel.findNumeroById).toHaveBeenCalledWith(3);
+  });
+});
+
+describe('numerosRemetentes.service.marcarConectado', () => {
+  it('grava numero + status_conexao=conectado e devolve o registro atualizado', async () => {
+    numerosRemetentesModel.updateConexao.mockResolvedValue(undefined);
+    numerosRemetentesModel.findNumeroById.mockResolvedValue({
+      id: 3,
+      numero: '5598912345678',
+      statusConexao: 'conectado',
+    });
+
+    const resultado = await numerosRemetentesService.marcarConectado(3, '5598912345678');
+
+    expect(numerosRemetentesModel.updateConexao).toHaveBeenCalledWith(3, {
+      numero: '5598912345678',
+      statusConexao: 'conectado',
+    });
+    expect(resultado).toEqual({ id: 3, numero: '5598912345678', statusConexao: 'conectado' });
+  });
+});
+
+describe('numerosRemetentes.service.marcarDesconectado', () => {
+  it('grava numero=null + status_conexao=aguardando_conexao e devolve o registro atualizado', async () => {
+    numerosRemetentesModel.updateConexao.mockResolvedValue(undefined);
+    numerosRemetentesModel.findNumeroById.mockResolvedValue({
+      id: 3,
+      numero: null,
+      statusConexao: 'aguardando_conexao',
+    });
+
+    const resultado = await numerosRemetentesService.marcarDesconectado(3);
+
+    expect(numerosRemetentesModel.updateConexao).toHaveBeenCalledWith(3, {
+      numero: null,
+      statusConexao: 'aguardando_conexao',
+    });
+    expect(resultado).toEqual({ id: 3, numero: null, statusConexao: 'aguardando_conexao' });
+  });
+});
+
+describe('numerosRemetentes.service.marcarStatusConexao', () => {
+  it('grava só o status_conexao, sem mexer no numero', async () => {
+    numerosRemetentesModel.updateConexao.mockResolvedValue(undefined);
+    numerosRemetentesModel.findNumeroById.mockResolvedValue({
+      id: 3,
+      numero: '5598912345678',
+      statusConexao: 'desconectado',
+    });
+
+    const resultado = await numerosRemetentesService.marcarStatusConexao(3, 'desconectado');
+
+    expect(numerosRemetentesModel.updateConexao).toHaveBeenCalledWith(3, { statusConexao: 'desconectado' });
+    expect(resultado).toEqual({ id: 3, numero: '5598912345678', statusConexao: 'desconectado' });
   });
 });

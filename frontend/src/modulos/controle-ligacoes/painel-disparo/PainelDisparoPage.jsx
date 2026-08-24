@@ -9,7 +9,7 @@
 // fase futura, fora de escopo).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../../app/AuthContext.jsx';
-import { fetchPainelDisparo, fetchContatosDisponiveis, criarDisparo } from './painelDisparoApi.js';
+import { fetchPainelDisparo, fetchContatosDisponiveis, verificarDisparo, criarDisparo } from './painelDisparoApi.js';
 
 const btn = "bg-[var(--violet)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
 const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--panel-alt)] disabled:cursor-not-allowed disabled:opacity-50";
@@ -43,38 +43,47 @@ function AvisoContatadoBadge() {
   );
 }
 
-// Modal pós-fato, exibido só quando o POST /disparos volta com avisos não
-// vazios — o disparo já foi criado nesse ponto (avisos nunca bloqueiam a
-// criação no backend), o modal é só informativo.
-function AvisosModal({ avisos, onFechar }) {
+// Modal exibido ANTES de gravar, quando POST /disparos/verificar volta com
+// avisos não vazios — nesse ponto nada foi persistido ainda (verificar não
+// grava nada). O usuário decide: "Cancelar" (desiste, nada é gravado) ou
+// "Disparar mesmo assim" (só aí chama POST /disparos de verdade).
+function AvisosModal({ avisos, confirmando, erro, onCancelar, onConfirmar }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="avisos-modal-title"
-      onClick={onFechar}
+      onClick={confirmando ? undefined : onCancelar}
     >
       <div
         className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="avisos-modal-title" className="font-display mb-2 text-[18px] font-bold text-[var(--gold)]">
-          Disparo registrado com avisos
+          Aviso antes de disparar
         </h2>
         <p className="mb-3 text-[13px] text-[var(--muted)]">
-          O disparo já foi registrado. Os contatos abaixo já haviam sido contatados nos últimos 3 dias:
+          Os contatos abaixo já foram contatados nos últimos 3 dias. Deseja prosseguir com o disparo mesmo assim?
         </p>
         <ul className="mb-4 flex flex-col gap-1.5">
           {avisos.map((c) => (
-            <li key={c.id} className="rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2 text-[13px]">
+            <li key={c.contatoId} className="rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2 text-[13px]">
               <span className="font-semibold text-[var(--text)]">{c.nome}</span>
               <span className="ml-2 text-[var(--muted)]">{c.telefone}</span>
             </li>
           ))}
         </ul>
-        <div className="flex justify-end">
-          <button type="button" className={btn} onClick={onFechar}>Entendido</button>
+        {erro ? (
+          <div className="mb-3 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3 py-2 text-[12.5px] text-[var(--danger)] break-words">
+            {erro}
+          </div>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <button type="button" className={btnGhost} onClick={onCancelar} disabled={confirmando}>Cancelar</button>
+          <button type="button" className={btn} onClick={onConfirmar} disabled={confirmando}>
+            {confirmando ? 'Disparando...' : 'Disparar mesmo assim'}
+          </button>
         </div>
       </div>
     </div>
@@ -226,28 +235,65 @@ function EstadoDisparoCard({ token, resumo, onFlash }) {
   const [disparando, setDisparando] = useState(false);
   const [disparoError, setDisparoError] = useState(null);
   const [avisos, setAvisos] = useState(null);
+  const [confirmandoAvisos, setConfirmandoAvisos] = useState(false);
+  const [avisosError, setAvisosError] = useState(null);
+
+  // Efetiva o disparo de verdade (POST /disparos) e trata o pós-sucesso comum
+  // aos dois caminhos possíveis (sem aviso, ou "Disparar mesmo assim" depois
+  // de aviso): flash de sucesso, limpar seleção do card e rechamar
+  // carregarContatos() pra badge "Contatado há menos de 3 dias" refletir o
+  // disparo recém-criado sem precisar recarregar a página.
+  function efetivarDisparo() {
+    return criarDisparo(token, {
+      estadoId: estado.id,
+      numeroRemetenteId: Number(numeroRemetenteId),
+      contatoIds: Array.from(selecionados),
+    }).then(() => {
+      setSelecionados(new Set());
+      setSelectionError(null);
+      onFlash('Disparo registrado.');
+      carregarContatos(); // dispara em paralelo, não precisa aguardar
+    });
+  }
 
   function handleDisparar() {
     if (selecionados.size === 0 || !numeroRemetenteId) return;
 
     setDisparando(true);
     setDisparoError(null);
-    criarDisparo(token, {
+    verificarDisparo(token, {
       estadoId: estado.id,
       numeroRemetenteId: Number(numeroRemetenteId),
       contatoIds: Array.from(selecionados),
     })
       .then((resultado) => {
-        setSelecionados(new Set());
-        setSelectionError(null);
         if (resultado?.avisos?.length > 0) {
+          // Há aviso: não grava nada ainda, abre o modal e preserva a
+          // seleção intacta (usuário pode desmarcar os avisados e tentar de
+          // novo, ou cancelar).
           setAvisos(resultado.avisos);
-        } else {
-          onFlash('Disparo registrado.');
+          return;
         }
+        // Sem aviso: efetiva o disparo automaticamente, sem exigir um
+        // segundo clique do usuário.
+        return efetivarDisparo();
       })
       .catch((err) => setDisparoError(err.message || 'Erro ao registrar disparo.'))
       .finally(() => setDisparando(false));
+  }
+
+  function cancelarAvisos() {
+    setAvisos(null);
+    setAvisosError(null);
+  }
+
+  function confirmarApesarDosAvisos() {
+    setConfirmandoAvisos(true);
+    setAvisosError(null);
+    efetivarDisparo()
+      .then(() => setAvisos(null))
+      .catch((err) => setAvisosError(err.message || 'Erro ao registrar disparo.'))
+      .finally(() => setConfirmandoAvisos(false));
   }
 
   const semNumeroAtivo = numerosAtivos.length === 0;
@@ -256,7 +302,13 @@ function EstadoDisparoCard({ token, resumo, onFlash }) {
   return (
     <div className={card}>
       {avisos ? (
-        <AvisosModal avisos={avisos} onFechar={() => { setAvisos(null); onFlash('Disparo registrado.'); }} />
+        <AvisosModal
+          avisos={avisos}
+          confirmando={confirmandoAvisos}
+          erro={avisosError}
+          onCancelar={cancelarAvisos}
+          onConfirmar={confirmarApesarDosAvisos}
+        />
       ) : null}
 
       <div className="mb-3 flex items-start justify-between gap-2">

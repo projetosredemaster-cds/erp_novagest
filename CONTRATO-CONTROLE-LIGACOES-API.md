@@ -308,11 +308,17 @@ Configurações. Protegida por `authMiddleware` + `operadorCobrancaMiddleware`.
     "estado": { "id": 6, "nome": "Maranhão", "uf": "MA" },
     "numero": null,
     "statusConexao": "aguardando_conexao",
+    "nomeColaboradora": null,
     "ativo": true,
     "criado_em": "..."
   }
 ]
 ```
+
+`nomeColaboradora` (string ou `null`) é o nome da colaboradora usada pelo
+worker de envio ao montar a mensagem daquele número (ver "Envio de Disparos
+(v6)"); `null` quando ainda não configurado. Nasce sempre `null` na criação
+(seção 6) — hoje só é definido/alterado via `PUT` (seção 7).
 
 ### Erros
 `500`: `{ "error": "Erro interno ao listar números remetentes." }`
@@ -351,12 +357,29 @@ Mesmo shape da seção 5 (item único).
 
 ## 7. `PUT /api/controle-ligacoes/numeros-remetentes/:id`
 
-Atualização parcial: `apelido`/`estadoId`/`ativo`. Protegida por
-`authMiddleware` + `operadorCobrancaMiddleware`.
+Atualização parcial: `apelido`/`estadoId`/`ativo`/`nomeColaboradora`. Todos os
+campos são opcionais e independentes — envie só o(s) que quer mudar.
+Protegida por `authMiddleware` + `operadorCobrancaMiddleware`.
+
+| Campo | Tipo | Semântica quando ausente | Semântica quando enviado |
+|---|---|---|---|
+| `apelido` | string | não muda | grava (não pode ser vazio → `400`) |
+| `estadoId` | number | não muda | grava, precisa existir em `Estados` (senão `400`) |
+| `ativo` | boolean | não muda | grava |
+| `nomeColaboradora` | string \| null | não muda | ver abaixo |
+
+`nomeColaboradora` tem uma semântica própria, diferente dos outros três
+campos: **ausente no body** → não mexe no valor atual; **string não vazia**
+→ grava (com `trim()`); **string vazia (`""`, ou só espaços) ou `null`** →
+limpa a coluna para `NULL` (remove o nome da colaboradora); **qualquer outro
+tipo** (number, boolean, array, objeto) → `400`:
+```json
+{ "error": "Campo \"nomeColaboradora\", quando enviado, deve ser uma string ou null." }
+```
 
 - `:id` não encontrado → `404`: `{ "error": "Número remetente não encontrado." }`
 - `estadoId`, se enviado, deve existir → `400`: `{ "error": "Estado informado não existe." }`
-- `200 OK` com o shape da seção 5.
+- `200 OK` com o shape da seção 5 (inclusive `nomeColaboradora` já atualizado).
 - `500`: `{ "error": "Erro interno ao atualizar número remetente." }`
 
 ## 8. `DELETE /api/controle-ligacoes/numeros-remetentes/:id`
@@ -621,19 +644,30 @@ Ambas as telas ficam atrás de `RequireOperadorCobranca` (mesmo padrão de
 | GET | `/api/controle-ligacoes/contatos/importar/:loteId` | operador_cobranca | Importação (v3); detalhe de um lote (resumo + `porEstado` + `erros`); `404` se não existir |
 | GET | `/api/controle-ligacoes/painel-disparo` | operador_cobranca | Painel de Disparo (v3); inclui Estado vazio |
 | GET | `/api/controle-ligacoes/estados/:estadoId/contatos-disponiveis` | operador_cobranca | Painel de Disparo (v3); não filtra por número |
-| POST | `/api/controle-ligacoes/disparos` | operador_cobranca | Painel de Disparo (v3); máx. 10 contatos, sempre `pendente_envio`; agora é onde a escolha de número por Estado acontece |
+| POST | `/api/controle-ligacoes/disparos/verificar` | operador_cobranca | Painel de Disparo (v4); só verifica (nunca grava), devolve `avisos` |
+| POST | `/api/controle-ligacoes/disparos` | operador_cobranca | Painel de Disparo (v3/v4); máx. 10 contatos, sempre `pendente_envio`; agora é onde a escolha de número por Estado acontece; **a partir da v4 não devolve mais `avisos`** (ver seção 15) |
+| GET | `/api/controle-ligacoes/disparos/:id` | operador_cobranca | Envio de Disparos (v6); detalhe do disparo + status individual de cada contato |
 
 Todos os erros seguem `{ "error": "mensagem" }`.
 
-## Painel de Disparo (v3)
+## Painel de Disparo (v3, com adendo v4)
 
 > Adendo ao contrato v2 acima — não substitui nada do que já existe, só
-> acrescenta as 3 rotas do "Painel de Disparo": a Lívia seleciona
+> acrescenta as rotas do "Painel de Disparo": a Lívia seleciona
 > manualmente até 10 contatos por vez, por Estado, e registra a intenção de
 > disparo (grava a fila). **Envio real via Baileys/Gemini continua fora de
 > escopo** — nenhum worker/processador consome `Disparos`/`DisparoContatos`
 > nesta fase; todo disparo criado nasce e permanece com
 > `status = 'pendente_envio'`.
+>
+> **v4** separou o que era uma única chamada (`POST /disparos`, que gravava
+> o disparo e devolvia `avisos` na mesma resposta) em duas chamadas reais:
+> `POST /disparos/verificar` (seção 15, só verifica, nunca grava, devolve
+> `avisos`) e `POST /disparos` (seção 14, sempre grava, não devolve mais
+> `avisos`). Isso resolve uma confusão de UX da v3: o usuário via o aviso na
+> resposta do `POST /disparos` e achava que ainda podia "cancelar" — mas o
+> registro já tinha sido gravado antes mesmo do aviso chegar à tela. Ver
+> seção 15 para o fluxo esperado.
 
 ### Contexto e decisões de design
 
@@ -668,11 +702,16 @@ Todos os erros seguem `{ "error": "mensagem" }`.
   checagem (evita colidir com o `UNIQUE(disparo_id, contato_id)` de
   `DisparoContatos` sem precisar devolver erro para um caso que não é bem
   uma violação de negócio).
-- **`avisos` nunca bloqueia a criação do disparo** — é só um aviso pós-fato
-  (contato que já tinha `disparadoUltimos3Dias = true` no momento exato da
-  criação); o disparo é criado normalmente mesmo quando `avisos` não está
-  vazio. Cabe à tela decidir se confirma com o usuário antes de enviar o
-  `POST`, mas o backend não impõe essa confirmação.
+- **`avisos` nunca bloqueia a criação do disparo, e a partir da v4 é
+  responsabilidade exclusiva de `POST /disparos/verificar` (seção 15), não
+  mais de `POST /disparos` (seção 14).** `avisos` lista contatos que já
+  tinham `disparadoUltimos3Dias = true` no momento da verificação; a rota
+  de verificação não grava nada, então a tela pode mostrar o aviso e ainda
+  dar ao usuário a chance real de cancelar antes de qualquer coisa existir
+  no banco. Só depois de o usuário confirmar (ou quando não havia aviso
+  nenhum) é que a tela deve chamar `POST /disparos`, que sempre grava
+  quando chamado — o backend não impõe essa ordem/confirmação, é uma
+  expectativa de uso da tela, não uma trava de código.
 
 ### Schema novo
 
@@ -766,7 +805,12 @@ erro — a query simplesmente não encontra `Contatos` com aquele
 ### 14. `POST /api/controle-ligacoes/disparos`
 
 Registra a intenção de disparo (grava a fila) — não envia nada de fato.
-Protegida por `authMiddleware` + `operadorCobrancaMiddleware`.
+Protegida por `authMiddleware` + `operadorCobrancaMiddleware`. **Sempre
+grava quando chamada** — não existe modo "só verificar" nesta rota a
+partir da v4 (isso é `POST /disparos/verificar`, seção 15). A expectativa
+de uso é a tela chamar `POST /disparos/verificar` primeiro, mostrar
+`avisos` ao usuário se houver, e só então chamar esta rota (com o mesmo
+payload) para efetivar — mas o backend não impõe essa ordem.
 
 #### Corpo da requisição
 ```json
@@ -798,28 +842,83 @@ dos ids.
 #### Comportamento no banco (transação)
 1. Valida `numeroRemetenteId` (existe, `ativo = 1`, `estado_id = @estadoId`).
 2. Valida que todo `contatoId` de `contatoIds` existe e tem
-   `estado_id = @estadoId` (a mesma query já recalcula
-   `disparadoUltimos3Dias` de cada um).
+   `estado_id = @estadoId`.
 3. Insere 1 linha em `Disparos` (`status = 'pendente_envio'`).
 4. Insere 1 linha em `DisparoContatos` por `contatoId`.
+
+A partir da v4, este `POST` **não recalcula/devolve mais `avisos`** — quem
+precisa do aviso de "contato já disparado nos últimos 3 dias" deve chamar
+`POST /disparos/verificar` (seção 15) antes.
 
 #### Resposta de sucesso — `201 Created`
 ```json
 {
   "disparoId": 42,
-  "totalContatos": 2,
-  "avisos": [
-    { "id": 10, "nome": "Maria Silva", "telefone": "5598900000000" }
-  ]
+  "totalContatos": 2
 }
 ```
-`avisos` lista os contatos que já tinham `disparadoUltimos3Dias = true` no
-momento deste `POST` — **não bloqueia** a criação, o disparo é criado de
-qualquer forma (ver "Contexto e decisões de design" acima). Array vazio
-quando nenhum contato do disparo tinha sido disparado nos últimos 3 dias.
 
 #### Erros
 `400`/`500` (`{ "error": "Erro interno ao criar disparo." }`)
+
+---
+
+### 15. `POST /api/controle-ligacoes/disparos/verificar`
+
+Nova na v4. Só verifica — **nunca grava nada no banco** (sem transação de
+escrita, é leitura pura contra `NumerosRemetentes`/`Contatos`/`Disparos`/
+`DisparoContatos`). Protegida por `authMiddleware` +
+`operadorCobrancaMiddleware`. Existe para o Painel de Disparo poder
+mostrar `avisos` ao usuário (contatos já disparados nos últimos 3 dias)
+**antes** de qualquer coisa ser gravada, dando a ele uma chance real de
+cancelar — diferente da v3, em que o aviso só chegava depois que o
+`POST /disparos` já tinha gravado o registro.
+
+#### Corpo da requisição
+Mesmo formato de `POST /disparos` (seção 14):
+```json
+{ "estadoId": 6, "numeroRemetenteId": 3, "contatoIds": [10, 11] }
+```
+| Campo | Tipo | Obrigatório | Validação |
+|---|---|---|---|
+| `estadoId` | number | sim | inteiro positivo |
+| `numeroRemetenteId` | number | sim | inteiro positivo; deve existir, estar `ativo` e pertencer a `estadoId` |
+| `contatoIds` | number[] | sim | não vazio, no máximo 10, cada item deve pertencer a `estadoId` |
+
+#### Validações — `400 Bad Request` (nesta ordem, idênticas a `POST /disparos`)
+1. `contatoIds` ausente/vazio: `{ "error": "Campo \"contatoIds\" é obrigatório." }`
+2. `contatoIds.length > 10`: `{ "error": "Máximo de 10 contatos por disparo." }`
+3. `numeroRemetenteId` (ou `estadoId`) em formato inválido, inexistente,
+   não `ativo`, ou de outro Estado:
+   `{ "error": "Número remetente inválido para o estado informado." }`
+4. Algum item de `contatoIds` em formato inválido ou de um `Contato` que não
+   pertence a `estadoId`:
+   `{ "error": "Todos os contatos devem pertencer ao estado informado." }`
+
+#### Comportamento no banco (leitura, sem transação de escrita)
+1. Valida `numeroRemetenteId` (existe, `ativo = 1`, `estado_id = @estadoId`).
+2. Valida que todo `contatoId` de `contatoIds` existe e tem
+   `estado_id = @estadoId` (a mesma query já recalcula
+   `disparadoUltimos3Dias` de cada um).
+3. Não insere nada em `Disparos`/`DisparoContatos`.
+
+#### Resposta de sucesso — `200 OK`
+```json
+{
+  "avisos": [
+    { "contatoId": 10, "nome": "Maria Silva", "telefone": "5598900000000" }
+  ]
+}
+```
+Note que o campo é `contatoId` (não `id`, diferente do formato de `avisos`
+que a v3 documentava dentro de `POST /disparos`) — mudança deliberada de
+nome. Array vazio quando nenhum contato informado tinha
+`disparadoUltimos3Dias = true`. Esta rota **não bloqueia** nada — mesmo com
+`avisos` não vazio, cabe à tela decidir se pede confirmação ao usuário
+antes de chamar `POST /disparos` de fato.
+
+#### Erros
+`400`/`500` (`{ "error": "Erro interno ao verificar disparo." }`)
 
 ---
 
@@ -969,10 +1068,417 @@ lista de linhas rejeitadas daquele lote (`erros`, de
 
 ---
 
+## Conexão Baileys (v5)
+
+> Adendo ao contrato v2 acima — implementa a **primeira metade** da
+> integração com WhatsApp via Baileys: conectar um número remetente (gerar
+> QR, escanear, manter a sessão viva, atualizar `numero`/`status_conexao`).
+> Chamada de "v5" porque a v4 já foi usada pelo adendo do Painel de Disparo
+> que separou `POST /disparos/verificar` de `POST /disparos` (ver seção
+> "Painel de Disparo (v3, com adendo v4)" acima) — não há reaproveitamento
+> de número de versão no meio do documento.
+>
+> **Deliberadamente fora deste adendo** (2ª metade, trabalho futuro): envio
+> de mensagem de fato (worker de fila que consome `Disparos`/
+> `DisparoContatos` e realmente manda algo pelo socket Baileys).
+
+### Contexto e decisões de design
+
+- **Baileys roda no mesmo processo do backend Node** (sem microsserviço
+  separado). A sessão de cada número remetente é persistida em disco via
+  `useMultiFileAuthState`, uma pasta por `numero_remetente_id`
+  (`backend/sessions/baileys/{numeroRemetenteId}/`) — nunca versionada (ver
+  `backend/.gitignore`).
+- **QR entregue como string crua via Server-Sent Events**, não como imagem
+  gerada no backend — o frontend renderiza o QR client-side com uma lib de
+  QR (mais leve; evita adicionar `qrcode` como dependência do backend).
+- **Gerenciamento de sessão isolado em `backend/src/services/baileysSession.service.js`**,
+  com um `Map` em memória de `numeroRemetenteId → sessão` (socket Baileys
+  ativo, listeners SSE, timers, contador de tentativas de reconexão). Esse
+  service não conhece `req`/`res` — expõe `abrirConexao`,
+  `removerListener`, `desconectar`, `getStatusEmMemoria`, chamadas pelo
+  controller (`numerosRemetentes.controller.js`).
+- **Um único socket Baileys por número remetente, reaproveitado por todas as
+  abas/streams simultâneas.** `GET .../conexao/stream` chamado duas vezes
+  para o mesmo `:id` (ex.: duas abas abertas) não cria duas sessões — a 2ª
+  chamada apenas registra mais um "listener" na sessão já em memória, e
+  ambas recebem os mesmos eventos (`qr`/`conectado`/`erro`) via broadcast. A
+  2ª aba recebe imediatamente, ao conectar, o último QR já conhecido (ou um
+  `conectado` imediato, numa corrida rara em que a sessão fechou entre a
+  checagem do controller e o registro do listener), em vez de esperar até a
+  próxima rotação de QR (~20s).
+- **Fechar a aba antes do QR ser escaneado remove só aquele listener**
+  (`req.on('close', ...)` no controller chama `removerListener`), sem matar
+  a sessão Baileys em memória — outra aba pode continuar esperando o mesmo
+  QR, ou o usuário pode reabrir a tela e continuar de onde parou.
+- **Persistência no banco das transições assíncronas (`conectado` e
+  `desconectado` por falha de reconexão) é feita diretamente por
+  `baileysSession.service.js`**, não pelo controller — porque essas
+  transições podem acontecer sem nenhum cliente SSE conectado no momento
+  (ex.: o QR foi escaneado depois que a aba já tinha sido fechada, mas a
+  sessão em memória seguia viva; ou uma sessão caiu horas depois de
+  qualquer stream ter sido aberto). A desconexão **manual** (`POST
+  .../desconectar`) é a exceção: como é uma ação explícita dentro de um
+  único request/response, a gravação (`numero=NULL`,
+  `status_conexao='aguardando_conexao'`) é feita pelo controller, depois
+  que `baileysSession.service.js` confirma que a sessão foi encerrada.
+- **`NumerosRemetentes.updateConexao` (novo, em `numerosRemetentes.model.js`)
+  não usa `COALESCE`** como `updateNumero` (usado pelo `PUT` já existente):
+  aqui cada campo enviado é gravado exatamente como recebido, inclusive
+  `numero: null` explícito (necessário para *limpar* a coluna na
+  desconexão — `COALESCE(NULL, numero)` manteria o valor antigo, o oposto
+  do que se precisa). Um campo `undefined` simplesmente não entra no
+  `SET` — por isso é possível atualizar só `status_conexao` (caso da
+  reconexão automática esgotada) sem tocar em `numero`.
+- **Timeout de QR: 2 minutos.** Se ninguém escanear dentro desse prazo, o
+  stream recebe `event: erro` e a sessão em memória é encerrada (o socket é
+  finalizado, a pasta de credenciais **não** é apagada apenas por esse
+  motivo — só é apagada em `POST .../desconectar` ou num logout forçado
+  pelo próprio WhatsApp). Uma nova chamada a `GET .../stream` depois disso
+  começa um pareamento do zero.
+- **Reconexão automática só se aplica a uma sessão que já chegou a ficar
+  `'conectado'` e caiu de forma inesperada** (ex.: queda de rede) — até 3
+  tentativas, com backoff simples (`tentativa * 2000ms`). Esgotadas as 3
+  tentativas, `status_conexao` vira `'desconectado'` (diferente de
+  `'aguardando_conexao'`, reservado para quando nunca houve conexão ou ela
+  foi encerrada de propósito) — `numero` é preservado. Se a queda acontecer
+  **antes** de completar o pareamento (sessão ainda `'conectando'`), não há
+  retentativa em segundo plano: a sessão é encerrada e cabe ao operador
+  abrir o stream de novo para tentar um pareamento novo.
+- **Dois casos especiais de fechamento de conexão do próprio Baileys são
+  tratados fora do fluxo de retentativa genérico:**
+  - `DisconnectReason.restartRequired` (515): passo normal logo após o
+    pareamento via QR — o socket é recriado imediatamente com as mesmas
+    credenciais, sem contar como tentativa de reconexão nem gerar nenhum
+    evento visível ao usuário.
+  - `DisconnectReason.loggedOut` (401): a sessão foi invalidada pelo
+    próprio WhatsApp (ex.: removida no celular) — não há como reconectar
+    sem novo QR; a pasta de credenciais é apagada e `status_conexao` volta
+    para `'aguardando_conexao'` (com `numero=NULL`), igual a uma
+    desconexão manual.
+- **Reconciliação de sessões no boot do processo** (`reconciliarSessoesNoBoot`,
+  em `baileysSession.service.js`, chamada uma única vez a partir de
+  `server.js`, em paralelo ao `app.listen` — não bloqueia o processo subir):
+  se o processo Node reiniciar enquanto um `NumerosRemetentes.status_conexao`
+  ainda está `'conectado'` no banco, o `Map` em memória (`sessoes`) se perde
+  no restart, mas o banco continua dizendo `'conectado'` — enganando
+  qualquer tela/worker que confie nesse campo sem checar se existe socket
+  vivo de verdade. No boot, a rotina busca todos os `NumerosRemetentes` com
+  `status_conexao = 'conectado'` e, **em sequência** (nunca em paralelo, para
+  não abrir várias conexões Baileys de uma vez), tenta restaurar cada um a
+  partir da pasta de credenciais já salva em disco
+  (`backend/sessions/baileys/{numeroRemetenteId}/`), reaproveitando o mesmo
+  caminho de abertura de socket que o fluxo de pareamento por QR já usa
+  (`iniciarSocket`/`handleConnectionUpdate`) — só que sem UI esperando por
+  QR algum:
+  - **Sucesso** (Baileys reconecta com as credenciais salvas,
+    `connection === 'open'` de novo, sem nunca pedir `qr`): `status_conexao`
+    permanece `'conectado'` (a mesma gravação de sempre, via
+    `persistirConectado`) e a sessão fica no `Map` como se tivesse acabado
+    de conectar via QR.
+  - **Falha** — pasta de credenciais ausente em disco, o Baileys emitir `qr`
+    de novo (tratado como credencial inválida — nesse caso a rotina não fica
+    esperando alguém escanear no boot), logout/erro definitivo reportado
+    pelo Baileys, ou um timeout curto por número (produção: 20s) sem
+    resolver nem `open` nem `close`: `status_conexao` vira `'desconectado'`
+    e `numero=NULL`, a pasta de sessão órfã é removida do disco, e nenhuma
+    entrada fica pendurada no `Map`.
+  - Há um pequeno intervalo entre uma tentativa e a próxima (produção:
+    2.5s), só para não sobrecarregar o processo/Baileys logo no boot.
+  - **Efeito observável**: a reconciliação não é instantânea. Um número que
+    estava `'conectado'` antes de um restart do processo pode aparecer
+    brevemente ainda como `'conectado'` no banco/na tela até a rotina
+    terminar de processá-lo (pode levar alguns segundos por número, em
+    sequência) — não presuma que o status já reflete a realidade nos
+    primeiros instantes depois do processo subir.
+  - A rotina nunca rejeita/derruba o processo — qualquer erro inesperado
+    (inclusive falha ao consultar o banco) é capturado e só logado.
+
+### `GET /api/controle-ligacoes/numeros-remetentes/:id/conexao/stream` (SSE)
+
+Abre (ou reaproveita) a sessão Baileys daquele número remetente e transmite
+os eventos de conexão conforme acontecem. Protegida por `authMiddleware` +
+`operadorCobrancaMiddleware` (herdado do mount, igual ao resto do módulo).
+
+#### Parâmetros
+| Nome | Tipo | Obrigatório | Validação |
+|---|---|---|---|
+| `:id` | path, number | sim | inteiro positivo; `400` se não for |
+
+#### Eventos emitidos (`Content-Type: text/event-stream`)
+| Evento | Payload | Quando |
+|---|---|---|
+| `qr` | `{ "qr": "<string crua>" }` | a cada QR novo emitido pelo Baileys (~20s até escanear) |
+| `conectado` | `{ "numero": "5598999999999" }` | conexão confirmada — `NumerosRemetentes.numero`/`status_conexao='conectado'` já foram gravados no banco antes deste evento ser emitido |
+| `erro` | `{ "mensagem": "..." }` | falha ao conectar, timeout de QR (2 min) sem escaneamento, ou logout forçado pelo WhatsApp |
+| `ja_conectado` | `{ "numero": "5598999999999" }` | `:id` já está `status_conexao='conectado'` no banco no momento em que o stream foi aberto — **nenhuma sessão/QR novo é aberta**; o stream é encerrado logo em seguida |
+
+O stream é encerrado pelo servidor após `conectado`, `erro`, ou
+`ja_conectado` (nunca fica aberto indefinidamente após um desses três).
+
+#### Erros
+- `400`: `{ "error": "Parâmetro \"id\" deve ser um número inteiro positivo." }`
+- `404`: `{ "error": "Número remetente não encontrado." }`
+- `500`: `{ "error": "Erro interno ao abrir conexão com o WhatsApp." }` (antes de qualquer header SSE ter sido enviado; se a falha acontecer depois, vira `event: erro` dentro do próprio stream, já com `200` na resposta)
+
+---
+
+### `POST /api/controle-ligacoes/numeros-remetentes/:id/conexao/desconectar`
+
+Encerra a sessão Baileys daquele número remetente (logout + remoção da
+pasta de sessão em disco) e grava `numero=NULL`/
+`status_conexao='aguardando_conexao'`. Protegida por `authMiddleware` +
+`operadorCobrancaMiddleware`.
+
+#### Parâmetros
+| Nome | Tipo | Obrigatório | Validação |
+|---|---|---|---|
+| `:id` | path, number | sim | inteiro positivo; `400` se não for |
+
+#### Resposta de sucesso — `200 OK`
+Mesmo formato de objeto que `PUT /numeros-remetentes/:id` já devolve hoje
+(`{ id, apelido, numero: null, statusConexao: "aguardando_conexao", ativo, criado_em, estado }`).
+
+#### Erros
+- `400`: `{ "error": "Parâmetro \"id\" deve ser um número inteiro positivo." }`
+- `404`: `{ "error": "Número remetente não encontrado." }`
+- `500`: `{ "error": "Erro interno ao desconectar número remetente." }`
+
+#### Observação
+Idempotente na prática: chamar esta rota para um número que já está
+`'aguardando_conexao'` (sem sessão em memória) não falha — `baileysSession.service.js`
+simplesmente não encontra nada para encerrar em memória, mas ainda tenta
+remover a pasta de sessão em disco (sem erro se ela não existir) antes do
+controller gravar `numero=NULL`/`status_conexao='aguardando_conexao'`
+(valores que, nesse caso, já eram os mesmos).
+
+---
+
+## Envio de Disparos (v6)
+
+> Adendo ao contrato v2 acima — implementa a **segunda metade** da
+> integração com WhatsApp via Baileys: o worker que consome a fila de
+> `DisparoContatos` pendentes (gravada pelo Painel de Disparo, ver seção
+> anterior) e envia de fato a primeira mensagem de cada contato, com
+> rotação round-robin de templates. Chamado de "v6" porque "v5" já foi usado
+> pelo adendo "Conexão Baileys" logo acima — não há reaproveitamento de
+> número de versão no meio do documento (nota: o rascunho inicial desta
+> tarefa sugeria "v4", mas esse número já pertence à separação
+> verificar/criar de `POST /disparos`, e "v5" já pertence à Conexão
+> Baileys — corrigido para "v6" ao escrever este adendo).
+>
+> **Deliberadamente fora deste adendo**: qualquer CRUD para
+> `MensagensTemplates`. `NumerosRemetentes.nome_colaboradora` passou a ser
+> editável via `PUT /api/controle-ligacoes/numeros-remetentes/:id` (seção 7
+> acima, campo `nomeColaboradora`) numa tarefa posterior a este adendo — ver
+> "Lacuna conhecida" no fim desta seção, atualizada para refletir isso.
+
+### Contexto e decisões de design
+
+- **O worker roda dentro do próprio processo backend** (`setInterval`,
+  iniciado a partir de `server.js` junto com `reconciliarSessoesNoBoot`),
+  sem processo/fila separados — mesmo princípio de todo o resto da
+  integração Baileys deste projeto.
+- **Processamento sempre em sequência, nunca em paralelo** — tanto os itens
+  de um mesmo lote/ciclo quanto os ciclos entre si (um `setInterval` que
+  disparasse antes do ciclo anterior terminar é pulado, não executado em
+  paralelo) — paralelismo quebraria o delay entre mensagens, que é uma
+  exigência de mitigação de risco de banimento do número, não só
+  performance.
+- **Um contato pertence a um Estado fixo, mas o número usado no disparo é
+  uma escolha feita naquele disparo** (ver "Painel de Disparo" acima) — o
+  worker só lê `Disparos.numero_remetente_id` (gravado no momento do
+  disparo), nunca recalcula ou reatribui esse vínculo.
+- **Rotação round-robin de templates**: a cada envio bem-sucedido, o próximo
+  template ativo (por `ordem`, ciclando de volta ao primeiro depois do
+  último) é calculado e só persistido em `ConfiguracoesEnvio.ultimo_template_usado_id`
+  **junto com** a gravação do sucesso do próprio `DisparoContatos`, na mesma
+  transação — um envio que falha (pré-condição não satisfeita, ou o
+  `sock.sendMessage` de fato rejeitar) nunca avança a rotação.
+- **Transação curta, desenhada para nunca ficar aberta durante a chamada de
+  rede ao Baileys** (que pode levar segundos): o cálculo de qual seria o
+  próximo template é uma leitura curta, fora de transação; a chamada
+  `sock.sendMessage` acontece depois, também fora de transação; só a
+  gravação do resultado de sucesso (`DisparoContatos` + `ConfiguracoesEnvio`)
+  é uma transação curta e atômica. Isso abre uma janela teórica de condição
+  de corrida no cálculo do "próximo" template entre itens processados quase
+  ao mesmo tempo — não mitigada com `UPDLOCK`/`HOLDLOCK` nesta fase porque
+  (a) o worker processa a fila estritamente em sequência e (b) hoje só
+  existe uma única instância do worker rodando (sem deploy
+  multi-processo/multi-instância). Revisitar se isso mudar.
+- **Nenhum retry automático nesta fase**: um item que falha fica
+  `status='falha'` e nunca é reprocessado sozinho — reenviar exigiria uma
+  ação manual futura (fora de escopo deste adendo).
+
+### Schema novo
+
+```sql
+CREATE TABLE MensagensTemplates (
+    id         INT IDENTITY(1,1) PRIMARY KEY,
+    corpo      NVARCHAR(MAX) NOT NULL,   -- placeholder suportado: {nomeColaboradora}
+    ordem      INT NOT NULL,
+    ativo      BIT NOT NULL DEFAULT 1,
+    criado_em  DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE TABLE ConfiguracoesEnvio (           -- linha única
+    id                        INT IDENTITY(1,1) PRIMARY KEY,
+    ultimo_template_usado_id  INT NULL FOREIGN KEY REFERENCES MensagensTemplates(id)
+);
+
+ALTER TABLE NumerosRemetentes ADD nome_colaboradora NVARCHAR(150) NULL;
+
+ALTER TABLE DisparoContatos ADD status             VARCHAR(20) NOT NULL DEFAULT 'pendente'; -- 'pendente' | 'enviado' | 'falha'
+ALTER TABLE DisparoContatos ADD template_usado_id   INT NULL FOREIGN KEY REFERENCES MensagensTemplates(id);
+ALTER TABLE DisparoContatos ADD mensagem_enviada    NVARCHAR(MAX) NULL;
+ALTER TABLE DisparoContatos ADD enviado_em          DATETIME2 NULL;
+ALTER TABLE DisparoContatos ADD erro                NVARCHAR(500) NULL;
+```
+
+Criado por `backend/src/scripts/MIGRATION-ENVIO-DISPAROS.sql` (idempotente,
+`IF NOT EXISTS`/`IF COL_LENGTH`, mesmo padrão de `MIGRATION-DISPAROS.sql`).
+A migration também garante uma linha única em `ConfiguracoesEnvio`
+(`ultimo_template_usado_id = NULL`), inserida só se a tabela estiver vazia.
+**Este script ainda não foi executado contra nenhum banco** — precisa
+rodar manualmente (local: `erp-novagest-dev`) antes do worker/da rota
+funcionarem de verdade.
+
+### Lacuna conhecida: sem CRUD para `MensagensTemplates` (`nome_colaboradora` já resolvido)
+
+Não existe, nesta fase, nenhuma rota para criar/editar templates de
+mensagem (`MensagensTemplates`) — a única forma de popular essa tabela é SQL
+direto contra o banco. **Atualização**: `NumerosRemetentes.nome_colaboradora`
+deixou de ser parte dessa lacuna — é editável via `PUT
+/api/controle-ligacoes/numeros-remetentes/:id` (campo `nomeColaboradora`,
+seção 7), exposto também em `GET`/`POST` da mesma rota (seções 5–6). Sem
+`MensagensTemplates` populado manualmente, o worker continua gravando
+`status='falha'` para todo item pendente cujo número não tenha
+`nome_colaboradora` configurado (`'Número sem nome de colaboradora
+configurado.'`) ou sem nenhum template ativo (`'Nenhum template de mensagem
+ativo cadastrado.'`) — a diferença é que o primeiro caso agora pode ser
+corrigido pela UI/API, não só por SQL direto.
+
+### O worker: `backend/src/workers/envioDisparos.worker.js`
+
+Inicia junto com o processo backend (`server.js`, ao lado de
+`reconciliarSessoesNoBoot`) — não é uma rota HTTP, não tem endpoint próprio.
+
+#### Configuração (variáveis de ambiente, todas opcionais)
+
+| Variável | Default | O que controla |
+|---|---|---|
+| `ENVIO_DISPAROS_INTERVALO_MS` | `15000` | intervalo entre um ciclo do worker e o próximo |
+| `ENVIO_DISPAROS_LOTE_TAMANHO` | `5` | quantos itens `status='pendente'` são buscados por ciclo |
+| `ENVIO_DISPAROS_DELAY_ENTRE_MENSAGENS_MS` | `4000` | delay aplicado entre tentativas de envio reais dentro do mesmo ciclo |
+
+#### A cada ciclo
+
+1. Busca até `ENVIO_DISPAROS_LOTE_TAMANHO` linhas de `DisparoContatos` com
+   `status='pendente'` (mais antigas primeiro), via JOIN com `Disparos`
+   (pega `numero_remetente_id`) e `Contatos` (pega `telefone`/`nome`).
+2. Processa cada uma **em sequência** (nunca em paralelo):
+   1. Checa, **nesta ordem**: sessão Baileys `'conectado'` em memória, depois
+      `NumerosRemetentes.nome_colaboradora` preenchido. Falha em qualquer um
+      dos dois grava `status='falha'` com a mensagem correspondente
+      (`'Número não está conectado.'` ou `'Número sem nome de colaboradora
+      configurado.'`) e **não** consome/avança a rotação de template — não
+      houve nenhuma tentativa de envio de fato.
+   2. Calcula (sem persistir ainda) o próximo template ativo na rotação
+      round-robin — lê `ConfiguracoesEnvio.ultimo_template_usado_id` e a
+      lista de `MensagensTemplates` ativos (por `ordem`); se
+      `ultimo_template_usado_id` for `NULL` ou não bater com nenhum template
+      ativo, começa do primeiro; cicla de volta ao primeiro depois do
+      último. Se não houver **nenhum** template ativo: `status='falha'`,
+      `erro='Nenhum template de mensagem ativo cadastrado.'`, sem consumir
+      rotação (não havia o que consumir).
+   3. Monta a mensagem substituindo `{nomeColaboradora}` no corpo do
+      template escolhido.
+   4. Obtém o socket Baileys ativo e chama `sock.onWhatsApp(telefone)` para
+      confirmar, contra os servidores do WhatsApp, que aquele número
+      corresponde de fato a uma conta ativa — necessário porque
+      `sock.sendMessage` pode resolver com sucesso mesmo quando o número não
+      existe no WhatsApp (não lança exceção nesse caso), e o telefone salvo
+      em `Contatos.telefone` pode não bater com a variante que o WhatsApp tem
+      registrada (ex.: 9º dígito de celular). Se `onWhatsApp` não encontrar
+      nenhuma correspondência (`exists`/`jid` ausentes na resposta) ou
+      lançar um erro inesperado (falha de rede, etc.): `status='falha'`,
+      `erro='Número não possui WhatsApp ativo ou não pôde ser verificado.'`
+      (ou a mensagem do erro de verificação, se foi exceção), **sem** chamar
+      `sock.sendMessage` e **sem** consumir/avançar a rotação de template —
+      mesma regra de "sem tentativa real" já aplicada no passo 2.1.
+   5. Se `onWhatsApp` confirmou a existência, chama
+      `sock.sendMessage(jid, { text: mensagem })` usando o `jid` **devolvido
+      por `onWhatsApp`** no passo anterior — não o telefone concatenado
+      manualmente (`"{telefone}@s.whatsapp.net"`); os dois podem divergir.
+      - **Sucesso**: grava, numa única transação,
+        `DisparoContatos.status='enviado'` (+ `template_usado_id`,
+        `mensagem_enviada`, `enviado_em`) **e**
+        `ConfiguracoesEnvio.ultimo_template_usado_id` — as duas gravações
+        nunca acontecem uma sem a outra.
+      - **Falha** (exceção do `sendMessage`, ou o socket ter caído entre a
+        checagem do passo 2.1 e agora): `status='falha'`, `erro=<mensagem
+        do erro>`, **sem** tocar em `ConfiguracoesEnvio` (a rotação não
+        avança) e sem retry automático.
+3. Delay (`ENVIO_DISPAROS_DELAY_ENTRE_MENSAGENS_MS`) aplicado sempre que o
+   worker chegou a gerar tráfego de rede de verdade — sucesso ou falha nos
+   passos 2.4 (verificação via `onWhatsApp`) ou 2.5 (`sendMessage`); um item
+   que falhou já no passo 2.1 ou 2.2 (sem sessão conectada, sem
+   `nome_colaboradora` ou sem template ativo — nenhum tráfego de rede pro
+   WhatsApp) não consome esse delay antes do próximo item do lote.
+
+O worker nunca lança/derruba o processo — qualquer erro inesperado (falha ao
+buscar o lote, falha ao gravar no banco) é capturado e só logado.
+
+### `GET /api/controle-ligacoes/disparos/:id`
+
+Detalhe de um disparo específico: Estado, Número Remetente e a lista de
+contatos daquele disparo com o status individual de envio de cada um
+(`'pendente'` | `'enviado'` | `'falha'`). Protegida por `authMiddleware` +
+`operadorCobrancaMiddleware`.
+
+#### Parâmetros
+| Nome | Tipo | Obrigatório | Validação |
+|---|---|---|---|
+| `:id` | path, number | sim | inteiro positivo; `400` se não for |
+
+#### Resposta de sucesso — `200 OK`
+```json
+{
+  "disparoId": 15,
+  "estado": { "id": 6, "nome": "Maranhão", "uf": "MA" },
+  "numeroRemetente": { "id": 3, "apelido": "CDC Cohatrac" },
+  "contatos": [
+    {
+      "nome": "Maria Silva",
+      "telefone": "5598900000000",
+      "status": "enviado",
+      "mensagemEnviada": "...",
+      "enviadoEm": "2026-...",
+      "erro": null
+    }
+  ]
+}
+```
+
+#### Erros
+- `400`: `{ "error": "Parâmetro \"id\" deve ser um número inteiro positivo." }`
+- `404`: `{ "error": "Disparo não encontrado." }`
+- `500`: `{ "error": "Erro interno ao buscar detalhe do disparo." }`
+
+---
+
 ## Fora de escopo deste v2 (registrado, não implementar agora)
 
-- Central de Mensagens (Baileys) + conexão real via QR Code (`numero` e
-  `status_conexao` de verdade nascem aqui).
+- ~~Central de Mensagens (Baileys) + conexão real via QR Code (`numero` e
+  `status_conexao` de verdade nascem aqui).~~ **A conexão (QR/sessão/status)
+  saiu de escopo — ver "Conexão Baileys (v5)" mais acima.** ~~O envio de
+  mensagem de fato (worker de fila, disparo real via Baileys a partir de
+  `Disparos`/`DisparoContatos`).~~ **O envio de mensagem também saiu de
+  escopo — ver "Envio de Disparos (v6)" mais acima.** Continuam fora de
+  escopo: CRUD de `MensagensTemplates`/`nome_colaboradora` (ver "Lacuna
+  conhecida" na seção v6), retry automático de falha de envio, e qualquer
+  pipeline de resposta do contato (a mensagem enviada por este worker é
+  sempre a primeira/única mensagem — não há acompanhamento de conversa).
 - Disparo em massa (limite de 10/número, aviso de 3 dias, seleção manual).
 - Pipeline de atendimento (`não atendido`/`atendido`/`perdido`/`agendado`)
   — colunas entram em `Contatos`, não em tabela nova.

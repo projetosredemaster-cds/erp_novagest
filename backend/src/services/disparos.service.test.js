@@ -69,13 +69,84 @@ describe('disparos.service.listarContatosDisponiveis', () => {
   });
 });
 
+describe('disparos.service.verificarDisparo', () => {
+  it('deduplica contatoIds repetidos antes de chamar o model', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({ status: 'ok', avisos: [] });
+
+    await disparosService.verificarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      contatoIds: [10, 10, 20],
+    });
+
+    expect(disparosModel.verificarDisparo).toHaveBeenCalledWith({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      contatoIds: [10, 20],
+    });
+  });
+
+  it('propaga o resultado retornado pelo model (status "ok", com avisos)', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({
+      status: 'ok',
+      avisos: [{ contatoId: 10, nome: 'Maria', telefone: '5598900000000' }],
+    });
+
+    const resultado = await disparosService.verificarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      contatoIds: [10],
+    });
+
+    expect(resultado).toEqual({
+      status: 'ok',
+      avisos: [{ contatoId: 10, nome: 'Maria', telefone: '5598900000000' }],
+    });
+  });
+
+  it('propaga o status "numero_invalido" retornado pelo model', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({ status: 'numero_invalido' });
+
+    const resultado = await disparosService.verificarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 999,
+      contatoIds: [10],
+    });
+
+    expect(resultado).toEqual({ status: 'numero_invalido' });
+  });
+
+  it('propaga o status "contatos_invalidos" retornado pelo model', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({ status: 'contatos_invalidos' });
+
+    const resultado = await disparosService.verificarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      contatoIds: [999],
+    });
+
+    expect(resultado).toEqual({ status: 'contatos_invalidos' });
+  });
+
+  it('não chama criarDisparo (rota de verificação nunca grava)', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({ status: 'ok', avisos: [] });
+
+    await disparosService.verificarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      contatoIds: [10],
+    });
+
+    expect(disparosModel.criarDisparo).not.toHaveBeenCalled();
+  });
+});
+
 describe('disparos.service.criarDisparo', () => {
   it('deduplica contatoIds repetidos antes de chamar o model', async () => {
     disparosModel.criarDisparo.mockResolvedValue({
       status: 'criado',
       disparoId: 1,
       totalContatos: 2,
-      avisos: [],
     });
 
     await disparosService.criarDisparo({
@@ -93,12 +164,11 @@ describe('disparos.service.criarDisparo', () => {
     });
   });
 
-  it('propaga o resultado retornado pelo model (status "criado")', async () => {
+  it('propaga o resultado retornado pelo model (status "criado", sem avisos)', async () => {
     disparosModel.criarDisparo.mockResolvedValue({
       status: 'criado',
       disparoId: 42,
       totalContatos: 1,
-      avisos: [{ id: 10, nome: 'Maria', telefone: '5598900000000' }],
     });
 
     const resultado = await disparosService.criarDisparo({
@@ -112,7 +182,6 @@ describe('disparos.service.criarDisparo', () => {
       status: 'criado',
       disparoId: 42,
       totalContatos: 1,
-      avisos: [{ id: 10, nome: 'Maria', telefone: '5598900000000' }],
     });
   });
 
@@ -140,5 +209,30 @@ describe('disparos.service.criarDisparo', () => {
     });
 
     expect(resultado).toEqual({ status: 'contatos_invalidos' });
+  });
+});
+
+describe('disparos.service.detalharDisparo', () => {
+  it('delega direto para o model e propaga o resultado', async () => {
+    const detalhe = {
+      disparoId: 15,
+      estado: { id: 6, nome: 'Maranhão', uf: 'MA' },
+      numeroRemetente: { id: 3, apelido: 'CDC Cohatrac' },
+      contatos: [],
+    };
+    disparosModel.findDisparoDetalhe.mockResolvedValue(detalhe);
+
+    const resultado = await disparosService.detalharDisparo(15);
+
+    expect(disparosModel.findDisparoDetalhe).toHaveBeenCalledWith(15);
+    expect(resultado).toEqual(detalhe);
+  });
+
+  it('propaga null quando o model não encontra o disparo', async () => {
+    disparosModel.findDisparoDetalhe.mockResolvedValue(null);
+
+    const resultado = await disparosService.detalharDisparo(999);
+
+    expect(resultado).toBeNull();
   });
 });

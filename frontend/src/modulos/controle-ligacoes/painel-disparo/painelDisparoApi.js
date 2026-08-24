@@ -38,6 +38,19 @@ export function fetchContatosDisponiveis(token, estadoId, filtros = {}) {
   );
 }
 
+// Só verifica (não grava nada) — usada antes de criarDisparo, para o
+// fluxo em 2 passos do Painel de Disparo: primeiro checa se algum contato
+// selecionado já foi contatado nos últimos 3 dias, sem persistir nada;
+// o disparo de fato só é gravado se o usuário confirmar mesmo com aviso,
+// ou automaticamente quando não há nenhum aviso (ver PainelDisparoPage.jsx).
+export function verificarDisparo(token, { estadoId, numeroRemetenteId, contatoIds }) {
+  return apiRequest('/api/controle-ligacoes/disparos/verificar', {
+    method: 'POST',
+    body: JSON.stringify({ estadoId, numeroRemetenteId, contatoIds }),
+    token,
+  });
+}
+
 export function criarDisparo(token, { estadoId, numeroRemetenteId, contatoIds }) {
   return apiRequest('/api/controle-ligacoes/disparos', {
     method: 'POST',

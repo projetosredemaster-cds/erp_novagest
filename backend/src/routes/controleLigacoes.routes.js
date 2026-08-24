@@ -49,6 +49,10 @@ router.post('/numeros-remetentes', numerosRemetentesController.criar);
 router.put('/numeros-remetentes/:id', numerosRemetentesController.atualizar);
 router.delete('/numeros-remetentes/:id', numerosRemetentesController.excluir);
 
+// Conexão Baileys (v4) — ver CONTRATO-CONTROLE-LIGACOES-API.md.
+router.get('/numeros-remetentes/:id/conexao/stream', numerosRemetentesController.conexaoStream);
+router.post('/numeros-remetentes/:id/conexao/desconectar', numerosRemetentesController.conexaoDesconectar);
+
 // '/historico' precisa vir antes de '/:loteId' (mesmo verbo GET) — senão o
 // Express casaria "historico" com o parâmetro :loteId da rota de detalhe.
 router.get('/contatos/importar/historico', importacaoController.historico);
@@ -59,6 +63,10 @@ router.get('/contatos/importar/:loteId', importacaoController.detalhe);
 
 router.get('/painel-disparo', disparosController.painelDisparo);
 router.get('/estados/:estadoId/contatos-disponiveis', disparosController.contatosDisponiveis);
+router.post('/disparos/verificar', disparosController.verificar);
 router.post('/disparos', disparosController.criar);
+// Envio de Disparos (v6) — ver CONTRATO-CONTROLE-LIGACOES-API.md. Verbo GET
+// novo, sem conflito com as rotas POST /disparos* acima.
+router.get('/disparos/:id', disparosController.detalhe);
 
 module.exports = router;

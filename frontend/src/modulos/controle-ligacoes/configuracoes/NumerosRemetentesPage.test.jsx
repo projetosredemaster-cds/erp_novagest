@@ -1,14 +1,34 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import NumerosRemetentesPage from './NumerosRemetentesPage.jsx';
 
-vi.mock('./controleLigacoesConfigApi.js', () => ({
-  fetchEstados: vi.fn(),
-  criarEstado: vi.fn(),
-  fetchNumerosRemetentes: vi.fn(),
-  criarNumeroRemetente: vi.fn(),
-  atualizarNumeroRemetente: vi.fn(),
-  removerNumeroRemetente: vi.fn(),
+// A conexão via QR Code (Baileys/SSE) NÃO passa por `apiRequest` — é fetch
+// nativo + parsing manual do corpo de stream (ver comentário em
+// controleLigacoesConfigApi.js). Por isso `abrirStreamConexao` mantém a
+// implementação REAL aqui (via `importOriginal`), e os testes que exercitam
+// o modal de conexão simulam a resposta stubando `global.fetch` diretamente
+// — assim o parsing SSE de verdade é exercitado, não só a reação do
+// componente a um mock de alto nível. As demais funções (CRUD via
+// `apiRequest`) continuam 100% mockadas, como já era.
+vi.mock('./controleLigacoesConfigApi.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    fetchEstados: vi.fn(),
+    criarEstado: vi.fn(),
+    fetchNumerosRemetentes: vi.fn(),
+    criarNumeroRemetente: vi.fn(),
+    atualizarNumeroRemetente: vi.fn(),
+    removerNumeroRemetente: vi.fn(),
+    desconectarNumeroRemetente: vi.fn(),
+  };
+});
+
+// Stub leve do componente de QR: evita depender da renderização SVG real da
+// lib pra testar troca de valor entre eventos — só expõe o `value` recebido
+// via texto num elemento com testid fixo.
+vi.mock('qrcode.react', () => ({
+  QRCodeSVG: ({ value }) => <div data-testid="qr-value">{value}</div>,
 }));
 
 vi.mock('../../../app/AuthContext.jsx', () => ({
@@ -18,15 +38,59 @@ vi.mock('../../../app/AuthContext.jsx', () => ({
 import * as api from './controleLigacoesConfigApi.js';
 import { useAuth } from '../../../app/AuthContext.jsx';
 
-function numero({ id = 3, apelido = 'CDC Cohatrac', ativo = true, estado } = {}) {
+function numero({
+  id = 3,
+  apelido = 'CDC Cohatrac',
+  ativo = true,
+  estado,
+  statusConexao = 'aguardando_conexao',
+  numeroTelefone = null,
+  nomeColaboradora = null,
+} = {}) {
   return {
     id,
     apelido,
-    numero: null,
-    statusConexao: 'aguardando_conexao',
+    numero: numeroTelefone,
+    statusConexao,
     ativo,
     estado: estado || { id: 6, nome: 'Maranhão', uf: 'MA' },
+    nomeColaboradora,
     criado_em: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+// --- helpers de simulação do stream SSE (ver abrirStreamConexao) ---
+function sseChunk(event, data) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+// `chunks`: array de string (evento pronto) ou `{ text, delayMs }` (evento
+// que só "chega" depois de um atraso real — usado pra garantir que o
+// componente tenha a chance de renderizar o estado intermediário antes do
+// próximo evento chegar, evitando que dois `setState` síncronos sejam
+// batchados num único render).
+function makeStreamResponse(chunks, { ok = true, status = 200 } = {}) {
+  const encoder = new TextEncoder();
+  let index = 0;
+  return {
+    ok,
+    status,
+    json: () => Promise.resolve(null),
+    body: {
+      getReader: () => ({
+        read: () => {
+          if (index >= chunks.length) return Promise.resolve({ done: true, value: undefined });
+          const chunk = chunks[index];
+          index += 1;
+          const text = typeof chunk === 'string' ? chunk : chunk.text;
+          const delayMs = typeof chunk === 'string' ? 0 : (chunk.delayMs || 0);
+          const value = encoder.encode(text);
+          if (!delayMs) return Promise.resolve({ done: false, value });
+          return new Promise((resolve) => setTimeout(() => resolve({ done: false, value }), delayMs));
+        },
+        cancel: () => Promise.resolve(),
+      }),
+    },
   };
 }
 
@@ -181,7 +245,7 @@ describe('NumerosRemetentesPage — editar número remetente', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Salvar alterações' }));
 
     await waitFor(() => expect(api.atualizarNumeroRemetente).toHaveBeenCalledWith('token-teste', 3, {
-      apelido: 'Apelido Editado', estadoId: 6,
+      apelido: 'Apelido Editado', estadoId: 6, nomeColaboradora: null,
     }));
     expect(await screen.findByText('Número remetente atualizado.')).toBeInTheDocument();
   });
@@ -298,5 +362,180 @@ describe('NumerosRemetentesPage — cadastro inline de Estado novo', () => {
     }));
     expect(await screen.findByText('Estado criado.')).toBeInTheDocument();
     expect(screen.getByLabelText('Estado')).toHaveValue('7');
+  });
+});
+
+describe('NumerosRemetentesPage — campo "Nome da colaboradora"', () => {
+  it('fica desabilitado e vazio ao criar um número novo', async () => {
+    mockCargaBasica();
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Novo número remetente' }));
+
+    const campo = screen.getByLabelText('Nome da colaboradora (opcional)');
+    expect(campo).toBeDisabled();
+    expect(campo).toHaveValue('');
+  });
+
+  it('aparece pré-preenchido na edição e é enviado no PUT', async () => {
+    mockCargaBasica({ numeros: [numero({ nomeColaboradora: 'Maria' })] });
+    api.atualizarNumeroRemetente.mockResolvedValue(numero({ nomeColaboradora: 'Maria Silva' }));
+
+    await renderPage();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Editar' })[0]);
+    const campo = screen.getByLabelText('Nome da colaboradora (opcional)');
+    expect(campo).not.toBeDisabled();
+    expect(campo).toHaveValue('Maria');
+
+    fireEvent.change(campo, { target: { value: 'Maria Silva' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar alterações' }));
+
+    await waitFor(() => expect(api.atualizarNumeroRemetente).toHaveBeenCalledWith('token-teste', 3, {
+      apelido: 'CDC Cohatrac', estadoId: 6, nomeColaboradora: 'Maria Silva',
+    }));
+  });
+});
+
+describe('NumerosRemetentesPage — conexão WhatsApp (QR Code / SSE)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('abre o modal e mostra o QR ao receber o evento "qr"', async () => {
+    mockCargaBasica();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      makeStreamResponse([sseChunk('qr', { qr: 'QR-CODE-1' })])
+    ));
+
+    await renderPage();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Conectar WhatsApp' })[0]);
+
+    expect(await screen.findByRole('dialog', { name: 'Conectar WhatsApp' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('qr-value')).toHaveTextContent('QR-CODE-1'));
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/controle-ligacoes/numeros-remetentes/3/conexao/stream'),
+      expect.objectContaining({
+        method: 'GET',
+        headers: { Authorization: 'Bearer token-teste' },
+      })
+    );
+  });
+
+  it('atualiza o QR exibido ao receber um novo evento "qr"', async () => {
+    mockCargaBasica();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      makeStreamResponse([
+        sseChunk('qr', { qr: 'QR-1' }),
+        { text: sseChunk('qr', { qr: 'QR-2' }), delayMs: 30 },
+      ])
+    ));
+
+    await renderPage();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Conectar WhatsApp' })[0]);
+
+    await waitFor(() => expect(screen.getByTestId('qr-value')).toHaveTextContent('QR-1'));
+    await waitFor(() => expect(screen.getByTestId('qr-value')).toHaveTextContent('QR-2'));
+  });
+
+  it('fecha o modal, rebusca a lista e mostra flash de sucesso ao receber "conectado"', async () => {
+    mockCargaBasica();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      makeStreamResponse([sseChunk('conectado', { numero: '5598999999999' })])
+    ));
+
+    await renderPage();
+    expect(api.fetchNumerosRemetentes).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Conectar WhatsApp' })[0]);
+    await screen.findByRole('dialog', { name: 'Conectar WhatsApp' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Conectar WhatsApp' })).not.toBeInTheDocument());
+    expect(await screen.findByText('WhatsApp conectado com sucesso.')).toBeInTheDocument();
+    expect(api.fetchNumerosRemetentes).toHaveBeenCalledTimes(2);
+  });
+
+  it('trata "ja_conectado" da mesma forma que "conectado"', async () => {
+    mockCargaBasica();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      makeStreamResponse([sseChunk('ja_conectado', { numero: '5598999999999' })])
+    ));
+
+    await renderPage();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Conectar WhatsApp' })[0]);
+
+    expect(await screen.findByText('WhatsApp conectado com sucesso.')).toBeInTheDocument();
+  });
+
+  it('mostra erro e permite "Tentar novamente", reabrindo o stream', async () => {
+    mockCargaBasica();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(makeStreamResponse([sseChunk('erro', { mensagem: 'Falha simulada de conexão' })]))
+      .mockResolvedValueOnce(makeStreamResponse([sseChunk('qr', { qr: 'QR-RETRY' })]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await renderPage();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Conectar WhatsApp' })[0]);
+
+    expect(await screen.findByText('Falha simulada de conexão')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+
+    await waitFor(() => expect(screen.getByTestId('qr-value')).toHaveTextContent('QR-RETRY'));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('fechar o modal cancela a leitura do stream (aborta o fetch)', async () => {
+    mockCargaBasica();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      makeStreamResponse([sseChunk('qr', { qr: 'QR-1' })])
+    ));
+
+    await renderPage();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Conectar WhatsApp' })[0]);
+    await waitFor(() => expect(screen.getByTestId('qr-value')).toHaveTextContent('QR-1'));
+
+    // "Fechar" tem duas ocorrências no modal (botão "✕" com aria-label
+    // "Fechar" e o botão de rodapé "Fechar") — usa a última (rodapé).
+    const botoesFechar = screen.getAllByRole('button', { name: 'Fechar' });
+    fireEvent.click(botoesFechar[botoesFechar.length - 1]);
+
+    expect(screen.queryByRole('dialog', { name: 'Conectar WhatsApp' })).not.toBeInTheDocument();
+    const [, options] = fetch.mock.calls[0];
+    expect(options.signal.aborted).toBe(true);
+  });
+
+  it('para número já conectado, mostra "Desconectar" e confirma antes de chamar a rota', async () => {
+    mockCargaBasica({ numeros: [numero({ statusConexao: 'conectado', numeroTelefone: '5598999999999' })] });
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    api.desconectarNumeroRemetente.mockResolvedValue(
+      numero({ statusConexao: 'aguardando_conexao', numeroTelefone: null })
+    );
+
+    await renderPage();
+
+    expect(screen.queryAllByRole('button', { name: 'Conectar WhatsApp' })).toHaveLength(0);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Desconectar' })[0]);
+
+    expect(confirm).toHaveBeenCalledWith(
+      'Isso encerrará a sessão do WhatsApp. Será necessário escanear o QR novamente para reconectar. Continuar?'
+    );
+    await waitFor(() => expect(api.desconectarNumeroRemetente).toHaveBeenCalledWith('token-teste', 3));
+    expect(await screen.findByText('WhatsApp desconectado.')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Conectar WhatsApp' }).length).toBeGreaterThan(0);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('confirmação cancelada ao desconectar não chama a rota', async () => {
+    mockCargaBasica({ numeros: [numero({ statusConexao: 'conectado', numeroTelefone: '5598999999999' })] });
+    vi.stubGlobal('confirm', vi.fn(() => false));
+
+    await renderPage();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Desconectar' })[0]);
+
+    expect(api.desconectarNumeroRemetente).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
   });
 });
