@@ -25,7 +25,12 @@ async function parseJsonSafely(response) {
 // rankingApi.js, que não tem acesso direto ao AuthContext).
 // `emitOn401`: desligado nas chamadas cujo 401 tem outro significado que não
 // "sessão expirada" (ex. login com credenciais erradas).
-export async function apiRequest(path, { method, body, token, emitOn401 = true } = {}) {
+// `cache`: repassado direto para o `fetch` (ex. `'no-store'`). Opcional e
+// `undefined` por padrão — não muda o comportamento de cache de nenhuma
+// chamada existente; foi adicionado para o Painel de Disparo do Controle de
+// Ligações (dados que mudam a cada poucos segundos, não devem ser servidos
+// do cache HTTP do navegador), mas qualquer `<modulo>Api.js` pode usar.
+export async function apiRequest(path, { method, body, token, emitOn401 = true, cache } = {}) {
   const authToken = token !== undefined ? token : getToken();
 
   // Upload multipart (ex.: importação de contatos do Controle de Ligações):
@@ -38,6 +43,7 @@ export async function apiRequest(path, { method, body, token, emitOn401 = true }
     response = await fetch(`${BASE_URL}${path}`, {
       method,
       body,
+      ...(cache ? { cache } : {}),
       headers: {
         ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),

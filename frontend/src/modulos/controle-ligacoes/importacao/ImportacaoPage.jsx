@@ -1,21 +1,39 @@
 // style-system: Tailwind
-import { useEffect, useRef, useState } from 'react';
+// Importação de contatos (CONTRATO-CONTROLE-LIGACOES-API.md, "Importação
+// (v3)"). Upload de planilha + histórico de todos os lotes já importados.
+//
+// v3: a escolha de número remetente por Estado deixou de acontecer aqui —
+// agora acontece no Painel de Disparo, no momento do disparo. Não existe
+// mais "lote pendente de confirmação": toda importação nasce completa, os
+// contatos já ficam disponíveis assim que o upload termina. Por isso esta
+// tela não tem mais nenhum formulário de escolha de número/confirmação —
+// só o upload e uma lista/detalhe (view por state, sem rota nova, mesmo
+// padrão que RankingPage/MargensPage já usam para alternar sub-telas) do
+// que já foi importado.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../../app/AuthContext.jsx';
-import { fetchEstados, fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
-import { importarContatos, confirmarImportacao, fetchImportacoesPendentes } from './importacaoApi.js';
+import { importarContatos, fetchHistoricoImportacoes, fetchDetalheImportacao } from './importacaoApi.js';
 
 const btn = "bg-[var(--violet)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
 const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--panel-alt)] disabled:cursor-not-allowed disabled:opacity-50";
-const btnDanger = "bg-[var(--danger-bg)] text-[var(--danger)] border-none rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[12.5px] font-bold cursor-pointer hover:brightness-110";
 const inputCls = "w-full rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-3 sm:py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--violet)]";
 const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-4 pt-5 pb-[22px] sm:px-5";
-const selectCls = "w-full min-w-[180px] rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-2.5 py-2.5 sm:py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--violet)]";
 
-function formatData(iso) {
+// Data + hora legível (ex.: "24/08/2026 14:35") — o histórico lista vários
+// lotes, possivelmente do mesmo dia, então a hora ajuda a diferenciar.
+function formatDataHora(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('pt-BR');
+  return d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function formatResumoLinha({ totalImportados, totalLinhas, totalSemEstado, totalDuplicado, totalErro }) {
+  const partes = [`${totalImportados} importados de ${totalLinhas}`];
+  if (totalDuplicado > 0) partes.push(`${totalDuplicado} duplicado(s)`);
+  if (totalSemEstado > 0) partes.push(`${totalSemEstado} sem estado`);
+  if (totalErro > 0) partes.push(`${totalErro} erro(s)`);
+  return partes.join(' · ');
 }
 
 function Stat({ label, value }) {
@@ -27,11 +45,134 @@ function Stat({ label, value }) {
   );
 }
 
+function ResumoStats({ resumo }) {
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+      <Stat label="Linhas" value={resumo.totalLinhas} />
+      <Stat label="Importados" value={resumo.totalImportados} />
+      <Stat label="Sem estado" value={resumo.totalSemEstado} />
+      <Stat label="Duplicados" value={resumo.totalDuplicado} />
+      <Stat label="Erros" value={resumo.totalErro} />
+    </div>
+  );
+}
+
+// --- Detalhe de um lote (view === 'detalhe') ---
+function DetalheImportacao({ loteId, token, onVoltar }) {
+  const [detalhe, setDetalhe] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Sem setState síncrono no corpo (regra `set-state-in-effect`) — os
+  // estados iniciais (`loading=true`, `error=null`) já cobrem a carga
+  // disparada pelo efeito de montagem; só o botão "Tentar novamente"
+  // (`retry`, disparado por clique, fora de um efeito) reseta manualmente.
+  const carregar = useCallback(() => {
+    fetchDetalheImportacao(token, loteId)
+      .then((dados) => { setDetalhe(dados); setError(null); })
+      .catch((err) => setError(err.message || 'Erro ao carregar detalhe da importação.'))
+      .finally(() => setLoading(false));
+  }, [token, loteId]);
+
+  useEffect(() => {
+    carregar();
+  }, [carregar]);
+
+  function retry() {
+    setLoading(true);
+    setError(null);
+    carregar();
+  }
+
+  return (
+    <div className={card}>
+      <div className="mb-3.5 flex items-center justify-between">
+        <h2 className="font-display text-[19px] font-bold">Detalhe da importação</h2>
+        <button type="button" className={btnGhost} onClick={onVoltar}>Voltar ao histórico</button>
+      </div>
+
+      {loading ? (
+        <div className="px-1 py-6 text-center text-sm text-[var(--muted)]">Carregando...</div>
+      ) : error ? (
+        <div className="flex flex-col items-stretch justify-between gap-3 rounded-xl border border-[var(--danger)] bg-[var(--danger-bg)] px-5 py-4 text-sm text-[var(--danger)] sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+          <span className="break-words">{error}</span>
+          {error === 'Importação não encontrada.' ? (
+            <button className={`${btn} w-full sm:w-auto`} onClick={onVoltar}>Voltar ao histórico</button>
+          ) : (
+            <button className={`${btn} w-full sm:w-auto`} onClick={retry}>Tentar novamente</button>
+          )}
+        </div>
+      ) : detalhe ? (
+        <>
+          <div className="mb-4 text-sm text-[var(--muted)]">
+            <div className="text-[15px] font-semibold text-[var(--text)]">{detalhe.nomeArquivo}</div>
+            <div>
+              {detalhe.usuarioEmail || 'usuário removido'} · {formatDataHora(detalhe.criado_em)}
+            </div>
+          </div>
+
+          <ResumoStats resumo={detalhe} />
+
+          <h3 className="font-display mt-5 mb-2.5 text-[15px] font-bold">Por estado</h3>
+          {(detalhe.porEstado || []).length === 0 ? (
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 text-[13px] text-[var(--muted)]">
+              Nenhum contato com estado reconhecido nesta importação.
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {detalhe.porEstado.map((item) => (
+                <div
+                  key={item.estado.id}
+                  className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 text-sm"
+                >
+                  <span className="font-semibold text-[var(--text)]">{item.estado.nome} ({item.estado.uf})</span>
+                  <span className="text-[var(--muted)]">{item.totalContatos} contato(s)</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <h3 className="font-display mt-5 mb-2.5 text-[15px] font-bold">Linhas rejeitadas</h3>
+          {(detalhe.erros || []).length === 0 ? (
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 text-[13px] text-[var(--muted)]">
+              Nenhum erro nesta importação.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
+              <table className="w-full min-w-[520px] text-left text-[13px]">
+                <thead>
+                  <tr className="bg-[var(--panel-alt)] text-[11px] uppercase tracking-[.06em] text-[var(--muted)]">
+                    <th className="px-3 py-2 font-semibold">Linha</th>
+                    <th className="px-3 py-2 font-semibold">Tipo</th>
+                    <th className="px-3 py-2 font-semibold">Nome</th>
+                    <th className="px-3 py-2 font-semibold">Contato</th>
+                    <th className="px-3 py-2 font-semibold">Motivo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {detalhe.erros.map((erro, idx) => (
+                    <tr key={`${erro.linha}-${idx}`}>
+                      <td className="px-3 py-2 text-[var(--text)]">{erro.linha}</td>
+                      <td className="px-3 py-2 text-[var(--text)]">
+                        {erro.tipo === 'duplicado' ? 'Duplicado' : 'Erro'}
+                      </td>
+                      <td className="px-3 py-2 text-[var(--text)]">{erro.nomePlanilha || '—'}</td>
+                      <td className="px-3 py-2 text-[var(--muted)]">{erro.contatoPlanilha || '—'}</td>
+                      <td className="px-3 py-2 text-[var(--muted)]">{erro.motivo}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export default function ImportacaoPage() {
   const { token } = useAuth();
-
-  const [numerosRemetentes, setNumerosRemetentes] = useState([]);
-  const [estadosCadastrados, setEstadosCadastrados] = useState([]);
 
   const [flashMsg, setFlashMsg] = useState(null);
   const flashTimer = useRef(null);
@@ -42,57 +183,52 @@ export default function ImportacaoPage() {
     flashTimer.current = setTimeout(() => setFlashMsg(null), type === 'error' ? 4200 : 1600);
   }
 
-  useEffect(() => {
-    fetchNumerosRemetentes(token).then((lista) => setNumerosRemetentes(lista || [])).catch(() => {});
-    fetchEstados(token).then((lista) => setEstadosCadastrados(lista || [])).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // 'lista' (upload + histórico) ou 'detalhe' (um lote específico)
+  const [view, setView] = useState('lista');
+  const [detalheLoteId, setDetalheLoteId] = useState(null);
 
-  // contador local para chaves de linha da retomada — evita Date.now()
-  // (função impura) sendo chamada a partir do corpo do componente.
-  const localIdCounterRef = useRef(0);
-  function nextLocalId() {
-    localIdCounterRef.current += 1;
-    return `linha-${localIdCounterRef.current}`;
+  function abrirDetalhe(loteImportacaoId) {
+    setDetalheLoteId(loteImportacaoId);
+    setView('detalhe');
   }
 
-  function numerosAtivosDoEstado(estadoId) {
-    return numerosRemetentes.filter((n) => n.estado.id === Number(estadoId) && n.ativo);
+  function voltarParaLista() {
+    setView('lista');
+    setDetalheLoteId(null);
   }
 
   // --- upload ---
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
+  const [resultadoUpload, setResultadoUpload] = useState(null);
   const fileInputRef = useRef(null);
 
-  // --- etapa de confirmação (comum a upload novo e retomada de pendente) ---
-  // confirmContext: { modo: 'novo' | 'retomada', loteImportacaoId, resumo }
-  const [confirmContext, setConfirmContext] = useState(null);
-  const [escolhasPorEstado, setEscolhasPorEstado] = useState({}); // modo 'novo': { [estadoId]: numeroRemetenteId }
-  const [retomadaLinhas, setRetomadaLinhas] = useState([]); // modo 'retomada': [{ localId, estadoId, numeroRemetenteId }]
-  const [confirmando, setConfirmando] = useState(false);
-  const [confirmError, setConfirmError] = useState(null);
+  // --- histórico ---
+  const [historico, setHistorico] = useState([]);
+  const [loadingHistorico, setLoadingHistorico] = useState(true);
+  const [historicoError, setHistoricoError] = useState(null);
 
-  function abrirConfirmacaoNova(resultado) {
-    setConfirmContext({ modo: 'novo', loteImportacaoId: resultado.loteImportacaoId, resumo: resultado });
-    const inicial = {};
-    (resultado.porEstado || []).forEach((item) => { inicial[item.estado.id] = ''; });
-    setEscolhasPorEstado(inicial);
-    setConfirmError(null);
-  }
+  // Sem setState síncrono no corpo (regra `set-state-in-effect`) — os
+  // estados iniciais (`loadingHistorico=true`, `historicoError=null`) já
+  // cobrem a carga disparada pelo efeito de montagem; `retryHistorico`
+  // (clique/pós-upload, sempre fora de um efeito) reseta manualmente antes
+  // de chamar de novo.
+  const carregarHistorico = useCallback(() => {
+    fetchHistoricoImportacoes(token)
+      .then((lista) => { setHistorico(lista || []); setHistoricoError(null); })
+      .catch((err) => setHistoricoError(err.message || 'Erro ao carregar histórico de importações.'))
+      .finally(() => setLoadingHistorico(false));
+  }, [token]);
 
-  function abrirConfirmacaoRetomada(pendente) {
-    setConfirmContext({ modo: 'retomada', loteImportacaoId: pendente.loteImportacaoId, resumo: pendente });
-    setRetomadaLinhas([{ localId: nextLocalId(), estadoId: '', numeroRemetenteId: '' }]);
-    setConfirmError(null);
-  }
+  useEffect(() => {
+    carregarHistorico();
+  }, [carregarHistorico]);
 
-  function cancelarConfirmacao() {
-    setConfirmContext(null);
-    setEscolhasPorEstado({});
-    setRetomadaLinhas([]);
-    setConfirmError(null);
+  function retryHistorico() {
+    setLoadingHistorico(true);
+    setHistoricoError(null);
+    carregarHistorico();
   }
 
   function handleUpload(e) {
@@ -107,82 +243,15 @@ export default function ImportacaoPage() {
     setUploading(true);
     importarContatos(token, selectedFile)
       .then((resultado) => {
-        abrirConfirmacaoNova(resultado);
+        setResultadoUpload(resultado);
         setSelectedFile(null);
         if (fileInputRef.current) fileInputRef.current.value = '';
-        flash('Arquivo importado. Confira o resumo e escolha os números.');
+        flash('Importação concluída.');
+        retryHistorico();
       })
       .catch((err) => setUploadError(err.message || 'Erro ao importar contatos.'))
       .finally(() => setUploading(false));
   }
-
-  function addRetomadaLinha() {
-    setRetomadaLinhas((prev) => [...prev, { localId: nextLocalId(), estadoId: '', numeroRemetenteId: '' }]);
-  }
-
-  function removeRetomadaLinha(localId) {
-    setRetomadaLinhas((prev) => prev.filter((l) => l.localId !== localId));
-  }
-
-  function updateRetomadaLinha(localId, campo, valor) {
-    setRetomadaLinhas((prev) => prev.map((l) => {
-      if (l.localId !== localId) return l;
-      if (campo === 'estadoId') return { ...l, estadoId: valor, numeroRemetenteId: '' };
-      return { ...l, [campo]: valor };
-    }));
-  }
-
-  const confirmarHabilitado = confirmContext?.modo === 'novo'
-    ? Object.values(escolhasPorEstado).every((v) => v !== '')
-      && Object.values(escolhasPorEstado).length > 0
-    : retomadaLinhas.length > 0 && retomadaLinhas.every((l) => l.estadoId && l.numeroRemetenteId);
-
-  function handleConfirmar() {
-    if (!confirmContext) return;
-
-    const escolhas = confirmContext.modo === 'novo'
-      ? Object.entries(escolhasPorEstado).map(([estadoId, numeroRemetenteId]) => ({
-        estadoId: Number(estadoId),
-        numeroRemetenteId: Number(numeroRemetenteId),
-      }))
-      : retomadaLinhas
-        .filter((l) => l.estadoId && l.numeroRemetenteId)
-        .map((l) => ({ estadoId: Number(l.estadoId), numeroRemetenteId: Number(l.numeroRemetenteId) }));
-
-    setConfirmando(true);
-    setConfirmError(null);
-    confirmarImportacao(token, confirmContext.loteImportacaoId, escolhas)
-      .then(() => {
-        flash('Distribuição confirmada com sucesso.');
-        cancelarConfirmacao();
-        loadPendentes();
-      })
-      .catch((err) => setConfirmError(err.message || 'Erro ao confirmar importação.'))
-      .finally(() => setConfirmando(false));
-  }
-
-  // --- importações pendentes ---
-  const [pendentes, setPendentes] = useState([]);
-  const [loadingPendentes, setLoadingPendentes] = useState(true);
-  const [pendentesError, setPendentesError] = useState(null);
-
-  function runLoadPendentes() {
-    fetchImportacoesPendentes(token)
-      .then((lista) => setPendentes(lista || []))
-      .catch((err) => setPendentesError(err.message || 'Erro ao carregar importações pendentes.'))
-      .finally(() => setLoadingPendentes(false));
-  }
-
-  function loadPendentes() {
-    setLoadingPendentes(true);
-    setPendentesError(null);
-    runLoadPendentes();
-  }
-
-  useEffect(() => {
-    runLoadPendentes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return (
     <div className="min-h-screen bg-[var(--bg)] p-4 sm:p-6 text-[var(--text)]">
@@ -192,190 +261,97 @@ export default function ImportacaoPage() {
           <h1 className="font-display mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Importação de contatos</h1>
         </div>
 
-        {!confirmContext ? (
-          <div className={`${card} mb-[18px]`}>
-            <h2 className="font-display mb-3 text-[19px] font-bold">Enviar planilha</h2>
-            <p className="mb-3.5 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 text-[12.5px] text-[var(--muted)]">
-              A planilha deve conter as colunas <strong className="text-[var(--text)]">NOME</strong> e{' '}
-              <strong className="text-[var(--text)]">CONTATO</strong> (com DDI, ex: 5598999999999).
-            </p>
-
-            <form onSubmit={handleUpload} noValidate className="flex flex-col gap-3 sm:flex-row sm:items-start">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.csv"
-                aria-label="Arquivo de contatos"
-                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                className={`${inputCls} sm:flex-1`}
-              />
-              <button type="submit" className={`${btn} w-full sm:w-auto`} disabled={uploading}>
-                {uploading ? 'Enviando...' : 'Importar'}
-              </button>
-            </form>
-            {uploadError ? (
-              <div className="mt-3 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3.5 py-2.5 text-[13px] text-[var(--danger)] break-words">
-                {uploadError}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {confirmContext ? (
-          <div className={`${card} mb-[18px]`}>
-            <div className="mb-3.5 flex items-center justify-between">
-              <h2 className="font-display text-[19px] font-bold">
-                {confirmContext.modo === 'novo' ? 'Resumo da importação' : 'Retomar importação pendente'}
-              </h2>
-              <button type="button" className={btnGhost} onClick={cancelarConfirmacao}>Cancelar</button>
-            </div>
-
-            {confirmContext.modo === 'novo' ? (
-              <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                <Stat label="Linhas" value={confirmContext.resumo.totalLinhas} />
-                <Stat label="Importados" value={confirmContext.resumo.totalImportados} />
-                <Stat label="Sem estado" value={confirmContext.resumo.totalSemEstado} />
-                <Stat label="Duplicados" value={confirmContext.resumo.totalDuplicado} />
-                <Stat label="Erros" value={confirmContext.resumo.totalErro} />
-              </div>
-            ) : (
-              <p className="mb-4 text-[13px] text-[var(--muted)]">
-                Arquivo <strong className="text-[var(--text)]">{confirmContext.resumo.nomeArquivo}</strong> — {confirmContext.resumo.totalImportados} contatos importados em {formatData(confirmContext.resumo.criado_em)}.
-                Escolha manualmente os estados presentes neste lote e o número que deve recebê-los.
+        {view === 'detalhe' ? (
+          <DetalheImportacao loteId={detalheLoteId} token={token} onVoltar={voltarParaLista} />
+        ) : (
+          <>
+            <div className={`${card} mb-[18px]`}>
+              <h2 className="font-display mb-3 text-[19px] font-bold">Enviar planilha</h2>
+              <p className="mb-3.5 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 text-[12.5px] text-[var(--muted)]">
+                A planilha deve conter as colunas <strong className="text-[var(--text)]">NOME</strong> e{' '}
+                <strong className="text-[var(--text)]">CONTATO</strong> (com DDI, ex: 5598999999999).
               </p>
-            )}
 
-            {confirmContext.modo === 'novo' ? (
-              <div className="flex flex-col gap-2.5">
-                {(confirmContext.resumo.porEstado || []).map((item) => {
-                  const opcoes = numerosAtivosDoEstado(item.estado.id);
-                  return (
-                    <div key={item.estado.id} className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="text-sm">
-                        <span className="font-semibold text-[var(--text)]">{item.estado.nome} ({item.estado.uf})</span>
-                        <span className="ml-2 text-[var(--muted)]">{item.totalContatos} contato(s)</span>
-                      </div>
-                      {opcoes.length === 0 ? (
-                        <span className="text-[12.5px] text-[var(--danger)]">Nenhum número ativo para este estado.</span>
-                      ) : (
-                        <select
-                          aria-label={`Número remetente para ${item.estado.nome}`}
-                          value={escolhasPorEstado[item.estado.id] || ''}
-                          onChange={(e) => setEscolhasPorEstado((prev) => ({ ...prev, [item.estado.id]: e.target.value }))}
-                          className={selectCls}
-                        >
-                          <option value="">Selecione o número...</option>
-                          {opcoes.map((n) => (
-                            <option key={n.id} value={n.id}>{n.apelido}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2.5">
-                {retomadaLinhas.map((linha) => {
-                  const opcoes = linha.estadoId ? numerosAtivosDoEstado(linha.estadoId) : [];
-                  return (
-                    <div key={linha.localId} className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 sm:flex-row sm:items-center">
-                      <select
-                        aria-label="Estado"
-                        value={linha.estadoId}
-                        onChange={(e) => updateRetomadaLinha(linha.localId, 'estadoId', e.target.value)}
-                        className={selectCls}
-                      >
-                        <option value="">Selecione o estado...</option>
-                        {estadosCadastrados.map((estado) => (
-                          <option key={estado.id} value={estado.id}>{estado.nome} ({estado.uf})</option>
-                        ))}
-                      </select>
-                      <select
-                        aria-label="Número remetente"
-                        value={linha.numeroRemetenteId}
-                        onChange={(e) => updateRetomadaLinha(linha.localId, 'numeroRemetenteId', e.target.value)}
-                        disabled={!linha.estadoId}
-                        className={selectCls}
-                      >
-                        <option value="">Selecione o número...</option>
-                        {opcoes.map((n) => (
-                          <option key={n.id} value={n.id}>{n.apelido}</option>
-                        ))}
-                      </select>
-                      {retomadaLinhas.length > 1 ? (
-                        <button
-                          type="button"
-                          aria-label="Remover estado desta escolha"
-                          className={`${btnDanger} shrink-0`}
-                          onClick={() => removeRetomadaLinha(linha.localId)}
-                        >
-                          Remover
-                        </button>
-                      ) : null}
-                    </div>
-                  );
-                })}
-                <button type="button" className={`${btnGhost} w-fit`} onClick={addRetomadaLinha}>
-                  + Adicionar outro estado
+              <form onSubmit={handleUpload} noValidate className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.csv"
+                  aria-label="Arquivo de contatos"
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  className={`${inputCls} sm:flex-1`}
+                />
+                <button type="submit" className={`${btn} w-full sm:w-auto`} disabled={uploading}>
+                  {uploading ? 'Enviando...' : 'Importar'}
                 </button>
-                <p className="text-[11.5px] text-[var(--muted)]">
-                  Esta lista não informa automaticamente quais estados fazem parte do lote pendente — escolha os estados
-                  presentes na importação original. Se um estado escolhido não tiver contatos pendentes neste lote, a
-                  confirmação retornará um erro explicando isso.
-                </p>
-              </div>
-            )}
-
-            {confirmError ? (
-              <div className="mt-3.5 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3.5 py-2.5 text-[13px] text-[var(--danger)] break-words">
-                {confirmError}
-              </div>
-            ) : null}
-
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                className={`${btn} w-full sm:w-auto`}
-                disabled={!confirmarHabilitado || confirmando}
-                onClick={handleConfirmar}
-              >
-                {confirmando ? 'Confirmando...' : 'Confirmar distribuição'}
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        <div className={card}>
-          <h2 className="font-display mb-3.5 text-[19px] font-bold">Importações pendentes</h2>
-          {loadingPendentes ? (
-            <div className="px-1 py-6 text-center text-sm text-[var(--muted)]">Carregando...</div>
-          ) : pendentesError ? (
-            <div className="flex flex-col items-stretch justify-between gap-3 rounded-xl border border-[var(--danger)] bg-[var(--danger-bg)] px-5 py-4 text-sm text-[var(--danger)] sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
-              <span className="break-words">Não foi possível carregar as importações pendentes: {pendentesError}</span>
-              <button className={`${btn} w-full sm:w-auto`} onClick={loadPendentes}>Tentar novamente</button>
-            </div>
-          ) : pendentes.length === 0 ? (
-            <div className="px-1 py-6 text-center text-sm text-[var(--muted)]">Nenhuma importação pendente.</div>
-          ) : (
-            <div className="flex flex-col gap-2.5">
-              {pendentes.map((p) => (
-                <div
-                  key={p.loteImportacaoId}
-                  className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="min-w-0 text-sm">
-                    <div className="truncate font-semibold text-[var(--text)]">{p.nomeArquivo}</div>
-                    <div className="text-[12px] text-[var(--muted)]">{p.totalImportados} contato(s) — {formatData(p.criado_em)}</div>
-                  </div>
-                  <button type="button" className={`${btn} w-full sm:w-auto`} onClick={() => abrirConfirmacaoRetomada(p)}>
-                    Retomar
-                  </button>
+              </form>
+              {uploadError ? (
+                <div className="mt-3 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3.5 py-2.5 text-[13px] text-[var(--danger)] break-words">
+                  {uploadError}
                 </div>
-              ))}
+              ) : null}
+
+              {resultadoUpload ? (
+                <div className="mt-4 border-t border-[var(--border)] pt-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="font-display text-[15px] font-bold">Resumo da importação</h3>
+                    <button type="button" className={btnGhost} onClick={() => setResultadoUpload(null)}>Fechar</button>
+                  </div>
+                  <p className="mb-3.5 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 text-[12.5px] text-[var(--muted)]">
+                    Importação concluída — os contatos já estão disponíveis no Painel de Disparo.
+                  </p>
+                  <ResumoStats resumo={resultadoUpload} />
+                  {(resultadoUpload.porEstado || []).length > 0 ? (
+                    <div className="mt-3 flex flex-col gap-2">
+                      {resultadoUpload.porEstado.map((item) => (
+                        <div
+                          key={item.estado.id}
+                          className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 text-sm"
+                        >
+                          <span className="font-semibold text-[var(--text)]">{item.estado.nome} ({item.estado.uf})</span>
+                          <span className="text-[var(--muted)]">{item.totalContatos} contato(s)</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
-          )}
-        </div>
+
+            <div className={card}>
+              <h2 className="font-display mb-3.5 text-[19px] font-bold">Histórico de importações</h2>
+              {loadingHistorico ? (
+                <div className="px-1 py-6 text-center text-sm text-[var(--muted)]">Carregando...</div>
+              ) : historicoError ? (
+                <div className="flex flex-col items-stretch justify-between gap-3 rounded-xl border border-[var(--danger)] bg-[var(--danger-bg)] px-5 py-4 text-sm text-[var(--danger)] sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+                  <span className="break-words">Não foi possível carregar o histórico de importações: {historicoError}</span>
+                  <button className={`${btn} w-full sm:w-auto`} onClick={retryHistorico}>Tentar novamente</button>
+                </div>
+              ) : historico.length === 0 ? (
+                <div className="px-1 py-6 text-center text-sm text-[var(--muted)]">Nenhuma importação realizada ainda.</div>
+              ) : (
+                <div className="flex flex-col gap-2.5">
+                  {historico.map((item) => (
+                    <button
+                      key={item.loteImportacaoId}
+                      type="button"
+                      onClick={() => abrirDetalhe(item.loteImportacaoId)}
+                      className="flex w-full flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 text-left transition-colors hover:border-[var(--violet)]"
+                    >
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <span className="truncate text-sm font-semibold text-[var(--text)]">{item.nomeArquivo}</span>
+                        <span className="text-[12px] text-[var(--muted)]">{formatDataHora(item.criado_em)}</span>
+                      </div>
+                      <div className="text-[12px] text-[var(--muted)]">
+                        {formatResumoLinha(item)} · {item.usuarioEmail || 'usuário removido'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       <div

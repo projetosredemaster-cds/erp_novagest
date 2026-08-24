@@ -62,6 +62,10 @@ export default function ControleLigacoesShell() {
             <span className="text-base leading-none">📥</span>
             Importação
           </NavLink>
+          <NavLink to="/controle-ligacoes/painel-disparo" onClick={() => setMobileOpen(false)} className={navItemClass}>
+            <span className="text-base leading-none">🚀</span>
+            Painel de Disparo
+          </NavLink>
         </nav>
 
         <div className="mt-auto flex flex-col gap-1">

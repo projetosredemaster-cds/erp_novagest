@@ -10,6 +10,7 @@ import RedefinirSenhaPage from '../modulos/auth/RedefinirSenhaPage.jsx';
 import ControleLigacoesHomePage from '../modulos/controle-ligacoes/ControleLigacoesHomePage.jsx';
 import NumerosRemetentesPage from '../modulos/controle-ligacoes/configuracoes/NumerosRemetentesPage.jsx';
 import ImportacaoPage from '../modulos/controle-ligacoes/importacao/ImportacaoPage.jsx';
+import PainelDisparoPage from '../modulos/controle-ligacoes/painel-disparo/PainelDisparoPage.jsx';
 import { moduleRegistry } from '../app/moduleRegistry.js';
 
 export default function AppRoutes() {
@@ -55,6 +56,7 @@ export default function AppRoutes() {
           <Route index element={<ControleLigacoesHomePage />} />
           <Route path="configuracoes/numeros-remetentes" element={<NumerosRemetentesPage />} />
           <Route path="importacao" element={<ImportacaoPage />} />
+          <Route path="painel-disparo" element={<PainelDisparoPage />} />
         </Route>
       </Route>
     </Routes>

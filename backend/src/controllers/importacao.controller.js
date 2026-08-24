@@ -40,71 +40,51 @@ async function importar(req, res) {
   }
 }
 
+/**
+ * Descontinuada em v3 — a escolha de número por Estado passou a acontecer
+ * no Painel de Disparo, no momento do disparo (ver disparos.controller.js).
+ * A rota continua montada (não removida do router) só para responder um 410
+ * claro em vez de um 404 genérico para quem ainda chamar o fluxo antigo.
+ */
 async function confirmar(req, res) {
-  const loteIdNum = Number(req.params.loteId);
-  if (!isPositiveInteger(loteIdNum)) {
-    return res.status(400).json({ error: 'Lote de importação não encontrado.' });
-  }
+  return res.status(410).json({
+    error: 'Rota descontinuada. A escolha de número acontece no Painel de Disparo.',
+  });
+}
 
-  const body = req.body || {};
-  const { escolhas } = body;
-
-  if (!Array.isArray(escolhas) || escolhas.length === 0) {
-    return res.status(400).json({ error: 'Campo "escolhas" é obrigatório.' });
-  }
-
-  const escolhasComFormatoValido = escolhas.every(
-    (escolha) =>
-      escolha &&
-      isPositiveInteger(Number(escolha.estadoId)) &&
-      isPositiveInteger(Number(escolha.numeroRemetenteId))
-  );
-  if (!escolhasComFormatoValido) {
-    return res.status(400).json({ error: 'Campo "escolhas" é obrigatório.' });
-  }
-
+async function historico(req, res) {
   try {
-    const resultado = await importacaoService.confirmarLote({ loteId: loteIdNum, escolhas });
-
-    if (resultado.status === 'lote_nao_encontrado') {
-      return res.status(400).json({ error: 'Lote de importação não encontrado.' });
-    }
-
-    if (resultado.status === 'ja_confirmado') {
-      return res.status(400).json({ error: 'Este lote já foi confirmado anteriormente.' });
-    }
-
-    if (resultado.status === 'numero_invalido') {
-      return res.status(400).json({
-        error: `Número remetente informado é inválido para o estado "${resultado.estadoNome}".`,
-      });
-    }
-
-    if (resultado.status === 'faltando_escolha') {
-      return res.status(400).json({
-        error: 'É necessário escolher um número para todos os estados deste lote.',
-      });
-    }
-
-    return res.status(200).json({ loteImportacaoId: loteIdNum, confirmado: true });
+    const lotes = await importacaoService.listarHistorico();
+    return res.json(lotes);
   } catch (err) {
-    console.error('[importacao.controller] Erro ao confirmar importação:', err);
-    return res.status(500).json({ error: 'Erro interno ao confirmar importação.' });
+    console.error('[importacao.controller] Erro ao listar histórico de importações:', err);
+    return res.status(500).json({ error: 'Erro interno ao listar histórico de importações.' });
   }
 }
 
-async function listarPendentes(req, res) {
+async function detalhe(req, res) {
+  const loteIdNum = Number(req.params.loteId);
+  if (!isPositiveInteger(loteIdNum)) {
+    return res.status(404).json({ error: 'Importação não encontrada.' });
+  }
+
   try {
-    const pendentes = await importacaoService.listarPendentes();
-    return res.json(pendentes);
+    const lote = await importacaoService.buscarDetalhe(loteIdNum);
+
+    if (!lote) {
+      return res.status(404).json({ error: 'Importação não encontrada.' });
+    }
+
+    return res.json(lote);
   } catch (err) {
-    console.error('[importacao.controller] Erro ao listar importações pendentes:', err);
-    return res.status(500).json({ error: 'Erro interno ao listar importações pendentes.' });
+    console.error('[importacao.controller] Erro ao buscar detalhe da importação:', err);
+    return res.status(500).json({ error: 'Erro interno ao buscar detalhe da importação.' });
   }
 }
 
 module.exports = {
   importar,
   confirmar,
-  listarPendentes,
+  historico,
+  detalhe,
 };

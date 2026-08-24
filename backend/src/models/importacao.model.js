@@ -16,8 +16,10 @@ async function listEstadoDDDs() {
 
 /**
  * Dos telefones informados, devolve os que já existem em Contatos (de
- * qualquer lote, confirmado ou não) — telefone é UNIQUE globalmente.
- * Cada telefone é seu próprio parâmetro (nunca concatenado na string SQL).
+ * qualquer lote), com o respectivo id — telefone é UNIQUE globalmente.
+ * O id é usado para gravar LoteImportacaoErros.contato_existente_id na
+ * linha rejeitada por duplicidade. Cada telefone é seu próprio parâmetro
+ * (nunca concatenado na string SQL).
  */
 async function listTelefonesExistentes(telefones) {
   if (!telefones || telefones.length === 0) {
@@ -33,15 +35,19 @@ async function listTelefonesExistentes(telefones) {
   });
 
   const result = await request.query(`
-    SELECT telefone FROM Contatos WHERE telefone IN (${placeholders.join(', ')})
+    SELECT id, telefone FROM Contatos WHERE telefone IN (${placeholders.join(', ')})
   `);
-  return result.recordset.map((row) => row.telefone);
+  return result.recordset;
 }
 
 /**
- * Cria o LotesImportacao e todos os Contatos válidos (com/sem Estado) numa
- * única transação, e devolve o resumo por Estado (porEstado). Nunca atribui
- * numero_remetente_id — isso só acontece na confirmação.
+ * Cria o LotesImportacao, todos os Contatos válidos (com/sem Estado) e todas
+ * as linhas rejeitadas (LoteImportacaoErros), numa única transação. Nunca
+ * atribui numero_remetente_id — a partir da v3 essa escolha acontece no
+ * Painel de Disparo, não mais na importação (ver CONTRATO-CONTROLE-LIGACOES-API.md,
+ * seção "Importação (v3)"). `LotesImportacao.confirmado` não é mais gravado
+ * explicitamente aqui — a coluna continua existindo no schema (default 0),
+ * só deixou de ter uso neste fluxo.
  */
 async function criarLoteEContatos({
   nomeArquivo,
@@ -51,6 +57,7 @@ async function criarLoteEContatos({
   totalDuplicado,
   totalErro,
   contatos,
+  erros,
 }) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
@@ -66,9 +73,9 @@ async function criarLoteEContatos({
     loteRequest.input('totalErro', sql.Int, totalErro);
     const loteResult = await loteRequest.query(`
       INSERT INTO LotesImportacao
-        (nome_arquivo, usuario_id, total_linhas, total_sem_estado, total_duplicado, total_erro, confirmado, criado_em)
+        (nome_arquivo, usuario_id, total_linhas, total_sem_estado, total_duplicado, total_erro, criado_em)
       OUTPUT inserted.id, inserted.criado_em
-      VALUES (@nomeArquivo, @usuarioId, @totalLinhas, @totalSemEstado, @totalDuplicado, @totalErro, 0, SYSUTCDATETIME())
+      VALUES (@nomeArquivo, @usuarioId, @totalLinhas, @totalSemEstado, @totalDuplicado, @totalErro, SYSUTCDATETIME())
     `);
     const lote = loteResult.recordset[0];
 
@@ -82,6 +89,22 @@ async function criarLoteEContatos({
       await contatoRequest.query(`
         INSERT INTO Contatos (nome, telefone, ddd, estado_id, numero_remetente_id, lote_importacao_id, criado_em)
         VALUES (@nome, @telefone, @ddd, @estadoId, NULL, @loteId, SYSUTCDATETIME())
+      `);
+    }
+
+    for (const erro of erros || []) {
+      const erroRequest = new sql.Request(transaction);
+      erroRequest.input('loteId', sql.Int, lote.id);
+      erroRequest.input('linha', sql.Int, erro.linha ?? null);
+      erroRequest.input('tipo', sql.VarChar(20), erro.tipo);
+      erroRequest.input('nomePlanilha', sql.NVarChar(150), erro.nomePlanilha ?? null);
+      erroRequest.input('contatoPlanilha', sql.VarChar(30), erro.contatoPlanilha ?? null);
+      erroRequest.input('motivo', sql.NVarChar(255), erro.motivo);
+      erroRequest.input('contatoExistenteId', sql.Int, erro.contatoExistenteId ?? null);
+      await erroRequest.query(`
+        INSERT INTO LoteImportacaoErros
+          (lote_importacao_id, linha, tipo, nome_planilha, contato_planilha, motivo, contato_existente_id, criado_em)
+        VALUES (@loteId, @linha, @tipo, @nomePlanilha, @contatoPlanilha, @motivo, @contatoExistenteId, SYSUTCDATETIME())
       `);
     }
 
@@ -112,143 +135,104 @@ async function criarLoteEContatos({
   }
 }
 
-async function getEstadoNomeEmTransacao(transaction, estadoId) {
-  const request = new sql.Request(transaction);
-  request.input('estadoId', sql.Int, estadoId);
-  const result = await request.query('SELECT nome FROM Estados WHERE id = @estadoId');
-  return result.recordset[0] ? result.recordset[0].nome : `#${estadoId}`;
-}
-
 /**
- * Confirma a distribuição de números por Estado de um lote, em transação:
- * 1) valida lote existe/não confirmado; 2) valida cada escolha (Estado com
- * pendentes, número pertence ao Estado e está ativo); 3) valida que todo
- * Estado com contato pendente recebeu uma escolha; 4) efetiva UPDATE +
- * INSERT em LoteImportacaoEscolhas + marca o lote como confirmado.
- * Retorna { status: 'lote_nao_encontrado' | 'ja_confirmado' | 'numero_invalido' (com estadoNome) |
- * 'faltando_escolha' | 'confirmado' }.
+ * Todos os lotes de importação (não só pendentes — a v3 não tem mais o
+ * conceito de "pendente de confirmação"), mais recentes primeiro.
+ * `usuarioEmail` vem de um LEFT JOIN com Usuarios (LEFT, não INNER, para não
+ * sumir um lote antigo se o usuário que importou já tiver sido excluído).
  */
-async function confirmarLote({ loteId, escolhas }) {
-  const pool = await getPool();
-  const transaction = new sql.Transaction(pool);
-
-  await transaction.begin();
-  try {
-    const loteRequest = new sql.Request(transaction);
-    loteRequest.input('loteId', sql.Int, loteId);
-    const loteResult = await loteRequest.query('SELECT id, confirmado FROM LotesImportacao WHERE id = @loteId');
-    const lote = loteResult.recordset[0];
-
-    if (!lote) {
-      await transaction.rollback();
-      return { status: 'lote_nao_encontrado' };
-    }
-
-    if (lote.confirmado) {
-      await transaction.rollback();
-      return { status: 'ja_confirmado' };
-    }
-
-    const pendentesRequest = new sql.Request(transaction);
-    pendentesRequest.input('loteId', sql.Int, loteId);
-    const pendentesResult = await pendentesRequest.query(`
-      SELECT c.estado_id, e.nome AS estado_nome, COUNT(*) AS total
-      FROM Contatos c
-      JOIN Estados e ON e.id = c.estado_id
-      WHERE c.lote_importacao_id = @loteId
-        AND c.estado_id IS NOT NULL
-        AND c.numero_remetente_id IS NULL
-      GROUP BY c.estado_id, e.nome
-    `);
-    const pendentesPorEstado = new Map(pendentesResult.recordset.map((row) => [row.estado_id, row]));
-
-    for (const escolha of escolhas) {
-      const { estadoId, numeroRemetenteId } = escolha;
-      const pendente = pendentesPorEstado.get(estadoId);
-
-      if (!pendente) {
-        const estadoNome = await getEstadoNomeEmTransacao(transaction, estadoId);
-        await transaction.rollback();
-        return { status: 'numero_invalido', estadoNome };
-      }
-
-      const numeroRequest = new sql.Request(transaction);
-      numeroRequest.input('numeroId', sql.Int, numeroRemetenteId);
-      const numeroResult = await numeroRequest.query(
-        'SELECT id, estado_id, ativo FROM NumerosRemetentes WHERE id = @numeroId'
-      );
-      const numero = numeroResult.recordset[0];
-
-      if (!numero || numero.estado_id !== estadoId || !numero.ativo) {
-        await transaction.rollback();
-        return { status: 'numero_invalido', estadoNome: pendente.estado_nome };
-      }
-    }
-
-    const estadosComEscolha = new Set(escolhas.map((escolha) => escolha.estadoId));
-    for (const estadoId of pendentesPorEstado.keys()) {
-      if (!estadosComEscolha.has(estadoId)) {
-        await transaction.rollback();
-        return { status: 'faltando_escolha' };
-      }
-    }
-
-    for (const escolha of escolhas) {
-      const { estadoId, numeroRemetenteId } = escolha;
-
-      const updateRequest = new sql.Request(transaction);
-      updateRequest.input('numeroId', sql.Int, numeroRemetenteId);
-      updateRequest.input('loteId', sql.Int, loteId);
-      updateRequest.input('estadoId', sql.Int, estadoId);
-      const updateResult = await updateRequest.query(`
-        UPDATE Contatos
-        SET numero_remetente_id = @numeroId
-        WHERE lote_importacao_id = @loteId AND estado_id = @estadoId AND numero_remetente_id IS NULL
-      `);
-      const totalContatos = updateResult.rowsAffected[0];
-
-      const insertRequest = new sql.Request(transaction);
-      insertRequest.input('loteId', sql.Int, loteId);
-      insertRequest.input('estadoId', sql.Int, estadoId);
-      insertRequest.input('numeroId', sql.Int, numeroRemetenteId);
-      insertRequest.input('totalContatos', sql.Int, totalContatos);
-      await insertRequest.query(`
-        INSERT INTO LoteImportacaoEscolhas (lote_importacao_id, estado_id, numero_remetente_id, total_contatos)
-        VALUES (@loteId, @estadoId, @numeroId, @totalContatos)
-      `);
-    }
-
-    const confirmarRequest = new sql.Request(transaction);
-    confirmarRequest.input('loteId', sql.Int, loteId);
-    await confirmarRequest.query('UPDATE LotesImportacao SET confirmado = 1 WHERE id = @loteId');
-
-    await transaction.commit();
-    return { status: 'confirmado' };
-  } catch (err) {
-    await transaction.rollback();
-    throw err;
-  }
-}
-
-async function listLotesPendentes() {
+async function listHistorico() {
   const pool = await getPool();
   const result = await pool.request().query(`
     SELECT
-      id AS loteImportacaoId,
-      nome_arquivo AS nomeArquivo,
-      (total_linhas - total_sem_estado - total_duplicado - total_erro) AS totalImportados,
-      criado_em
-    FROM LotesImportacao
-    WHERE confirmado = 0
-    ORDER BY criado_em DESC
+      li.id AS loteImportacaoId,
+      li.nome_arquivo AS nomeArquivo,
+      u.email AS usuarioEmail,
+      li.total_linhas AS totalLinhas,
+      (li.total_linhas - li.total_sem_estado - li.total_duplicado - li.total_erro) AS totalImportados,
+      li.total_sem_estado AS totalSemEstado,
+      li.total_duplicado AS totalDuplicado,
+      li.total_erro AS totalErro,
+      li.criado_em AS criado_em
+    FROM LotesImportacao li
+    LEFT JOIN Usuarios u ON u.id = li.usuario_id
+    ORDER BY li.criado_em DESC
   `);
   return result.recordset;
+}
+
+/**
+ * Detalhe de um lote: resumo + porEstado (SEM filtro de numero_remetente_id
+ * — sempre o total real do lote, diferente da extinta "pendentes") + a lista
+ * de erros/duplicados gravados em LoteImportacaoErros. Devolve null se o
+ * lote não existir.
+ */
+async function getDetalheLote(loteId) {
+  const pool = await getPool();
+
+  const loteRequest = pool.request();
+  loteRequest.input('loteId', sql.Int, loteId);
+  const loteResult = await loteRequest.query(`
+    SELECT
+      li.id AS loteImportacaoId,
+      li.nome_arquivo AS nomeArquivo,
+      u.email AS usuarioEmail,
+      li.total_linhas AS totalLinhas,
+      (li.total_linhas - li.total_sem_estado - li.total_duplicado - li.total_erro) AS totalImportados,
+      li.total_sem_estado AS totalSemEstado,
+      li.total_duplicado AS totalDuplicado,
+      li.total_erro AS totalErro,
+      li.criado_em AS criado_em
+    FROM LotesImportacao li
+    LEFT JOIN Usuarios u ON u.id = li.usuario_id
+    WHERE li.id = @loteId
+  `);
+  const lote = loteResult.recordset[0];
+
+  if (!lote) {
+    return null;
+  }
+
+  const porEstadoRequest = pool.request();
+  porEstadoRequest.input('loteId', sql.Int, loteId);
+  const porEstadoResult = await porEstadoRequest.query(`
+    SELECT e.id, e.nome, e.uf, COUNT(*) AS totalContatos
+    FROM Contatos c
+    JOIN Estados e ON e.id = c.estado_id
+    WHERE c.lote_importacao_id = @loteId
+    GROUP BY e.id, e.nome, e.uf
+    ORDER BY e.nome
+  `);
+
+  const errosRequest = pool.request();
+  errosRequest.input('loteId', sql.Int, loteId);
+  const errosResult = await errosRequest.query(`
+    SELECT
+      linha,
+      tipo,
+      nome_planilha AS nomePlanilha,
+      contato_planilha AS contatoPlanilha,
+      motivo,
+      contato_existente_id AS contatoExistenteId
+    FROM LoteImportacaoErros
+    WHERE lote_importacao_id = @loteId
+    ORDER BY linha ASC, id ASC
+  `);
+
+  return {
+    ...lote,
+    porEstado: porEstadoResult.recordset.map((row) => ({
+      estado: { id: row.id, nome: row.nome, uf: row.uf },
+      totalContatos: row.totalContatos,
+    })),
+    erros: errosResult.recordset,
+  };
 }
 
 module.exports = {
   listEstadoDDDs,
   listTelefonesExistentes,
   criarLoteEContatos,
-  confirmarLote,
-  listLotesPendentes,
+  listHistorico,
+  getDetalheLote,
 };

@@ -50,6 +50,7 @@ describe('importacao.service.importarPlanilha — leitura/parsing (.csv)', () =>
     expect(importacaoModel.criarLoteEContatos).toHaveBeenCalledWith(
       expect.objectContaining({
         contatos: [expect.objectContaining({ nome: 'Fulano de Tal', telefone: '5598984761733', ddd: '98', estadoId: 6 })],
+        erros: [],
       })
     );
   });
@@ -64,10 +65,24 @@ describe('importacao.service.importarPlanilha — leitura/parsing (.csv)', () =>
 
     expect(resultado.totalLinhas).toBe(1);
   });
+
+  it('numera "linha" 1-indexed contando o cabeçalho como linha 1', async () => {
+    mockModelBasico({ ddds: [] });
+    const csv = 'NOME,CONTATO\n,123\nOutro,456\n';
+
+    await importacaoService.importarPlanilha({
+      buffer: Buffer.from(csv), nomeArquivo: 'x.csv', usuarioId: 1, extensao: '.csv',
+    });
+
+    const erros = importacaoModel.criarLoteEContatos.mock.calls[0][0].erros;
+    expect(erros).toHaveLength(2);
+    expect(erros[0].linha).toBe(2);
+    expect(erros[1].linha).toBe(3);
+  });
 });
 
 describe('importacao.service.importarPlanilha — extração de DDD e erro de linha', () => {
-  it('rejeita (total_erro) linha com NOME vazio mesmo com telefone válido', async () => {
+  it('rejeita (total_erro) linha com NOME vazio mesmo com telefone válido, com motivo "Nome não informado."', async () => {
     mockModelBasico({ ddds: [{ ddd: '98', estado_id: 6, estado_nome: 'Maranhão', estado_uf: 'MA' }] });
     const csv = 'NOME,CONTATO\n,5598984761733\n';
 
@@ -77,9 +92,13 @@ describe('importacao.service.importarPlanilha — extração de DDD e erro de li
 
     expect(resultado.totalErro).toBe(1);
     expect(resultado.totalImportados).toBe(0);
+    const erros = importacaoModel.criarLoteEContatos.mock.calls[0][0].erros;
+    expect(erros).toEqual([
+      expect.objectContaining({ tipo: 'erro', motivo: 'Nome não informado.', nomePlanilha: null }),
+    ]);
   });
 
-  it('rejeita (total_erro) telefone com menos de 12 dígitos (sem DDD extraível)', async () => {
+  it('rejeita (total_erro) telefone com menos de 12 dígitos (sem DDD extraível), com motivo "Telefone inválido ou incompleto."', async () => {
     mockModelBasico({ ddds: [] });
     // telefone com 10 dígitos totais (menos que o mínimo de 12)
     const csvCurto = 'NOME,CONTATO\nFulano,5598476173\n';
@@ -89,6 +108,10 @@ describe('importacao.service.importarPlanilha — extração de DDD e erro de li
     });
 
     expect(resultado.totalErro).toBe(1);
+    const erros = importacaoModel.criarLoteEContatos.mock.calls[0][0].erros;
+    expect(erros).toEqual([
+      expect.objectContaining({ tipo: 'erro', motivo: 'Telefone inválido ou incompleto.', nomePlanilha: 'Fulano' }),
+    ]);
   });
 
   it('rejeita (total_erro) telefone com mais de 13 dígitos', async () => {
@@ -147,10 +170,10 @@ describe('importacao.service.importarPlanilha — extração de DDD e erro de li
   });
 });
 
-describe('importacao.service.importarPlanilha — duplicidade de telefone', () => {
-  it('conta em total_duplicado um telefone já existente em Contatos (globalmente, não só no lote atual)', async () => {
+describe('importacao.service.importarPlanilha — duplicidade de telefone (grava LoteImportacaoErros)', () => {
+  it('conta em total_duplicado um telefone já existente em Contatos (globalmente) e grava contatoExistenteId', async () => {
     mockModelBasico({
-      existentes: ['5598984761733'],
+      existentes: [{ id: 42, telefone: '5598984761733' }],
       ddds: [{ ddd: '98', estado_id: 6, estado_nome: 'Maranhão', estado_uf: 'MA' }],
     });
     const csv = 'NOME,CONTATO\nJa Existe,5598984761733\n';
@@ -161,12 +184,20 @@ describe('importacao.service.importarPlanilha — duplicidade de telefone', () =
 
     expect(resultado.totalDuplicado).toBe(1);
     expect(resultado.totalImportados).toBe(0);
-    expect(importacaoModel.criarLoteEContatos).toHaveBeenCalledWith(
-      expect.objectContaining({ contatos: [] })
-    );
+    const chamada = importacaoModel.criarLoteEContatos.mock.calls[0][0];
+    expect(chamada.contatos).toEqual([]);
+    expect(chamada.erros).toEqual([
+      expect.objectContaining({
+        tipo: 'duplicado',
+        nomePlanilha: 'Ja Existe',
+        contatoPlanilha: '5598984761733',
+        motivo: 'Telefone já cadastrado.',
+        contatoExistenteId: 42,
+      }),
+    ]);
   });
 
-  it('conta em total_duplicado a 2ª ocorrência de um telefone repetido dentro do mesmo arquivo (assunção documentada)', async () => {
+  it('conta em total_duplicado a 2ª ocorrência de um telefone repetido dentro do mesmo arquivo e grava contatoExistenteId NULL (assunção documentada)', async () => {
     mockModelBasico({
       existentes: [],
       ddds: [{ ddd: '98', estado_id: 6, estado_nome: 'Maranhão', estado_uf: 'MA' }],
@@ -179,44 +210,45 @@ describe('importacao.service.importarPlanilha — duplicidade de telefone', () =
 
     expect(resultado.totalDuplicado).toBe(1);
     expect(resultado.totalImportados).toBe(1);
-    expect(importacaoModel.criarLoteEContatos).toHaveBeenCalledWith(
+    const chamada = importacaoModel.criarLoteEContatos.mock.calls[0][0];
+    expect(chamada.contatos).toEqual([
+      expect.objectContaining({ nome: 'Primeira Vez' }),
+    ]);
+    expect(chamada.erros).toEqual([
       expect.objectContaining({
-        contatos: [expect.objectContaining({ nome: 'Primeira Vez' })],
-      })
-    );
+        tipo: 'duplicado',
+        nomePlanilha: 'Segunda Vez',
+        contatoExistenteId: null,
+      }),
+    ]);
   });
 });
 
-describe('importacao.service.confirmarLote', () => {
-  it('normaliza estadoId/numeroRemetenteId para número antes de delegar ao model', async () => {
-    importacaoModel.confirmarLote.mockResolvedValue({ status: 'confirmado' });
-
-    await importacaoService.confirmarLote({
-      loteId: 12,
-      escolhas: [{ estadoId: '6', numeroRemetenteId: '3' }],
-    });
-
-    expect(importacaoModel.confirmarLote).toHaveBeenCalledWith({
-      loteId: 12,
-      escolhas: [{ estadoId: 6, numeroRemetenteId: 3 }],
-    });
-  });
-
-  it('propaga o status retornado pelo model sem alteração', async () => {
-    importacaoModel.confirmarLote.mockResolvedValue({ status: 'numero_invalido', estadoNome: 'Maranhão' });
-
-    const resultado = await importacaoService.confirmarLote({ loteId: 12, escolhas: [{ estadoId: 6, numeroRemetenteId: 3 }] });
-
-    expect(resultado).toEqual({ status: 'numero_invalido', estadoNome: 'Maranhão' });
-  });
-});
-
-describe('importacao.service.listarPendentes', () => {
+describe('importacao.service.listarHistorico', () => {
   it('delega direto para o model', async () => {
-    importacaoModel.listLotesPendentes.mockResolvedValue([{ loteImportacaoId: 12 }]);
+    importacaoModel.listHistorico.mockResolvedValue([{ loteImportacaoId: 12 }]);
 
-    const resultado = await importacaoService.listarPendentes();
+    const resultado = await importacaoService.listarHistorico();
 
     expect(resultado).toEqual([{ loteImportacaoId: 12 }]);
+  });
+});
+
+describe('importacao.service.buscarDetalhe', () => {
+  it('delega direto para o model, repassando o loteId', async () => {
+    importacaoModel.getDetalheLote.mockResolvedValue({ loteImportacaoId: 12, erros: [] });
+
+    const resultado = await importacaoService.buscarDetalhe(12);
+
+    expect(importacaoModel.getDetalheLote).toHaveBeenCalledWith(12);
+    expect(resultado).toEqual({ loteImportacaoId: 12, erros: [] });
+  });
+
+  it('propaga null quando o model não encontra o lote', async () => {
+    importacaoModel.getDetalheLote.mockResolvedValue(null);
+
+    const resultado = await importacaoService.buscarDetalhe(999);
+
+    expect(resultado).toBeNull();
   });
 });

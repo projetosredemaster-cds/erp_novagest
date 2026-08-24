@@ -21,7 +21,10 @@ function extrairDDD(telefoneNormalizado) {
 
 /**
  * Lê a planilha e localiza as colunas NOME/CONTATO de forma case-insensitive
- * na primeira linha (cabeçalho), ignorando linhas totalmente vazias.
+ * na primeira linha (cabeçalho), ignorando linhas totalmente vazias. Cada
+ * registro carrega `linha`, o número de linha original na planilha
+ * (1-indexed, contando o cabeçalho como linha 1) — usado para gravar
+ * LoteImportacaoErros.linha em linhas rejeitadas (erro ou duplicado).
  *
  * O ExcelJS, diferente do SheetJS/xlsx, não detecta o formato sozinho a
  * partir do buffer — exige APIs separadas por formato. `.csv` precisa de um
@@ -61,21 +64,31 @@ async function lerPlanilha(buffer, extensao) {
     return { colunasEncontradas: false, registros: [] };
   }
 
-  const registros = linhas
-    .slice(1)
-    .filter((linha) => Array.isArray(linha) && linha.some((celula) => String(celula).trim() !== ''))
-    .map((linha) => ({
+  const registros = [];
+  // Começa em 1 (a linha 0 é o cabeçalho); `i + 1` é o número de linha
+  // 1-indexed da planilha, contando o cabeçalho como linha 1.
+  for (let i = 1; i < linhas.length; i += 1) {
+    const linha = linhas[i];
+    const vazia = !Array.isArray(linha) || linha.every((celula) => String(celula).trim() === '');
+    if (vazia) {
+      continue;
+    }
+
+    registros.push({
+      linha: i + 1,
       nome: String(linha[indiceNome] ?? '').trim(),
       contato: String(linha[indiceContato] ?? '').trim(),
-    }));
+    });
+  }
 
   return { colunasEncontradas: true, registros };
 }
 
 /**
- * Lê, valida, agrupa por Estado e persiste o lote + contatos. Nunca atribui
- * numero_remetente_id — isso só acontece na confirmação (confirmarLote).
- * Retorna 'colunas_ausentes' ou o resumo de sucesso.
+ * Lê, valida, agrupa por Estado e persiste o lote + contatos + erros. Nunca
+ * atribui numero_remetente_id — a partir da v3 essa escolha acontece no
+ * Painel de Disparo, não mais na importação. Retorna 'colunas_ausentes' ou o
+ * resumo de sucesso.
  */
 async function importarPlanilha({ buffer, nomeArquivo, usuarioId, extensao }) {
   const { colunasEncontradas, registros } = await lerPlanilha(buffer, extensao);
@@ -86,23 +99,31 @@ async function importarPlanilha({ buffer, nomeArquivo, usuarioId, extensao }) {
 
   const totalLinhas = registros.length;
   const candidatos = [];
-  let totalErro = 0;
+  const erros = [];
 
   for (const registro of registros) {
     const telefoneNormalizado = normalizarTelefone(registro.contato);
     const ddd = extrairDDD(telefoneNormalizado);
 
     if (!registro.nome || !ddd) {
-      totalErro += 1;
+      erros.push({
+        linha: registro.linha,
+        tipo: 'erro',
+        nomePlanilha: registro.nome || null,
+        contatoPlanilha: telefoneNormalizado || null,
+        motivo: !registro.nome ? 'Nome não informado.' : 'Telefone inválido ou incompleto.',
+        contatoExistenteId: null,
+      });
       continue;
     }
 
-    candidatos.push({ nome: registro.nome, telefone: telefoneNormalizado, ddd });
+    candidatos.push({ linha: registro.linha, nome: registro.nome, telefone: telefoneNormalizado, ddd });
   }
 
-  const telefonesExistentes = new Set(
-    await importacaoModel.listTelefonesExistentes(candidatos.map((c) => c.telefone))
+  const existentesRows = await importacaoModel.listTelefonesExistentes(
+    candidatos.map((candidato) => candidato.telefone)
   );
+  const existentesPorTelefone = new Map(existentesRows.map((row) => [row.telefone, row.id]));
   const ddds = await importacaoModel.listEstadoDDDs();
   const dddParaEstadoId = new Map(ddds.map((d) => [d.ddd, d.estado_id]));
 
@@ -115,8 +136,38 @@ async function importarPlanilha({ buffer, nomeArquivo, usuarioId, extensao }) {
   const telefonesDoLote = new Set();
 
   for (const candidato of candidatos) {
-    if (telefonesExistentes.has(candidato.telefone) || telefonesDoLote.has(candidato.telefone)) {
+    const idExistenteNoBanco = existentesPorTelefone.get(candidato.telefone);
+
+    if (idExistenteNoBanco !== undefined) {
       totalDuplicado += 1;
+      erros.push({
+        linha: candidato.linha,
+        tipo: 'duplicado',
+        nomePlanilha: candidato.nome,
+        contatoPlanilha: candidato.telefone,
+        motivo: 'Telefone já cadastrado.',
+        contatoExistenteId: idExistenteNoBanco,
+      });
+      continue;
+    }
+
+    if (telefonesDoLote.has(candidato.telefone)) {
+      totalDuplicado += 1;
+      // Duplicata dentro do próprio arquivo (2ª ocorrência do mesmo
+      // telefone no mesmo upload): a 1ª ocorrência ainda não tem
+      // Contatos.id neste ponto — só ganha id ao inserir, dentro da mesma
+      // transação, em criarLoteEContatos. Não é trivial resolver isso sem
+      // reestruturar o INSERT em duas fases, então essa é uma limitação
+      // documentada: contatoExistenteId fica NULL só neste sub-caso
+      // específico (a linha de erro ainda é gravada normalmente).
+      erros.push({
+        linha: candidato.linha,
+        tipo: 'duplicado',
+        nomePlanilha: candidato.nome,
+        contatoPlanilha: candidato.telefone,
+        motivo: 'Telefone já cadastrado.',
+        contatoExistenteId: null,
+      });
       continue;
     }
     telefonesDoLote.add(candidato.telefone);
@@ -134,6 +185,8 @@ async function importarPlanilha({ buffer, nomeArquivo, usuarioId, extensao }) {
     });
   }
 
+  const totalErro = erros.filter((erro) => erro.tipo === 'erro').length;
+
   const resultado = await importacaoModel.criarLoteEContatos({
     nomeArquivo,
     usuarioId,
@@ -142,6 +195,7 @@ async function importarPlanilha({ buffer, nomeArquivo, usuarioId, extensao }) {
     totalDuplicado,
     totalErro,
     contatos: contatosValidos,
+    erros,
   });
 
   return {
@@ -156,21 +210,24 @@ async function importarPlanilha({ buffer, nomeArquivo, usuarioId, extensao }) {
   };
 }
 
-async function confirmarLote({ loteId, escolhas }) {
-  const escolhasNormalizadas = escolhas.map((escolha) => ({
-    estadoId: Number(escolha && escolha.estadoId),
-    numeroRemetenteId: Number(escolha && escolha.numeroRemetenteId),
-  }));
-
-  return importacaoModel.confirmarLote({ loteId, escolhas: escolhasNormalizadas });
+/**
+ * Todos os lotes de importação, mais recentes primeiro (v3 — substitui a
+ * extinta "listarPendentes").
+ */
+async function listarHistorico() {
+  return importacaoModel.listHistorico();
 }
 
-async function listarPendentes() {
-  return importacaoModel.listLotesPendentes();
+/**
+ * Detalhe de um lote (resumo + porEstado + erros). Retorna null se o lote
+ * não existir — o controller decide o 404.
+ */
+async function buscarDetalhe(loteId) {
+  return importacaoModel.getDetalheLote(loteId);
 }
 
 module.exports = {
   importarPlanilha,
-  confirmarLote,
-  listarPendentes,
+  listarHistorico,
+  buscarDetalhe,
 };

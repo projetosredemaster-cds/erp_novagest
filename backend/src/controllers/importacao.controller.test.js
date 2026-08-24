@@ -65,7 +65,7 @@ describe('POST /api/controle-ligacoes/contatos/importar', () => {
     });
   });
 
-  it('201 — importa e NUNCA atribui numero_remetente_id (só a confirmação faz isso)', async () => {
+  it('201 — importa e NUNCA atribui numero_remetente_id (isso não acontece mais na importação)', async () => {
     importacaoModel.listTelefonesExistentes.mockResolvedValue([]);
     importacaoModel.listEstadoDDDs.mockResolvedValue([
       { ddd: '98', estado_id: 6, estado_nome: 'Maranhão', estado_uf: 'MA' },
@@ -105,13 +105,16 @@ describe('POST /api/controle-ligacoes/contatos/importar', () => {
             estadoId: 6,
           }),
         ],
+        erros: [],
       })
     );
   });
 
-  it('201 — classifica corretamente duplicado (banco), duplicado (mesmo arquivo), sem estado e erro de linha', async () => {
+  it('201 — classifica corretamente duplicado (banco), duplicado (mesmo arquivo), sem estado e erro de linha, gravando LoteImportacaoErros', async () => {
     // telefone já existente em Contatos (de uma importação anterior)
-    importacaoModel.listTelefonesExistentes.mockResolvedValue(['5598900000001']);
+    importacaoModel.listTelefonesExistentes.mockResolvedValue([
+      { id: 77, telefone: '5598900000001' },
+    ]);
     importacaoModel.listEstadoDDDs.mockResolvedValue([
       { ddd: '98', estado_id: 6, estado_nome: 'Maranhão', estado_uf: 'MA' },
     ]);
@@ -143,13 +146,48 @@ describe('POST /api/controle-ligacoes/contatos/importar', () => {
     expect(res.body.totalErro).toBe(2);
     expect(res.body.totalImportados).toBe(1);
 
-    // nunca atribui numero_remetente_id na importação — só a confirmação faz isso.
-    const contatosEnviados = importacaoModel.criarLoteEContatos.mock.calls[0][0].contatos;
+    // nunca atribui numero_remetente_id na importação.
+    const chamada = importacaoModel.criarLoteEContatos.mock.calls[0][0];
+    const contatosEnviados = chamada.contatos;
     expect(contatosEnviados).toHaveLength(2); // 1 com estado + 1 sem estado
     for (const contato of contatosEnviados) {
       expect(contato).not.toHaveProperty('numeroRemetenteId');
       expect(contato).not.toHaveProperty('numero_remetente_id');
     }
+
+    // 4 linhas rejeitadas: 2 duplicadas + 2 erro de formato.
+    const erros = chamada.erros;
+    expect(erros).toHaveLength(4);
+
+    const duplicadoBanco = erros.find((e) => e.nomePlanilha === 'Ja Existe no Banco');
+    expect(duplicadoBanco).toMatchObject({
+      tipo: 'duplicado',
+      contatoPlanilha: '5598900000001',
+      motivo: 'Telefone já cadastrado.',
+      contatoExistenteId: 77,
+    });
+    expect(duplicadoBanco.linha).toBe(2);
+
+    const duplicadoArquivo = erros.find((e) => e.nomePlanilha === 'Repetido no Arquivo');
+    expect(duplicadoArquivo).toMatchObject({
+      tipo: 'duplicado',
+      contatoPlanilha: '5598984761733',
+      motivo: 'Telefone já cadastrado.',
+      contatoExistenteId: null,
+    });
+
+    const nomeVazio = erros.find((e) => e.linha === 6);
+    expect(nomeVazio).toMatchObject({
+      tipo: 'erro',
+      nomePlanilha: null,
+      motivo: 'Nome não informado.',
+    });
+
+    const telefoneCurto = erros.find((e) => e.nomePlanilha === 'Telefone Curto Demais');
+    expect(telefoneCurto).toMatchObject({
+      tipo: 'erro',
+      motivo: 'Telefone inválido ou incompleto.',
+    });
   });
 
   it('400 quando as colunas NOME/CONTATO estão ausentes', async () => {
@@ -168,7 +206,7 @@ describe('POST /api/controle-ligacoes/contatos/importar', () => {
   });
 });
 
-describe('POST /api/controle-ligacoes/contatos/importar/:loteId/confirmar', () => {
+describe('POST /api/controle-ligacoes/contatos/importar/:loteId/confirmar (descontinuada em v3)', () => {
   it('401 sem token', async () => {
     const res = await request(app)
       .post('/api/controle-ligacoes/contatos/importar/12/confirmar')
@@ -186,119 +224,177 @@ describe('POST /api/controle-ligacoes/contatos/importar/:loteId/confirmar', () =
     expect(res.status).toBe(403);
   });
 
-  it('400 quando um item de "escolhas" é malformado (não numérico) — reaproveita a mensagem de campo obrigatório', async () => {
+  it('410 sempre, independente do corpo — rota descontinuada', async () => {
     const res = await request(app)
       .post('/api/controle-ligacoes/contatos/importar/12/confirmar')
       .set('Authorization', `Bearer ${tokenFor()}`)
-      .send({ escolhas: [{ estadoId: 'abc', numeroRemetenteId: 3 }] });
+      .send({ escolhas: [{ estadoId: 6, numeroRemetenteId: 3 }] });
 
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Campo "escolhas" é obrigatório.' });
-    expect(importacaoModel.confirmarLote).not.toHaveBeenCalled();
+    expect(res.status).toBe(410);
+    expect(res.body).toEqual({
+      error: 'Rota descontinuada. A escolha de número acontece no Painel de Disparo.',
+    });
   });
 
-  it('400 quando :loteId não é inteiro positivo', async () => {
+  it('410 mesmo com :loteId inválido ou corpo vazio', async () => {
     const res = await request(app)
       .post('/api/controle-ligacoes/contatos/importar/abc/confirmar')
       .set('Authorization', `Bearer ${tokenFor()}`)
-      .send({ escolhas: [{ estadoId: 6, numeroRemetenteId: 3 }] });
-
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Lote de importação não encontrado.' });
-  });
-
-  it('400 quando "escolhas" está ausente', async () => {
-    const res = await request(app)
-      .post('/api/controle-ligacoes/contatos/importar/12/confirmar')
-      .set('Authorization', `Bearer ${tokenFor()}`)
       .send({});
 
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Campo "escolhas" é obrigatório.' });
-  });
-
-  it('400 quando o lote já foi confirmado', async () => {
-    importacaoModel.confirmarLote.mockResolvedValue({ status: 'ja_confirmado' });
-
-    const res = await request(app)
-      .post('/api/controle-ligacoes/contatos/importar/12/confirmar')
-      .set('Authorization', `Bearer ${tokenFor()}`)
-      .send({ escolhas: [{ estadoId: 6, numeroRemetenteId: 3 }] });
-
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Este lote já foi confirmado anteriormente.' });
-  });
-
-  it('400 — número remetente inválido para o estado, mensagem exata', async () => {
-    importacaoModel.confirmarLote.mockResolvedValue({
-      status: 'numero_invalido',
-      estadoNome: 'Maranhão',
-    });
-
-    const res = await request(app)
-      .post('/api/controle-ligacoes/contatos/importar/12/confirmar')
-      .set('Authorization', `Bearer ${tokenFor()}`)
-      .send({ escolhas: [{ estadoId: 6, numeroRemetenteId: 999 }] });
-
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(410);
     expect(res.body).toEqual({
-      error: 'Número remetente informado é inválido para o estado "Maranhão".',
+      error: 'Rota descontinuada. A escolha de número acontece no Painel de Disparo.',
     });
-  });
-
-  it('400 quando falta escolha para algum estado do lote', async () => {
-    importacaoModel.confirmarLote.mockResolvedValue({ status: 'faltando_escolha' });
-
-    const res = await request(app)
-      .post('/api/controle-ligacoes/contatos/importar/12/confirmar')
-      .set('Authorization', `Bearer ${tokenFor()}`)
-      .send({ escolhas: [{ estadoId: 6, numeroRemetenteId: 3 }] });
-
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({
-      error: 'É necessário escolher um número para todos os estados deste lote.',
-    });
-  });
-
-  it('200 — confirma a distribuição com sucesso', async () => {
-    importacaoModel.confirmarLote.mockResolvedValue({ status: 'confirmado' });
-
-    const res = await request(app)
-      .post('/api/controle-ligacoes/contatos/importar/12/confirmar')
-      .set('Authorization', `Bearer ${tokenFor()}`)
-      .send({ escolhas: [{ estadoId: 6, numeroRemetenteId: 3 }] });
-
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ loteImportacaoId: 12, confirmado: true });
   });
 });
 
-describe('GET /api/controle-ligacoes/contatos/importar/pendentes', () => {
+describe('GET /api/controle-ligacoes/contatos/importar/historico', () => {
   it('401 sem token', async () => {
-    const res = await request(app).get('/api/controle-ligacoes/contatos/importar/pendentes');
+    const res = await request(app).get('/api/controle-ligacoes/contatos/importar/historico');
     expect(res.status).toBe(401);
   });
 
   it('403 quando o usuário não é operador_cobranca', async () => {
     const res = await request(app)
-      .get('/api/controle-ligacoes/contatos/importar/pendentes')
+      .get('/api/controle-ligacoes/contatos/importar/historico')
       .set('Authorization', `Bearer ${tokenFor({ role: 'usuario' })}`);
 
     expect(res.status).toBe(403);
   });
 
-  it('200 — lista lotes pendentes', async () => {
-    importacaoModel.listLotesPendentes.mockResolvedValue([
-      { loteImportacaoId: 12, nomeArquivo: 'clientes_agosto.xlsx', totalImportados: 148, criado_em: '2026-01-01T00:00:00.000Z' },
+  it('200 — lista todos os lotes, mais recentes primeiro', async () => {
+    importacaoModel.listHistorico.mockResolvedValue([
+      {
+        loteImportacaoId: 12,
+        nomeArquivo: 'clientes_agosto.xlsx',
+        usuarioEmail: 'liv@teste.com',
+        totalLinhas: 150,
+        totalImportados: 148,
+        totalSemEstado: 0,
+        totalDuplicado: 2,
+        totalErro: 0,
+        criado_em: '2026-01-01T00:00:00.000Z',
+      },
     ]);
 
     const res = await request(app)
-      .get('/api/controle-ligacoes/contatos/importar/pendentes')
+      .get('/api/controle-ligacoes/contatos/importar/historico')
       .set('Authorization', `Bearer ${tokenFor()}`);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([
-      { loteImportacaoId: 12, nomeArquivo: 'clientes_agosto.xlsx', totalImportados: 148, criado_em: '2026-01-01T00:00:00.000Z' },
+      {
+        loteImportacaoId: 12,
+        nomeArquivo: 'clientes_agosto.xlsx',
+        usuarioEmail: 'liv@teste.com',
+        totalLinhas: 150,
+        totalImportados: 148,
+        totalSemEstado: 0,
+        totalDuplicado: 2,
+        totalErro: 0,
+        criado_em: '2026-01-01T00:00:00.000Z',
+      },
     ]);
+  });
+
+  it('500 quando o model lança erro', async () => {
+    importacaoModel.listHistorico.mockRejectedValue(new Error('falha de conexão'));
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/contatos/importar/historico')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao listar histórico de importações.' });
+  });
+});
+
+describe('GET /api/controle-ligacoes/contatos/importar/:loteId', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).get('/api/controle-ligacoes/contatos/importar/12');
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário não é operador_cobranca', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/contatos/importar/12')
+      .set('Authorization', `Bearer ${tokenFor({ role: 'usuario' })}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('404 quando :loteId não é inteiro positivo', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/contatos/importar/abc')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Importação não encontrada.' });
+    expect(importacaoModel.getDetalheLote).not.toHaveBeenCalled();
+  });
+
+  it('404 quando o lote não existe', async () => {
+    importacaoModel.getDetalheLote.mockResolvedValue(null);
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/contatos/importar/999')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Importação não encontrada.' });
+  });
+
+  it('200 — devolve resumo + porEstado (sem filtro de número) + erros', async () => {
+    importacaoModel.getDetalheLote.mockResolvedValue({
+      loteImportacaoId: 12,
+      nomeArquivo: 'clientes_agosto.xlsx',
+      usuarioEmail: 'liv@teste.com',
+      totalLinhas: 150,
+      totalImportados: 148,
+      totalSemEstado: 0,
+      totalDuplicado: 2,
+      totalErro: 0,
+      criado_em: '2026-01-01T00:00:00.000Z',
+      porEstado: [{ estado: { id: 6, nome: 'Maranhão', uf: 'MA' }, totalContatos: 148 }],
+      erros: [
+        {
+          linha: 7,
+          tipo: 'duplicado',
+          nomePlanilha: 'João Silva',
+          contatoPlanilha: '5598900000000',
+          motivo: 'Telefone já cadastrado.',
+          contatoExistenteId: 5,
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/contatos/importar/12')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.loteImportacaoId).toBe(12);
+    expect(res.body.porEstado).toEqual([
+      { estado: { id: 6, nome: 'Maranhão', uf: 'MA' }, totalContatos: 148 },
+    ]);
+    expect(res.body.erros).toHaveLength(1);
+    expect(res.body.erros[0]).toMatchObject({
+      linha: 7,
+      tipo: 'duplicado',
+      motivo: 'Telefone já cadastrado.',
+    });
+    expect(importacaoModel.getDetalheLote).toHaveBeenCalledWith(12);
+  });
+
+  it('500 quando o model lança erro', async () => {
+    importacaoModel.getDetalheLote.mockRejectedValue(new Error('falha de conexão'));
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/contatos/importar/12')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao buscar detalhe da importação.' });
   });
 });
