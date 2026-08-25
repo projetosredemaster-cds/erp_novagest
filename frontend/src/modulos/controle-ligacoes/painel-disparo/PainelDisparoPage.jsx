@@ -12,11 +12,17 @@ import { useAuth } from '../../../app/AuthContext.jsx';
 import { fetchPainelDisparo, fetchContatosDisponiveis, verificarDisparo, criarDisparo } from './painelDisparoApi.js';
 import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
 
-const btn = "bg-[var(--violet)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
-const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--panel-alt)] disabled:cursor-not-allowed disabled:opacity-50";
-const inputCls = "w-full rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 sm:py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--violet)]";
-const selectCls = "w-full rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-2.5 py-2.5 sm:py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--violet)]";
-const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-4 pt-5 pb-[22px] sm:px-5 flex flex-col";
+// Tema claro escopado: todos os tokens `--pd-*` são definidos pela classe
+// `.painel-disparo-light-theme` (em index.css), aplicada só no elemento raiz
+// desta página — nada aqui vaza para o resto do ERP nem para as outras telas
+// do Controle de Ligações. Bordas de controles interativos (input/select/botão
+// fantasma) ficam em opacidade cheia por afordância; bordas decorativas (card,
+// modal, caixas informativas, divisórias) usam `/60`.
+const btn = "bg-[var(--pd-accent)] text-white border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
+const btnGhost = "bg-transparent border border-[var(--pd-border)] text-[var(--pd-text-primary)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--pd-surface-alt)] disabled:cursor-not-allowed disabled:opacity-50";
+const inputCls = "w-full rounded-lg border border-[var(--pd-border)] bg-[var(--pd-surface-alt)] px-3 py-2.5 sm:py-2 text-sm text-[var(--pd-text-primary)] focus:outline-none focus:border-[var(--pd-accent)]";
+const selectCls = "w-full rounded-lg border border-[var(--pd-border)] bg-[var(--pd-surface-alt)] px-2.5 py-2.5 sm:py-2 text-sm text-[var(--pd-text-primary)] focus:outline-none focus:border-[var(--pd-accent)]";
+const card = "bg-[var(--pd-card-bg)] border border-[var(--pd-border)]/60 rounded-2xl px-4 pt-5 pb-[22px] sm:px-5 flex flex-col";
 
 const ORDENS = [
   { value: 'nome_asc', label: 'Nome (A-Z)' },
@@ -28,13 +34,13 @@ const DEBOUNCE_BUSCA_MS = 400;
 const MAX_CONTATOS_POR_DISPARO = 10;
 
 const STATUS_CONEXAO_INFO = {
-  conectado: { label: 'Conectado', bg: 'bg-[var(--success-bg)]', text: 'text-[var(--success)]' },
-  desconectado: { label: 'Desconectado', bg: 'bg-[var(--danger-bg)]', text: 'text-[var(--danger)]' },
-  aguardando_conexao: { label: 'Aguardando conexão', bg: 'bg-[var(--warning-bg)]', text: 'text-[var(--warning)]' },
+  conectado: { label: 'Conectado', bg: 'bg-[var(--pd-success-bg)]', text: 'text-[var(--pd-success)]' },
+  desconectado: { label: 'Desconectado', bg: 'bg-[var(--pd-danger-bg)]', text: 'text-[var(--pd-danger)]' },
+  aguardando_conexao: { label: 'Aguardando conexão', bg: 'bg-[var(--pd-warning-bg)]', text: 'text-[var(--pd-warning)]' },
 };
 
 function StatusConexaoBadge({ status }) {
-  const info = STATUS_CONEXAO_INFO[status] || { label: status, bg: 'bg-[var(--panel-alt)]', text: 'text-[var(--muted)]' };
+  const info = STATUS_CONEXAO_INFO[status] || { label: status, bg: 'bg-[var(--pd-surface-alt)]', text: 'text-[var(--pd-text-secondary)]' };
   return (
     <span className={`w-fit shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${info.bg} ${info.text}`}>
       {info.label}
@@ -44,7 +50,7 @@ function StatusConexaoBadge({ status }) {
 
 function AvisoContatadoBadge() {
   return (
-    <span className="w-fit shrink-0 rounded-full border border-[var(--gold)] bg-[var(--gold)]/10 px-2 py-0.5 text-[10.5px] font-semibold text-[var(--gold)]">
+    <span className="w-fit shrink-0 rounded-full border border-[var(--pd-warning)] bg-[var(--pd-warning-bg)] px-2 py-0.5 text-[10.5px] font-semibold text-[var(--pd-warning)]">
       Contatado há menos de 3 dias
     </span>
   );
@@ -64,25 +70,25 @@ function AvisosModal({ avisos, confirmando, erro, onCancelar, onConfirmar }) {
       onClick={confirmando ? undefined : onCancelar}
     >
       <div
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5"
+        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-[var(--pd-border)]/60 bg-[var(--pd-card-bg)] p-5"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="avisos-modal-title" className="font-display mb-2 text-[18px] font-bold text-[var(--gold)]">
+        <h2 id="avisos-modal-title" className="pd-font-serif mb-2 text-[18px] font-bold text-[var(--pd-warning)]">
           Aviso antes de disparar
         </h2>
-        <p className="mb-3 text-[13px] text-[var(--muted)]">
+        <p className="mb-3 text-[13px] text-[var(--pd-text-secondary)]">
           Os contatos abaixo já foram contatados nos últimos 3 dias. Deseja prosseguir com o disparo mesmo assim?
         </p>
         <ul className="mb-4 flex flex-col gap-1.5">
           {avisos.map((c) => (
-            <li key={c.contatoId} className="rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2 text-[13px]">
-              <span className="font-semibold text-[var(--text)]">{c.nome}</span>
-              <span className="ml-2 text-[var(--muted)]">{c.telefone}</span>
+            <li key={c.contatoId} className="rounded-lg border border-[var(--pd-border)]/60 bg-[var(--pd-surface-alt)] px-3 py-2 text-[13px]">
+              <span className="font-semibold text-[var(--pd-text-primary)]">{c.nome}</span>
+              <span className="ml-2 text-[var(--pd-text-secondary)]">{c.telefone}</span>
             </li>
           ))}
         </ul>
         {erro ? (
-          <div className="mb-3 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3 py-2 text-[12.5px] text-[var(--danger)] break-words">
+          <div className="mb-3 rounded-lg border border-[var(--pd-danger)] bg-[var(--pd-danger-bg)] px-3 py-2 text-[12.5px] text-[var(--pd-danger)] break-words">
             {erro}
           </div>
         ) : null}
@@ -368,21 +374,21 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
 
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
-          <h2 className="font-display text-[18px] font-bold leading-tight">{estado.nome}</h2>
-          <span className="text-[11.5px] text-[var(--muted)]">{estado.uf}</span>
+          <h2 className="pd-font-serif text-[18px] font-bold leading-tight">{estado.nome}</h2>
+          <span className="text-[11.5px] text-[var(--pd-text-secondary)]">{estado.uf}</span>
         </div>
-        <span className="shrink-0 rounded-full bg-[var(--panel-alt)] border border-[var(--border)] px-2.5 py-1 text-[12px] font-semibold text-[var(--text)]">
+        <span className="shrink-0 rounded-full bg-[var(--pd-surface-alt)] border border-[var(--pd-border)]/60 px-2.5 py-1 text-[12px] font-semibold text-[var(--pd-text-primary)]">
           {totalContatos} contato(s) disponível(is)
         </span>
       </div>
 
       {semNumeroAtivo ? (
-        <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 text-[12.5px] text-[var(--muted)]">
+        <div className="mb-3 rounded-lg border border-[var(--pd-border)]/60 bg-[var(--pd-surface-alt)] px-3 py-2.5 text-[12.5px] text-[var(--pd-text-secondary)]">
           Nenhum número remetente ativo cadastrado para este estado.
         </div>
       ) : (
         <div className="mb-3">
-          <label htmlFor={`numero-${estado.id}`} className="mb-1 block text-[11.5px] font-semibold text-[var(--muted)]">
+          <label htmlFor={`numero-${estado.id}`} className="mb-1 block text-[11.5px] font-semibold text-[var(--pd-text-secondary)]">
             Número remetente usado neste disparo
           </label>
           <div className="flex items-center gap-2">
@@ -407,16 +413,16 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
               />
             ) : null}
           </div>
-          <p className="mt-1 text-[11px] text-[var(--muted)]">
+          <p className="mt-1 text-[11px] text-[var(--pd-text-secondary)]">
             A escolha acima não filtra a fila abaixo — a lista de contatos é sempre a do estado inteiro.
           </p>
           {nenhumNumeroElegivel ? (
-            <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 text-[12.5px] text-[var(--muted)]">
+            <div className="mt-2 rounded-lg border border-[var(--pd-border)]/60 bg-[var(--pd-surface-alt)] px-3 py-2.5 text-[12.5px] text-[var(--pd-text-secondary)]">
               Nenhum número deste estado está pronto para disparo. Configure a conexão e o nome da colaboradora em Configurações.
             </div>
           ) : null}
           {numeroSelecionadoElegivel && numeroSelecionadoDetalhe?.numero ? (
-            <div className="mt-2 rounded-lg border border-[var(--success)]/30 bg-[var(--success-bg)] px-3 py-2.5 text-[13px] text-[var(--success)]">
+            <div className="mt-2 rounded-lg border border-[var(--pd-success)]/30 bg-[var(--pd-success-bg)] px-3 py-2.5 text-[13px] text-[var(--pd-success)]">
               📱 {numeroSelecionadoDetalhe.numero} · Atendido por {numeroSelecionadoDetalhe.nomeColaboradora}
             </div>
           ) : null}
@@ -444,20 +450,20 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
         </select>
       </div>
 
-      <div className="mb-3 max-h-[280px] overflow-y-auto rounded-lg border border-[var(--border)]">
+      <div className="mb-3 max-h-[280px] overflow-y-auto rounded-lg border border-[var(--pd-border)]">
         {loadingContatos ? (
-          <div className="px-3 py-6 text-center text-[13px] text-[var(--muted)]">Carregando contatos...</div>
+          <div className="px-3 py-6 text-center text-[13px] text-[var(--pd-text-secondary)]">Carregando contatos...</div>
         ) : contatosError ? (
-          <div className="flex flex-col items-stretch gap-2.5 px-3 py-4 text-[13px] text-[var(--danger)]">
+          <div className="flex flex-col items-stretch gap-2.5 px-3 py-4 text-[13px] text-[var(--pd-danger)]">
             <span className="break-words">Não foi possível carregar os contatos deste estado.</span>
             <button type="button" className={btnGhost} onClick={retryContatos}>Tentar novamente</button>
           </div>
         ) : contatos.length === 0 ? (
-          <div className="px-3 py-6 text-center text-[13px] text-[var(--muted)]">
+          <div className="px-3 py-6 text-center text-[13px] text-[var(--pd-text-secondary)]">
             Nenhum contato disponível neste estado.
           </div>
         ) : (
-          <ul className="divide-y divide-[var(--border)]">
+          <ul className="divide-y divide-[var(--pd-border)]">
             {contatos.map((c) => (
               <li key={c.id} className="flex items-center gap-2.5 px-3 py-2.5">
                 <input
@@ -465,11 +471,11 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
                   id={`contato-${estado.id}-${c.id}`}
                   checked={selecionados.has(c.id)}
                   onChange={() => toggleSelecionado(c.id)}
-                  className="h-4 w-4 shrink-0 accent-[var(--violet)]"
+                  className="h-4 w-4 shrink-0 accent-[var(--pd-accent)]"
                 />
                 <label htmlFor={`contato-${estado.id}-${c.id}`} className="min-w-0 flex-1 cursor-pointer">
-                  <div className="truncate text-[13.5px] font-semibold text-[var(--text)]">{c.nome}</div>
-                  <div className="text-[12px] text-[var(--muted)]">{c.telefone}</div>
+                  <div className="truncate text-[13.5px] font-semibold text-[var(--pd-text-primary)]">{c.nome}</div>
+                  <div className="text-[12px] text-[var(--pd-text-secondary)]">{c.telefone}</div>
                 </label>
                 {c.disparadoUltimos3Dias ? <AvisoContatadoBadge /> : null}
               </li>
@@ -479,17 +485,17 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
       </div>
 
       <div className="mb-2 flex items-center justify-between text-[12.5px]">
-        <span className="font-semibold text-[var(--text)]">
+        <span className="font-semibold text-[var(--pd-text-primary)]">
           {selecionados.size}/{MAX_CONTATOS_POR_DISPARO} selecionados
         </span>
       </div>
 
       {selectionError ? (
-        <div className="mb-2 text-[12.5px] text-[var(--danger)]">{selectionError}</div>
+        <div className="mb-2 text-[12.5px] text-[var(--pd-danger)]">{selectionError}</div>
       ) : null}
 
       {disparoError ? (
-        <div className="mb-2 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3 py-2 text-[12.5px] text-[var(--danger)] break-words">
+        <div className="mb-2 rounded-lg border border-[var(--pd-danger)] bg-[var(--pd-danger-bg)] px-3 py-2 text-[12.5px] text-[var(--pd-danger)] break-words">
           {disparoError}
         </div>
       ) : null}
@@ -574,22 +580,22 @@ export default function PainelDisparoPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] p-4 sm:p-6 text-[var(--text)]">
+    <div className="painel-disparo-light-theme min-h-screen bg-[var(--pd-bg)] p-4 sm:p-6 text-[var(--pd-text-primary)]">
       <div className="mx-auto max-w-[1400px]">
-        <div className="mb-[22px] border-b border-[var(--border)] pb-[18px]">
-          <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--violet)]">Controle de Ligações</div>
-          <h1 className="font-display mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Painel de Disparo</h1>
+        <div className="mb-[22px] border-b border-[var(--pd-border)]/60 pb-[18px]">
+          <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--pd-accent-strong)]">Controle de Ligações</div>
+          <h1 className="pd-font-serif mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Painel de Disparo</h1>
         </div>
 
         {loading ? (
-          <div className="px-1 py-10 text-center text-sm text-[var(--muted)]">Carregando...</div>
+          <div className="px-1 py-10 text-center text-sm text-[var(--pd-text-secondary)]">Carregando...</div>
         ) : loadError ? (
-          <div className="flex flex-col items-stretch justify-between gap-3 rounded-xl border border-[var(--danger)] bg-[var(--danger-bg)] px-5 py-4 text-sm text-[var(--danger)] sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+          <div className="flex flex-col items-stretch justify-between gap-3 rounded-xl border border-[var(--pd-danger)] bg-[var(--pd-danger-bg)] px-5 py-4 text-sm text-[var(--pd-danger)] sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
             <span className="break-words">Não foi possível carregar o painel de disparo: {loadError}</span>
             <button className={`${btn} w-full sm:w-auto`} onClick={retryPainel}>Tentar novamente</button>
           </div>
         ) : painel.length === 0 ? (
-          <div className="px-1 py-10 text-center text-sm text-[var(--muted)]">Nenhum estado cadastrado.</div>
+          <div className="px-1 py-10 text-center text-sm text-[var(--pd-text-secondary)]">Nenhum estado cadastrado.</div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {painel.map((resumo) => (
@@ -610,8 +616,8 @@ export default function PainelDisparoPage() {
           flashMsg ? 'opacity-100' : 'opacity-0'
         } ${
           flashMsg?.type === 'error'
-            ? 'border border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger)]'
-            : 'bg-[var(--violet)] text-[#0b1010]'
+            ? 'border border-[var(--pd-danger)] bg-[var(--pd-danger-bg)] text-[var(--pd-danger)]'
+            : 'bg-[var(--pd-accent)] text-white'
         }`}
       >
         {flashMsg?.msg}

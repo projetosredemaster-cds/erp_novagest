@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500..700&display=swap');
 @import "tailwindcss";
 :root {
   --bg: #0f1115;
@@ -27,4 +27,75 @@ body {
 
 .font-display {
   font-family: 'Barlow Condensed', sans-serif;
+}
+
+/* ---------------------------------------------------------------------------
+ * Tema claro ESCOPADO do Painel de Disparo (Controle de Ligações).
+ *
+ * Não é um tema global: os tokens abaixo só existem dentro do elemento que
+ * carrega a classe `.painel-disparo-light-theme` (hoje, só o elemento raiz de
+ * `PainelDisparoPage.jsx`). O `:root` escuro do resto do ERP continua
+ * intacto — nenhuma outra tela é afetada.
+ *
+ * Paleta-base (--pd-bg/--pd-card-bg/--pd-text-primary/--pd-text-secondary/
+ * --pd-accent/--pd-accent-soft/--pd-border) é fixa, definida pelo produto.
+ * Os demais tokens (surface-alt, danger, warning, success) foram derivados
+ * para a mesma família terrosa/pastel e ajustados até passarem WCAG AA
+ * (>= 4.5:1) contra o fundo real onde cada um aparece.
+ * ------------------------------------------------------------------------- */
+.painel-disparo-light-theme {
+  /* --- paleta-base (não alterar) --- */
+  --pd-bg: #F5EFEB;             /* Beige — fundo da página */
+  --pd-card-bg: #FFFFFF;        /* White — fundo dos cards/modal */
+  --pd-text-primary: #2F4156;   /* Navy — títulos e texto principal (10.4:1 no branco) */
+  /* --pd-text-secondary aponta pra --pd-accent-strong (abaixo), não pro Teal
+     original (#567C8D) — ver esse token pro motivo: #567C8D só passa AA
+     (4.5:1) contra branco puro, e --pd-text-secondary é usado em 100% dos
+     casos como cor de TEXTO, inclusive sobre --pd-bg/--pd-surface-alt, onde
+     caía pra ~3.96:1. */
+  --pd-text-secondary: var(--pd-accent-strong);
+  --pd-accent: #567C8D;         /* Teal — só PREENCHIMENTO: fundo de botão, borda de foco, accent-color do checkbox. NÃO usar como cor de texto sobre fundo não-branco (ver --pd-accent-strong). */
+  --pd-accent-soft: #C8D9E6;    /* Sky Blue — badges/tags/fundos suaves */
+  --pd-border: #C8D9E6;         /* Sky Blue — bordas (usar /60 nas decorativas) */
+
+  /* Teal escurecido (mesma matiz de --pd-accent, luminância linear escalada
+     por ~0.565 — hue preservado exatamente, só mais escuro) — usado como cor
+     de TEXTO sobre fundo não-branco (--pd-bg, --pd-surface-alt), onde o Teal
+     original não atingia 4.5:1 AA. Contraste calculado pela fórmula WCAG de
+     luminância relativa (não estimado): 5.99:1 contra --pd-bg (#F5EFEB),
+     5.98:1 contra --pd-surface-alt (#EAF1F5), 6.83:1 contra branco puro. */
+  --pd-accent-strong: #415F6C;
+
+  /* --- tokens derivados --- */
+  /* Superfície secundária: tingimento leve de --pd-accent-soft sobre branco.
+     Distinta do card (branco) sem virar cinza morto. Navy sobre ela: 9.1:1. */
+  --pd-surface-alt: #EAF1F5;
+
+  /* Erro: terracota dessaturado. 6.0:1 no branco, 5.2:1 no bege e 5.2:1
+     sobre o próprio --pd-danger-bg. */
+  --pd-danger: #A6443D;
+  --pd-danger-bg: rgba(166, 68, 61, 0.10);
+
+  /* Atenção: âmbar queimado. Unifica o antigo --warning e o --gold do tema
+     escuro num único tom de "atenção". Escurecido de #9C6B2E para #8A5A1F
+     porque, sobre o próprio --pd-warning-bg, #9C6B2E dava só 3.97:1 —
+     abaixo do mínimo para o texto de 10.5-11px dos badges. Agora: 5.0:1
+     sobre --pd-warning-bg e 5.9:1 no branco. */
+  --pd-warning: #8A5A1F;
+  --pd-warning-bg: rgba(138, 90, 31, 0.12);
+
+  /* Sucesso: verde-sálvia, mesma temperatura fria do teal da paleta.
+     Escurecido de #3F7859 para #376B4F pelo mesmo motivo do warning
+     (#3F7859 dava 4.45:1 sobre o próprio fundo). Agora: 5.2:1 sobre
+     --pd-success-bg e 6.2:1 no branco. */
+  --pd-success: #376B4F;
+  --pd-success-bg: rgba(55, 107, 79, 0.12);
+
+  --pd-font-serif: 'Fraunces', Georgia, serif;
+}
+
+/* Serifada só para títulos (página, card de estado, modal) — nunca em lista
+   densa/rolável. Ver comentário no topo de PainelDisparoPage.jsx. */
+.pd-font-serif {
+  font-family: var(--pd-font-serif, 'Fraunces', Georgia, serif);
 }
