@@ -668,6 +668,17 @@ Todos os erros seguem `{ "error": "mensagem" }`.
 > resposta do `POST /disparos` e achava que ainda podia "cancelar" — mas o
 > registro já tinha sido gravado antes mesmo do aviso chegar à tela. Ver
 > seção 15 para o fluxo esperado.
+>
+> **Adendo posterior (sem número de versão próprio, correção de bug de
+> produção):** `POST /disparos/verificar` e `POST /disparos` passaram a
+> validar também que o `numeroRemetenteId` escolhido está com
+> `status_conexao = 'conectado'` e com `nome_colaboradora` preenchido —
+> antes dessa correção, `POST /disparos` respondia `201` mesmo para um
+> número desconectado do WhatsApp ou sem colaboradora configurada, e só o
+> worker assíncrono (`workers/envioDisparos.worker.js`, que roda minutos
+> depois) barrava o envio, deixando o operador sem saber na hora que o
+> disparo estava fadado a falhar. Ver seções 14 e 15 abaixo para os novos
+> status/corpos de erro.
 
 ### Contexto e decisões de design
 
@@ -712,6 +723,19 @@ Todos os erros seguem `{ "error": "mensagem" }`.
   nenhum) é que a tela deve chamar `POST /disparos`, que sempre grava
   quando chamado — o backend não impõe essa ordem/confirmação, é uma
   expectativa de uso da tela, não uma trava de código.
+- **A checagem de conexão/colaboradora do número remetente é feita uma vez
+  só, dentro de `disparos.model.js: validarNumeroEContatos`**, a mesma
+  função interna já reaproveitada por `verificarDisparo()`/`criarDisparo()`
+  — não há duplicação de lógica entre `POST /disparos/verificar` e
+  `POST /disparos`, só o mapeamento HTTP do status devolvido é repetido em
+  cada controller (mesmo padrão já usado para `numero_invalido`/
+  `contatos_invalidos`). As duas checagens rodam **depois** da checagem de
+  `numeroRemetenteId` existir/estar `ativo`/pertencer ao Estado, e **antes**
+  de qualquer validação de `contatoIds` — nesta ordem: (1) conexão, (2)
+  colaboradora, (3) contatos. Em `POST /disparos`, isso acontece dentro da
+  mesma transação que faz os `INSERT`s — qualquer um dos dois novos status
+  dá rollback antes de gravar `Disparos`/`DisparoContatos`, igual já
+  acontecia para `numero_invalido`/`contatos_invalidos`.
 
 ### Schema novo
 
@@ -831,20 +855,33 @@ payload) para efetivar — mas o backend não impõe essa ordem.
 3. `numeroRemetenteId` (ou `estadoId`) em formato inválido, inexistente,
    não `ativo`, ou de outro Estado:
    `{ "error": "Número remetente inválido para o estado informado." }`
-4. Algum item de `contatoIds` em formato inválido ou de um `Contato` que não
+4. `numeroRemetenteId` existe/está `ativo`/pertence ao Estado, mas
+   `status_conexao != 'conectado'`:
+   `{ "error": "Este número não está conectado ao WhatsApp. Conecte-o em Configurações antes de disparar." }`
+5. `numeroRemetenteId` conectado, mas `nome_colaboradora` é `NULL`, vazio ou
+   só espaços (checado com `trim()`):
+   `{ "error": "Este número não tem nome da colaboradora configurado. Preencha em Configurações antes de disparar." }`
+6. Algum item de `contatoIds` em formato inválido ou de um `Contato` que não
    pertence a `estadoId`:
    `{ "error": "Todos os contatos devem pertencer ao estado informado." }`
 
-O backend sempre recalcula as duas checagens acima contra o banco no
+O backend sempre recalcula todas as checagens acima contra o banco no
 momento do `POST` — nunca confia em nenhum dado enviado pelo frontend além
-dos ids.
+dos ids. As validações 4 e 5 (conexão/colaboradora) existem para o operador
+não descobrir só minutos depois, pelo worker de envio, que o disparo estava
+fadado a falhar (ver "Contexto e decisões de design" acima).
 
 #### Comportamento no banco (transação)
 1. Valida `numeroRemetenteId` (existe, `ativo = 1`, `estado_id = @estadoId`).
-2. Valida que todo `contatoId` de `contatoIds` existe e tem
+2. Valida `status_conexao = 'conectado'` e `nome_colaboradora` preenchido
+   (com conteúdo além de espaços) do mesmo `numeroRemetenteId`.
+3. Valida que todo `contatoId` de `contatoIds` existe e tem
    `estado_id = @estadoId`.
-3. Insere 1 linha em `Disparos` (`status = 'pendente_envio'`).
-4. Insere 1 linha em `DisparoContatos` por `contatoId`.
+4. Insere 1 linha em `Disparos` (`status = 'pendente_envio'`).
+5. Insere 1 linha em `DisparoContatos` por `contatoId`.
+
+Qualquer falha nos passos 1–3 dá `ROLLBACK` da transação antes de qualquer
+`INSERT` — nada é gravado.
 
 A partir da v4, este `POST` **não recalcula/devolve mais `avisos`** — quem
 precisa do aviso de "contato já disparado nos últimos 3 dias" deve chamar
@@ -891,16 +928,24 @@ Mesmo formato de `POST /disparos` (seção 14):
 3. `numeroRemetenteId` (ou `estadoId`) em formato inválido, inexistente,
    não `ativo`, ou de outro Estado:
    `{ "error": "Número remetente inválido para o estado informado." }`
-4. Algum item de `contatoIds` em formato inválido ou de um `Contato` que não
+4. `numeroRemetenteId` existe/está `ativo`/pertence ao Estado, mas
+   `status_conexao != 'conectado'`:
+   `{ "error": "Este número não está conectado ao WhatsApp. Conecte-o em Configurações antes de disparar." }`
+5. `numeroRemetenteId` conectado, mas `nome_colaboradora` é `NULL`, vazio ou
+   só espaços (checado com `trim()`):
+   `{ "error": "Este número não tem nome da colaboradora configurado. Preencha em Configurações antes de disparar." }`
+6. Algum item de `contatoIds` em formato inválido ou de um `Contato` que não
    pertence a `estadoId`:
    `{ "error": "Todos os contatos devem pertencer ao estado informado." }`
 
 #### Comportamento no banco (leitura, sem transação de escrita)
 1. Valida `numeroRemetenteId` (existe, `ativo = 1`, `estado_id = @estadoId`).
-2. Valida que todo `contatoId` de `contatoIds` existe e tem
+2. Valida `status_conexao = 'conectado'` e `nome_colaboradora` preenchido
+   (com conteúdo além de espaços) do mesmo `numeroRemetenteId`.
+3. Valida que todo `contatoId` de `contatoIds` existe e tem
    `estado_id = @estadoId` (a mesma query já recalcula
    `disparadoUltimos3Dias` de cada um).
-3. Não insere nada em `Disparos`/`DisparoContatos`.
+4. Não insere nada em `Disparos`/`DisparoContatos`.
 
 #### Resposta de sucesso — `200 OK`
 ```json
@@ -1467,6 +1512,547 @@ contatos daquele disparo com o status individual de envio de cada um
 
 ---
 
+## Central de Mensagens (v7)
+
+> Adendo ao contrato v2 acima — implementa a **primeira funcionalidade** da
+> Central de Mensagens: captura de mensagens recebidas via Baileys (listener
+> `messages.upsert`), integração com o worker de envio já existente (toda
+> mensagem que a IA manda também vira uma linha em `Mensagens`), e as 3
+> rotas REST que uma tela de inbox vai consumir numa fase posterior (a tela
+> em si **não** faz parte deste adendo — fica para quem implementar o
+> frontend depois). Ganhou depois uma 4ª rota, `GET .../conversas/stream`
+> (SSE — ver rota 4 abaixo), para a tela de Conversas não depender só de
+> atualização manual/polling. Ganhou depois ainda a coluna
+> `e_primeira_resposta_cliente` em `Mensagens`, o campo `primeiraResposta`
+> no payload SSE de `nova-mensagem`, e uma 5ª rota, `GET .../notificacoes`
+> — juntos, a base do sino de notificações do frontend (ver "Sino de
+> notificações" e rota 5 abaixo), que conta só a PRIMEIRA resposta de cada
+> contato (handoff IA→humano) ainda não vista, não toda mensagem nova.
+>
+> **Deliberadamente fora deste adendo**: qualquer tela/rota de "iniciar"
+> uma conversa nova (só é possível responder um contato que já tem pelo
+> menos 1 mensagem recebida — ver `POST .../mensagens`), handoff
+> automático IA→Lívia, indicador de "digitando", suporte a mídia (áudio,
+> imagem, documento — mensagens desse tipo viram um texto placeholder fixo,
+> ver "Contexto e decisões de design" abaixo), e paginação de
+> `GET .../mensagens` (devolve o histórico inteiro do contato de uma vez).
+
+### Contexto e decisões de design
+
+- **O listener roda dentro da própria sessão Baileys já gerenciada por
+  `baileysSession.service.js`** — registrado em `iniciarSocket`, ao lado
+  dos listeners de `creds.update`/`connection.update` já existentes, o que
+  cobre automaticamente todos os caminhos que criam um socket novo (QR
+  normal, reconexão automática, restauração no boot), sem duplicar código.
+- **Só processa eventos `messages.upsert` com `type === 'notify'`** — o
+  Baileys também emite esse evento com `type: 'append'` durante
+  sincronização de histórico, o que acontece sobretudo quando uma sessão é
+  **restaurada na reconciliação de boot** (`restaurarSessaoNoBoot`).
+  Processar `'append'` inundaria `Mensagens` com histórico antigo toda vez
+  que o processo reinicia — qualquer `type` diferente de `'notify'` é
+  ignorado silenciosamente (comportamento esperado, não uma falha, não
+  logado como erro).
+- **Mensagens com `key.fromMe === true` são ignoradas** — é o eco de uma
+  mensagem que o próprio número enviou (seja pelo worker de envio, seja
+  pela rota de resposta manual abaixo); essas já são gravadas
+  explicitamente por quem as enviou, gravar de novo a partir do listener
+  duplicaria a linha.
+- **Dedup via índice único FILTRADO, não checagem prévia**: em vez de fazer
+  um `SELECT` antes de cada `INSERT` para checar se aquele
+  `baileys_message_id` já foi processado, a tabela tem
+  `CREATE UNIQUE INDEX UQ_Mensagens_baileysId ON Mensagens
+  (numero_remetente_id, baileys_message_id) WHERE baileys_message_id IS NOT
+  NULL` e o model captura a violação (driver `mssql`: `err.number === 2627`
+  ou `2601`) e ignora em silêncio (log informativo, não erro) — mais
+  simples e sem condição de corrida entre checagem e gravação.
+  **Correção de bug (visto em produção/teste)**: a versão original desta
+  tabela usava uma `UNIQUE CONSTRAINT` simples em vez de um índice
+  filtrado, com a premissa incorreta de que "SQL Server trata múltiplos
+  `NULL` numa `UNIQUE CONSTRAINT` como não-conflitantes" — isso é **falso**
+  para uma constraint simples (que permite no máximo UM `NULL` por
+  combinação das demais colunas) e só é verdadeiro para um **índice único
+  filtrado**. Como toda mensagem enviada por nós (`remetente IN ('ia',
+  'colaboradora')`) grava `baileys_message_id = NULL`, a constraint antiga
+  bloqueava a SEGUNDA mensagem nossa para o mesmo número remetente
+  ("Violation of UNIQUE KEY constraint" ao responder mais de uma vez pela
+  tela de Conversas). O índice filtrado acima corrige isso: linhas com
+  `baileys_message_id IS NULL` são inteiramente ignoradas na checagem de
+  unicidade, então mensagens nossas nunca colidem entre si nem com nada; a
+  proteção original (não duplicar o mesmo evento `messages.upsert` recebido
+  duas vezes) continua intacta.
+- **Mensagem de mídia (áudio, imagem, documento, etc.) vira um texto
+  placeholder fixo** (`'[Mensagem de mídia não suportada nesta versão]'`) —
+  o listener só extrai texto de `msg.message.conversation` ou
+  `msg.message.extendedTextMessage.text`; qualquer outro formato de
+  conteúdo, incluindo mídia, cai nesse placeholder. Tratamento de mídia de
+  verdade (download/armazenamento do arquivo) é trabalho futuro.
+- **Telefone não encontrado em `Contatos` (ex.: mensagem de um grupo, ou de
+  um número fora da base) é ignorado silenciosamente** (log informativo) —
+  a Central de Mensagens só existe para contatos já importados; não cria
+  `Contatos` novos a partir de mensagens recebidas.
+- **`POST /conversas/:contatoId/mensagens` responde sempre pelo mesmo
+  número remetente da última mensagem daquela conversa** (`numero_remetente_id`
+  da linha mais recente em `Mensagens`, independente de ser uma mensagem
+  recebida ou enviada por nós) — não existe seleção manual de número na
+  resposta, ao contrário do Painel de Disparo. Consequência: só é possível
+  responder um contato que já tem histórico (pelo menos 1 mensagem,
+  recebida ou enviada) — sem isso, não há como saber por qual número
+  remetente enviar (`400`, ver rota 3 abaixo).
+- **A mesma checagem `sock.onWhatsApp(telefone)` do worker de envio é
+  reaplicada aqui** antes de `sock.sendMessage`, pelo mesmo motivo
+  documentado na seção "Envio de Disparos (v6)": `sendMessage` pode
+  resolver com sucesso mesmo quando o número não existe de fato no
+  WhatsApp, e o telefone salvo em `Contatos.telefone` pode não bater com a
+  variante que o WhatsApp tem registrada. O `jid` usado em `sendMessage` é
+  sempre o devolvido por `onWhatsApp`, nunca o telefone concatenado
+  manualmente.
+
+### Schema novo
+
+```sql
+CREATE TABLE Mensagens (
+    id                     INT IDENTITY(1,1) PRIMARY KEY,
+    contato_id             INT NOT NULL FOREIGN KEY REFERENCES Contatos(id),
+    numero_remetente_id    INT NOT NULL FOREIGN KEY REFERENCES NumerosRemetentes(id),
+    remetente              VARCHAR(20) NOT NULL,   -- 'cliente' | 'ia' | 'colaboradora'
+    corpo                  NVARCHAR(MAX) NOT NULL,
+    baileys_message_id     VARCHAR(100) NULL,      -- só preenchido em mensagens recebidas ('cliente')
+    lida                   BIT NOT NULL DEFAULT 0,
+    e_primeira_resposta_cliente BIT NOT NULL DEFAULT 0, -- ver "Sino de notificações" abaixo
+    criado_em              DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+-- Unicidade de baileys_message_id garantida por um ÍNDICE ÚNICO FILTRADO
+-- (não uma UNIQUE CONSTRAINT simples — ver "Contexto e decisões de design"
+-- acima para o porquê dessa correção):
+CREATE UNIQUE INDEX UQ_Mensagens_baileysId
+ON Mensagens (numero_remetente_id, baileys_message_id)
+WHERE baileys_message_id IS NOT NULL;
+```
+
+Criado por `backend/src/scripts/MIGRATION-MENSAGENS.sql` (idempotente,
+`IF NOT EXISTS`, mesmo padrão de `MIGRATION-DISPAROS.sql` — inclui também
+um passo de correção que remove a `UNIQUE CONSTRAINT` antiga com bug, caso
+um banco já tenha rodado uma versão anterior desta migration). **Este
+script ainda não foi executado contra nenhum banco** — precisa rodar
+manualmente (local: `erp-novagest-dev`) antes do listener/worker/rotas
+abaixo funcionarem de verdade.
+
+`lida` só tem sentido para `remetente='cliente'` (mensagem enviada por nós
+não tem o conceito de "não lida" do ponto de vista do operador) — as
+funções de leitura nunca filtram/contam `lida` para `remetente IN ('ia',
+'colaboradora')`.
+
+`e_primeira_resposta_cliente` foi adicionada depois, por
+`backend/src/scripts/MIGRATION-NOTIFICACOES.sql` (idempotente,
+`IF NOT EXISTS` via `sys.columns`, mesmo padrão de
+`MIGRATION-ENVIO-DISPAROS.sql`) — ver "Sino de notificações" abaixo para o
+propósito e a rota que a consome. **Este script também ainda não foi
+executado contra nenhum banco** — precisa rodar manualmente (local:
+`erp-novagest-dev`, depois de `MIGRATION-MENSAGENS.sql` já ter rodado)
+antes do listener/rota abaixo funcionarem de verdade.
+
+### O listener: `baileysSession.service.js` (`messages.upsert`)
+
+Registrado dentro de `iniciarSocket(numeroRemetenteId, sessao)`, ao lado dos
+listeners já existentes:
+
+```js
+sock.ev.on('messages.upsert', (upsert) => {
+  handleMessagesUpsert(numeroRemetenteId, sock, upsert).catch((err) => {
+    console.error(`[baileysSession] erro inesperado tratando messages.upsert (numeroRemetenteId=${numeroRemetenteId}):`, err);
+  });
+});
+```
+
+Para cada evento com `type === 'notify'`, e para cada `msg` em
+`upsert.messages`:
+
+1. Ignora se `msg.key.fromMe === true`.
+2. Resolve o telefone real do remetente a partir de `msg.key`
+   (`resolverTelefoneDoRemetente`, em `baileysSession.service.js`):
+   - Se `msg.key.remoteJid` terminar em `@s.whatsapp.net` (ou `@g.us`/outro
+     sufixo de grupo — normalizado do mesmo jeito, sem tratamento especial):
+     extrai o telefone normalizado (só dígitos, sufixo de servidor e de
+     dispositivo removidos) diretamente do `remoteJid`.
+   - **Correção de bug (causa raiz de "mensagens recebidas não aparecem na
+     Central de Mensagens")**: o WhatsApp moderno frequentemente endereça o
+     remetente por um **LID** (`msg.key.remoteJid` termina em `@lid` — um
+     identificador interno de ~15 dígitos, **não** o telefone) em vez de
+     `@s.whatsapp.net`. Extrair dígitos direto de um `@lid` produzia um
+     "telefone" que nunca batia com nenhum `Contatos.telefone`, e a
+     mensagem era descartada com um log que sugeria erroneamente que o
+     telefone tinha sido extraído certo mas não encontrado na base. Quando
+     `remoteJid` termina em `@lid`, a resolução tenta, nesta ordem
+     (confirmado contra o código-fonte de `@whiskeysockets/baileys@7.0.0-rc14`
+     — reconfirme se a lib for atualizada, os nomes de campo não são
+     documentação pública estável):
+     1. `msg.key.remoteJidAlt` — quando presente, é a contrapartida em
+        telefone/PN que o próprio Baileys já inclui no envelope da
+        mensagem; só é usado se `jidDecode` confirmar que ele mesmo não é
+        outro `@lid`.
+     2. `sock.signalRepository.lidMapping.getPNForLID(remoteJid)` — cache/
+        armazenamento persistente de pares LID↔PN que o Baileys mantém por
+        conta própria; só resolve se algum evento anterior já tiver
+        alimentado esse mapeamento para aquele remetente.
+     Se nenhuma das duas fontes resolver, a mensagem é ignorada com um log
+     explícito de **"LID não resolvido"** (diferente do log de "telefone
+     sem Contato correspondente" do passo 3 — são causas bem diferentes:
+     uma é "não sabemos o telefone", a outra é "sabemos o telefone e não
+     está na nossa base").
+3. Busca o `Contato` correspondente. **Segundo bug corrigido** (também
+   causa de "mensagens recebidas não aparecem na Central de Mensagens",
+   diferente do bug de LID do passo 2): o servidor do WhatsApp às vezes
+   representa a conta do remetente **sem o 9º dígito** do celular
+   brasileiro (formato pré-2012) mesmo quando o número de discagem real
+   inclui o 9 — ambiguidade real do lado do WhatsApp, não um erro de
+   captura. Caso real de teste: `remoteJid` chegou como `558582336124` (12
+   dígitos, sem o 9) via `@s.whatsapp.net` direto, mas o `Contato` estava
+   gravado como `5585982336124` (13 dígitos, com o 9) — a busca exata
+   falhava e a mensagem era descartada. A busca agora tenta, numa única
+   query `SELECT TOP (1) id FROM Contatos WHERE telefone IN (...)`
+   (`findContatoIdPorTelefoneComVariantes`, em `mensagens.model.js`), o
+   telefone recebido **e**, quando o formato bate com `55`+DDD (2
+   dígitos)+número de celular (12 dígitos sem o 9 ↔ 13 dígitos com o 9), a
+   variante com/sem o 9º dígito (`gerarVariantesTelefoneBr`, em
+   `baileysSession.service.js`); qualquer outro formato/tamanho tenta só o
+   telefone original. Como `Contatos.telefone` é `UNIQUE` globalmente, no
+   máximo uma linha pode bater. Se nenhum candidato encontrar, ignora a
+   mensagem (log informativo, mostrando o telefone original recebido, não
+   as variantes tentadas).
+4. Extrai o texto (`msg.message.conversation` ou
+   `msg.message.extendedTextMessage.text`; sem nenhum dos dois, usa o
+   placeholder de mídia — ver "Contexto e decisões de design" acima).
+5. **Antes de inserir**, checa `mensagensModel.existeMensagemClienteAnterior
+   (contatoId)` — se o contato nunca teve nenhuma mensagem `remetente='cliente'`
+   até agora, esta é a primeira resposta dele (handoff IA→humano), e
+   `ePrimeiraRespostaCliente=true` é repassado para o insert (ver "Sino de
+   notificações" abaixo). Essa checagem precisa acontecer ANTES do `INSERT`
+   do passo 6, nunca depois — checar depois sempre encontraria a própria
+   linha recém-gravada.
+6. Insere em `Mensagens`: `contato_id`, `numero_remetente_id` = o número
+   **desta sessão** (que recebeu a mensagem), `remetente='cliente'`,
+   `corpo`, `baileys_message_id = msg.key.id`, `lida=0`,
+   `e_primeira_resposta_cliente` = o valor calculado no passo 5. Uma
+   violação do índice único filtrado (evento duplicado) é capturada e
+   ignorada em silêncio pelo model (ver "Contexto e decisões de design"
+   acima).
+
+Nenhum erro inesperado (falha de banco, etc.) derruba o processo — capturado
+e só logado, mesmo princípio do resto da integração Baileys deste projeto.
+
+### Sino de notificações
+
+`e_primeira_resposta_cliente` (ver "Schema novo" acima) marca a mensagem que
+representa a PRIMEIRA resposta de um contato desde sempre — não "primeira do
+dia" nem qualquer outra janela de tempo, é sempre relativo ao histórico
+inteiro daquele contato em `Mensagens`. O objetivo é alimentar um sino de
+notificações no frontend que conta quantos contatos tiveram esse momento de
+handoff IA→humano e ainda não foram vistos — diferente de "notificar a cada
+mensagem nova", que geraria ruído a cada troca de mensagem de uma conversa já
+em andamento.
+
+- `mensagens.model.js: existeMensagemClienteAnterior(contatoId)` — checagem
+  de existência simples (`SELECT TOP (1) 1 ... WHERE contato_id = @contatoId
+  AND remetente = 'cliente'`), chamada pelo listener antes de cada insert de
+  mensagem recebida (ver passo 5 acima).
+- `mensagens.model.js: contarNotificacoesNaoVistas()` —
+  `SELECT COUNT(*) ... WHERE e_primeira_resposta_cliente = 1 AND lida = 0`,
+  usada pela rota `GET /notificacoes` abaixo. "Vista" aqui é o mesmo conceito
+  de `lida` já usado no resto da Central de Mensagens — abrir a conversa
+  daquele contato (`GET .../:contatoId/mensagens`) marca a mensagem como
+  lida e, por consequência, ela some da contagem de notificações não vistas
+  também (não há uma coluna/flag separada só para o sino).
+- `mensagens.model.js: listNotificacoesPendentes(limite = 10)` — mesmo
+  filtro de `contarNotificacoesNaoVistas`, só que devolvendo linhas
+  (`contatoId`/`nomeContato`/`telefone`/`preview`/`criado_em`) em vez de
+  `COUNT(*)`, `ORDER BY criado_em DESC`, `TOP (@limite)` parametrizado.
+  Usada pela rota `GET /notificacoes` abaixo para alimentar o dropdown do
+  sino no frontend com nome/preview/horário de cada notificação pendente.
+  Sem paginação nesta fase — `limite` é fixo em 10 (as 10 notificações mais
+  recentes), não configurável por query string. `preview` é o `corpo` da
+  mensagem truncado para no máximo 80 caracteres, com "…" acrescentado no
+  final quando de fato corta (corpo com 80 caracteres ou menos vem
+  inalterado, sem reticências) — truncagem feita em `truncarTexto`, dentro
+  do próprio `mensagens.model.js`. `criado_em` é devolvido em snake_case
+  (não convertido para `criadoEm`), mesmo padrão já usado por
+  `GET /conversas/:contatoId/mensagens` (`listMensagensEMarcarLidas`) para
+  timestamp de mensagem nesta área da API — não é inconsistência.
+- O payload do evento `'mensagem-recebida'` emitido em
+  `mensagensEvents.service.js` (consumido por `GET /conversas/stream`, ver
+  seção 4 abaixo) ganhou o campo `primeiraResposta` (boolean) — reflete se
+  aquela mensagem específica foi a primeira de cliente já recebida daquele
+  contato, lido do `OUTPUT` do próprio `INSERT` (`mensagemInserida.e_primeira_resposta_cliente`),
+  não da variável calculada antes do insert — evita qualquer discrepância
+  entre o booleano JS enviado e o `BIT` que o SQL Server de fato gravou.
+
+### O worker de envio grava em `Mensagens`
+
+`backend/src/workers/envioDisparos.worker.js: processarItem` — logo depois
+da chamada já existente a `disparosModel.marcarContatoEnviado({...})` (que
+já roda com o envio via `sock.sendMessage` confirmado com sucesso), o worker
+também grava a mesma mensagem em `Mensagens`
+(`remetente='ia'`, `numero_remetente_id`, `contato_id` = `item.contatoId`,
+`corpo` = a mesma mensagem já montada e enviada). Essa gravação é envolvida
+em seu próprio `try/catch`: uma falha ao registrar em `Mensagens` é só
+logada — **não** faz o worker tratar o envio (que já teve sucesso de fato)
+como falha, e **não** dispara reenvio nem reprocessamento.
+
+### 1. `GET /api/controle-ligacoes/conversas`
+
+Lista os contatos que já têm pelo menos 1 mensagem trocada, ordenados pela
+mensagem mais recente (DESC). Protegida por `authMiddleware` +
+`operadorCobrancaMiddleware`.
+
+#### Parâmetros (query, ambos opcionais)
+| Nome | Tipo | Validação |
+|---|---|---|
+| `busca` | string | filtra por nome OU telefone do contato (`LIKE`) |
+| `apenasNaoLidas` | `'true'`\|`'false'` | qualquer valor diferente de `'true'` (inclusive ausente) é tratado como `false` |
+
+#### Resposta de sucesso — `200 OK`
+```json
+[
+  {
+    "contato": { "id": 42, "nome": "Maria Silva", "telefone": "5598900000000" },
+    "numeroRemetenteAtual": { "id": 3, "apelido": "CDC Cohatrac" },
+    "numeroRemetenteInicial": { "id": 7, "apelido": "CDC Imperatriz" },
+    "ultimaMensagem": { "corpo": "Oi, tudo bem?", "remetente": "cliente", "criado_em": "2026-08-25T12:00:00.000Z" },
+    "naoLidas": 2
+  }
+]
+```
+`numeroRemetenteInicial` (campo novo — **aditivo**, não é uma mudança
+breaking) é o número remetente da mensagem de **MENOR** `id`/`criado_em`
+daquele contato, ou seja, o número que **iniciou** a conversa —
+`numeroRemetenteAtual` continua sendo o da mensagem mais recente, sem
+nenhuma mudança de cálculo. Como um contato nunca fica travado a um número
+remetente específico (ver "Contexto e decisões de design" acima), os dois
+campos podem apontar para números diferentes ao longo do tempo. Ambos vêm
+`null` só na teoria (todo item desta lista já tem, por definição, ao menos 1
+mensagem — não há caso real de `numeroRemetenteInicial: null` aqui).
+
+#### Erros
+- `500`: `{ "error": "Erro interno ao listar conversas." }`
+
+### 2. `GET /api/controle-ligacoes/conversas/:contatoId/mensagens`
+
+Histórico completo de mensagens de um contato, ordenado por `criado_em ASC`.
+**Efeito colateral esperado**: ao ser chamada, marca como lida (`lida=1`)
+toda mensagem `remetente='cliente' AND lida=0` daquele contato — "abrir a
+conversa = marcar como lida", como qualquer inbox. Protegida por
+`authMiddleware` + `operadorCobrancaMiddleware`.
+
+#### Parâmetros
+| Nome | Tipo | Obrigatório | Validação |
+|---|---|---|---|
+| `:contatoId` | path, number | sim | inteiro positivo; `400` se não for |
+
+#### Resposta de sucesso — `200 OK`
+
+> **MUDANÇA DE FORMATO (breaking, não aditiva).** Antes desta revisão, esta
+> rota devolvia um **array puro** de mensagens (`[{...}, {...}]`). A partir
+> de agora devolve um **objeto** `{ mensagens, numeroRemetenteInicial }` —
+> qualquer consumidor que fizesse `response.map(...)`/`response.length`
+> diretamente sobre o corpo da resposta precisa ser atualizado para ler
+> `response.mensagens` em vez disso. `numeroRemetenteAtual` **não** entra
+> nesta resposta de propósito — o frontend já tem esse dado disponível na
+> lista de conversas carregada previamente por `GET /conversas` (ver seção
+> 1 acima), não há necessidade de duplicá-lo aqui.
+
+```json
+{
+  "mensagens": [
+    { "id": 1, "remetente": "cliente", "corpo": "Oi, tudo bem?", "criado_em": "2026-08-25T12:00:00.000Z" },
+    { "id": 2, "remetente": "ia", "corpo": "Olá! ...", "criado_em": "2026-08-25T12:01:00.000Z" }
+  ],
+  "numeroRemetenteInicial": { "id": 3, "apelido": "Teste Junior" }
+}
+```
+`numeroRemetenteInicial` é o número remetente da mensagem MAIS ANTIGA
+daquele contato (a que iniciou a conversa) — `{ id, apelido }`, ou `null` se
+o contato existe mas nunca teve nenhuma mensagem (caso teórico, coberto por
+robustez; na prática essa rota só é chamada a partir de uma conversa que já
+tem histórico). Um contato que existe mas nunca teve mensagem devolve `200`
+com `{ "mensagens": [], "numeroRemetenteInicial": null }` — **não** `404`
+(só `:contatoId` inexistente em `Contatos` vira `404`, ver abaixo).
+
+#### Erros
+- `400`: `{ "error": "Parâmetro \"contatoId\" deve ser um número inteiro positivo." }`
+- `404`: `{ "error": "Contato não encontrado." }`
+- `500`: `{ "error": "Erro interno ao listar mensagens do contato." }`
+
+### 3. `POST /api/controle-ligacoes/conversas/:contatoId/mensagens`
+
+Envia uma resposta manual (`remetente='colaboradora'`) para o contato, pelo
+mesmo número remetente da última mensagem daquela conversa (ver "Contexto e
+decisões de design" acima — não há seleção manual de número aqui).
+Protegida por `authMiddleware` + `operadorCobrancaMiddleware`.
+
+#### Corpo da requisição
+```json
+{ "corpo": "Oi Maria, tudo bem?" }
+```
+
+#### Validações (nesta ordem)
+1. `:contatoId` inteiro positivo (`400` se não for).
+2. `corpo` presente e não-vazio após `trim()` (`400` se ausente/vazio/só espaços).
+3. `:contatoId` existe em `Contatos` (`404` se não existir).
+4. O contato tem pelo menos 1 mensagem em `Mensagens` (`400` se nunca teve —
+   não há como saber por qual número responder).
+5. A sessão Baileys do número resolvido está `'conectado'` em memória
+   (`409` se não estiver).
+6. `sock.onWhatsApp(telefone do contato)` confirma uma conta ativa (`500`
+   se não confirmar ou lançar erro — é um erro operacional, não uma
+   validação de input do usuário).
+7. `sock.sendMessage(jid, { text: corpo })` tem sucesso (`500` se lançar
+   erro).
+
+#### Resposta de sucesso — `201 Created`
+```json
+{
+  "id": 10,
+  "remetente": "colaboradora",
+  "corpo": "Oi Maria, tudo bem?",
+  "criado_em": "2026-08-25T12:05:00.000Z"
+}
+```
+
+#### Erros
+- `400`: `{ "error": "Campo \"corpo\" é obrigatório." }`
+- `400`: `{ "error": "Parâmetro \"contatoId\" deve ser um número inteiro positivo." }`
+- `400`: `{ "error": "Não é possível responder um contato sem histórico de conversa." }`
+- `404`: `{ "error": "Contato não encontrado." }`
+- `409`: `{ "error": "Número não está conectado." }`
+- `500`: `{ "error": "Número não possui WhatsApp ativo ou não pôde ser verificado." }` (ou a mensagem do erro de verificação)
+- `500`: `{ "error": "Falha ao enviar mensagem." }` (ou a mensagem do erro de envio)
+- `500`: `{ "error": "Erro interno ao responder contato." }`
+
+### 4. `GET /api/controle-ligacoes/conversas/stream` (SSE)
+
+Push em tempo real de "chegou mensagem nova" para a tela de Conversas, para
+não depender só do botão "Atualizar"/polling manual. Reaproveita exatamente
+o mesmo padrão de headers/escrita do stream de Conexão Baileys (ver
+`numerosRemetentes.controller.js: conexaoStream`, seção "Conexão Baileys
+(v5)"), com uma diferença deliberada: **este stream não se encerra
+sozinho** — fica aberto indefinidamente até o cliente desconectar, porque a
+tela de Conversas permanece aberta enquanto o operador estiver nela (o
+stream de Conexão Baileys, por comparação, encerra a si mesmo logo após
+"conectado"/"erro"). Protegida por `authMiddleware` +
+`operadorCobrancaMiddleware` (herdado do mount do módulo, nenhuma checagem
+própria na rota).
+
+Assim como o `EventSource` nativo do browser não permite enviar o header
+`Authorization` que a API exige, o consumo no frontend deve seguir o mesmo
+padrão já usado para o stream de Conexão Baileys (`fetch` +
+`response.body.getReader()`/`TextDecoder`, parsing manual do formato SSE —
+ver `controleLigacoesConfigApi.js: abrirStreamConexao`), não
+`new EventSource(...)`.
+
+#### Headers de resposta
+```
+Content-Type: text/event-stream
+Cache-Control: no-store
+Connection: keep-alive
+```
+
+#### Evento emitido (único tipo, pode ocorrer 0..N vezes por conexão)
+```
+event: nova-mensagem
+data: {"contatoId":42,"numeroRemetenteId":17}
+```
+Só esses 2 campos — **sem** o corpo da mensagem nem qualquer outro dado; o
+cliente decide se recarrega a lista de conversas e/ou a conversa aberta
+(quando `contatoId` bate com a que está na tela) a partir desse sinal.
+
+#### Contexto e decisões de design
+- **Canal**: `backend/src/services/mensagensEvents.service.js` — um único
+  `EventEmitter` (módulo nativo `events`) compartilhado por todo o
+  processo, não um por número remetente/contato. Produtor:
+  `baileysSession.service.js: handleMessagesUpsert`, que emite
+  `'mensagem-recebida'` (`{ contatoId, numeroRemetenteId }`) sempre que uma
+  mensagem de cliente é **efetivamente gravada** em `Mensagens` — nunca
+  quando a gravação é descartada por dedup de evento duplicado do Baileys
+  (`mensagens.model.js: inserirMensagemRecebida` retornando `null` nesse
+  caso). Consumidor: esta rota, que registra um listener por conexão SSE.
+- **Broadcast para múltiplos clientes**: cada `GET .../conversas/stream`
+  aberto registra seu próprio listener no `EventEmitter` compartilhado —
+  N abas/operadores conectados ao mesmo tempo recebem o mesmo evento,
+  cada um pela sua própria conexão.
+- **Encerramento só pelo cliente**: ao contrário do stream de Conexão
+  Baileys (que dispara `res.end()` sozinho após "conectado"/"erro"), aqui
+  o servidor só remove o listener e chama `res.end()` quando `req.on('close',
+  ...)` dispara (cliente desconectou — aba fechada, navegação para outra
+  tela, etc.) — nunca por iniciativa própria.
+- **Sem histórico/replay**: o canal não guarda eventos passados; um
+  cliente que conecta depois de um evento emitido simplesmente não o
+  recebe. A tela consumidora deve sempre fazer um `GET /conversas` normal
+  ao montar, usando este stream só como sinal incremental de "algo mudou,
+  talvez valha a pena atualizar".
+
+#### Erros
+Nenhum — a rota não valida nenhum parâmetro de entrada (sem path/query
+params) e não faz nenhuma chamada assíncrona antes de abrir o stream, então
+não há caminho de erro `4xx`/`5xx` específico desta rota (fora dos `401`/
+`403` já cobertos pelos middlewares do mount, iguais ao resto do módulo).
+
+### 5. `GET /api/controle-ligacoes/notificacoes`
+
+Contagem de notificações não vistas do sino de notificações do frontend,
+mais a lista dos itens mais recentes para alimentar o dropdown do sino —
+ver "Sino de notificações" acima. Não é uma rota `/conversas/*`, mas
+documentada nesta seção por ser a mesma tabela/feature. Protegida por
+`authMiddleware` + `operadorCobrancaMiddleware` (herdado do mount, nenhuma
+checagem própria na rota).
+
+#### Parâmetros
+Nenhum.
+
+#### Resposta de sucesso — `200 OK`
+```json
+{
+  "naoVistas": 1,
+  "itens": [
+    {
+      "contatoId": 603,
+      "nomeContato": "Natanael Soares Lima Junior",
+      "telefone": "5585982336124",
+      "preview": "ola",
+      "criado_em": "2026-08-25T14:58:00.000Z"
+    }
+  ]
+}
+```
+`naoVistas` = `COUNT(*)` de `Mensagens` com `e_primeira_resposta_cliente = 1
+AND lida = 0` no momento da chamada — cai automaticamente quando o operador
+abre a conversa daquele contato (`GET .../:contatoId/mensagens` marca
+`lida = 1`), sem precisar de nenhuma rota/flag dedicada de "marcar
+notificação como vista".
+
+`itens` (campo novo — **aditivo**, não é uma mudança breaking; quem já lê só
+`naoVistas` continua funcionando sem alteração) é a lista das notificações
+pendentes de fato, mesmo filtro (`e_primeira_resposta_cliente = 1 AND lida =
+0`) só que devolvendo linhas em vez de `COUNT(*)`, ordenadas por
+`criado_em DESC` (mais recente primeiro), limitada às **10 mais recentes**
+(`mensagens.model.js: listNotificacoesPendentes`, `TOP (@limite)`
+parametrizado, `limite` fixo em 10 — sem paginação/parâmetro de query para
+alterar esse limite nesta versão, "limite razoável" para o dropdown do
+sino). `naoVistas` pode ser **maior** que `itens.length` quando houver mais
+de 10 pendentes ao mesmo tempo — isso é esperado, o dropdown do sino mostra
+só as mais recentes, `naoVistas` continua sendo a contagem exata para o
+badge numérico. Cada item: `contatoId` (int), `nomeContato`/`telefone` do
+contato, `preview` (o `corpo` da própria mensagem que gerou a notificação,
+truncado no backend para no máximo **80 caracteres**, com "…" acrescentado
+no final quando de fato corta — corpo com 80 caracteres ou menos vem
+inalterado, sem reticências) e `criado_em` (timestamp da mensagem, em
+snake_case — mesmo padrão de `GET /conversas/:contatoId/mensagens`, não é
+inconsistência com o resto da API em camelCase).
+
+#### Erros
+- `500`: `{ "error": "Erro interno ao contar notificações não vistas." }`
+
+---
+
 ## Fora de escopo deste v2 (registrado, não implementar agora)
 
 - ~~Central de Mensagens (Baileys) + conexão real via QR Code (`numero` e
@@ -1474,11 +2060,18 @@ contatos daquele disparo com o status individual de envio de cada um
   saiu de escopo — ver "Conexão Baileys (v5)" mais acima.** ~~O envio de
   mensagem de fato (worker de fila, disparo real via Baileys a partir de
   `Disparos`/`DisparoContatos`).~~ **O envio de mensagem também saiu de
-  escopo — ver "Envio de Disparos (v6)" mais acima.** Continuam fora de
+  escopo — ver "Envio de Disparos (v6)" mais acima.** ~~Captura de mensagens
+  recebidas + acompanhamento de conversa (histórico, resposta manual).~~
+  **A captura (listener `messages.upsert`), o registro das mensagens
+  enviadas pelo worker, e as 3 rotas de leitura/resposta também saíram de
+  escopo — ver "Central de Mensagens (v7)" mais acima.** Continuam fora de
   escopo: CRUD de `MensagensTemplates`/`nome_colaboradora` (ver "Lacuna
-  conhecida" na seção v6), retry automático de falha de envio, e qualquer
-  pipeline de resposta do contato (a mensagem enviada por este worker é
-  sempre a primeira/única mensagem — não há acompanhamento de conversa).
+  conhecida" na seção v6), retry automático de falha de envio, suporte a
+  mídia de verdade (download/armazenamento — mensagens de mídia recebidas
+  viram um texto placeholder fixo, ver seção v7), paginação do histórico de
+  conversa, indicador de "digitando", handoff automático IA→Lívia, e a
+  **tela de inbox** (as rotas da v7 existem para o frontend consumir numa
+  fase posterior, mas nenhuma tela própria foi implementada nesta tarefa).
 - Disparo em massa (limite de 10/número, aviso de 3 dias, seleção manual).
 - Pipeline de atendimento (`não atendido`/`atendido`/`perdido`/`agendado`)
   — colunas entram em `Contatos`, não em tabela nova.

@@ -9,19 +9,35 @@ vi.mock('./painelDisparoApi.js', () => ({
   criarDisparo: vi.fn(),
 }));
 
+vi.mock('../configuracoes/controleLigacoesConfigApi.js', () => ({
+  fetchNumerosRemetentes: vi.fn(),
+}));
+
 vi.mock('../../../app/AuthContext.jsx', () => ({
   useAuth: vi.fn(),
 }));
 
 import * as api from './painelDisparoApi.js';
+import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
 import { useAuth } from '../../../app/AuthContext.jsx';
+
+// Item "cheio" (statusConexao + nomeColaboradora) de GET /numeros-remetentes,
+// cruzado por id com `numerosAtivos` de GET /painel-disparo para calcular
+// elegibilidade de disparo em cada card (PainelDisparoPage.jsx). Por padrão,
+// o número 3 (CDC Cohatrac, usado na maioria dos testes) é elegível —
+// conectado e com colaboradora configurada — para não quebrar os fluxos de
+// disparo já cobertos; os testes de elegibilidade abaixo sobrescrevem isso
+// caso a caso.
+function numeroRemetenteDetalhado({ id = 3, statusConexao = 'conectado', nomeColaboradora = 'Ana Souza' } = {}) {
+  return { id, apelido: 'CDC Cohatrac', numero: '5598900000000', statusConexao, nomeColaboradora, ativo: true, estado: { id: 6, nome: 'Maranhão', uf: 'MA' } };
+}
 
 function resumoMaranhao({ totalContatos = 2, numerosAtivos } = {}) {
   return {
     estado: { id: 6, nome: 'Maranhão', uf: 'MA' },
     totalContatos,
     numerosAtivos: numerosAtivos ?? [
-      { id: 3, apelido: 'CDC Cohatrac', statusConexao: 'aguardando_conexao' },
+      { id: 3, apelido: 'CDC Cohatrac', statusConexao: 'conectado' },
     ],
   };
 }
@@ -48,6 +64,7 @@ async function renderPage() {
 beforeEach(() => {
   vi.clearAllMocks();
   useAuth.mockReturnValue({ token: 'token-teste' });
+  fetchNumerosRemetentes.mockResolvedValue([numeroRemetenteDetalhado()]);
 });
 
 describe('PainelDisparoPage — estados de loading/erro/vazio do painel', () => {
@@ -87,7 +104,7 @@ describe('PainelDisparoPage — card de estado', () => {
     expect(screen.getByText('Maranhão')).toBeInTheDocument();
     expect(screen.getByText('2 contato(s) disponível(is)')).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'CDC Cohatrac' })).toBeInTheDocument();
-    expect(screen.getByText('Aguardando conexão')).toBeInTheDocument();
+    expect(screen.getByText('Conectado')).toBeInTheDocument();
   });
 
   it('estado sem número ativo: mostra aviso e botão Disparar desabilitado', async () => {
@@ -246,6 +263,120 @@ describe('PainelDisparoPage — card de estado', () => {
     await waitFor(() => expect(api.fetchContatosDisponiveis).toHaveBeenCalledWith(
       'token-teste', 6, { busca: '', ordem: 'recentes' }
     ));
+  });
+});
+
+describe('PainelDisparoPage — elegibilidade de número remetente para disparo', () => {
+  it('número desconectado aparece desabilitado no select com sufixo "(desconectado)"', async () => {
+    mockCargaBasica({
+      painel: [resumoMaranhao({
+        numerosAtivos: [{ id: 3, apelido: 'CDC Cohatrac', statusConexao: 'desconectado' }],
+      })],
+    });
+    fetchNumerosRemetentes.mockResolvedValue([
+      numeroRemetenteDetalhado({ statusConexao: 'desconectado' }),
+    ]);
+
+    await renderPage();
+
+    expect(screen.getByRole('option', { name: 'CDC Cohatrac (desconectado)' })).toBeDisabled();
+  });
+
+  it('número conectado sem nome de colaboradora aparece desabilitado com sufixo "(sem colaboradora configurada)"', async () => {
+    mockCargaBasica();
+    fetchNumerosRemetentes.mockResolvedValue([
+      numeroRemetenteDetalhado({ statusConexao: 'conectado', nomeColaboradora: '' }),
+    ]);
+
+    await renderPage();
+
+    expect(screen.getByRole('option', { name: 'CDC Cohatrac (sem colaboradora configurada)' })).toBeDisabled();
+  });
+
+  it('nenhum número elegível: botão Disparar fica desabilitado mesmo com contato selecionado, e mostra aviso discreto', async () => {
+    mockCargaBasica();
+    fetchNumerosRemetentes.mockResolvedValue([
+      numeroRemetenteDetalhado({ statusConexao: 'aguardando_conexao', nomeColaboradora: null }),
+    ]);
+
+    await renderPage();
+
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+
+    expect(screen.getByText(
+      'Nenhum número deste estado está pronto para disparo. Configure a conexão e o nome da colaboradora em Configurações.'
+    )).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Disparar' })).toBeDisabled();
+  });
+
+  it('seleção inicial prefere um número elegível mesmo quando não é o primeiro da lista', async () => {
+    mockCargaBasica({
+      painel: [resumoMaranhao({
+        numerosAtivos: [
+          { id: 3, apelido: 'CDC Cohatrac', statusConexao: 'desconectado' },
+          { id: 4, apelido: 'CDC Imperatriz', statusConexao: 'conectado' },
+        ],
+      })],
+    });
+    fetchNumerosRemetentes.mockResolvedValue([
+      numeroRemetenteDetalhado({ id: 3, statusConexao: 'desconectado', nomeColaboradora: null }),
+      numeroRemetenteDetalhado({ id: 4, statusConexao: 'conectado', nomeColaboradora: 'Bia' }),
+    ]);
+
+    await renderPage();
+
+    expect(screen.getByLabelText('Número remetente usado neste disparo')).toHaveValue('4');
+  });
+
+  it('número selecionado elegível mostra a linha "📱 {numero} · Atendido por {nomeColaboradora}"', async () => {
+    mockCargaBasica();
+
+    await renderPage();
+
+    expect(screen.getByText('📱 5598900000000 · Atendido por Ana Souza')).toBeInTheDocument();
+  });
+
+  it('número selecionado elegível mas sem `numero` (telefone) preenchido não mostra a linha nova', async () => {
+    mockCargaBasica();
+    fetchNumerosRemetentes.mockResolvedValue([
+      { ...numeroRemetenteDetalhado(), numero: null },
+    ]);
+
+    await renderPage();
+
+    expect(screen.queryByText(/Atendido por/)).not.toBeInTheDocument();
+  });
+
+  it('número selecionado inelegível não mostra a linha "Atendido por"', async () => {
+    mockCargaBasica({
+      painel: [resumoMaranhao({
+        numerosAtivos: [{ id: 3, apelido: 'CDC Cohatrac', statusConexao: 'desconectado' }],
+      })],
+    });
+    fetchNumerosRemetentes.mockResolvedValue([
+      numeroRemetenteDetalhado({ statusConexao: 'desconectado' }),
+    ]);
+
+    await renderPage();
+
+    expect(screen.queryByText(/Atendido por/)).not.toBeInTheDocument();
+  });
+
+  it('erro 400 do backend (validação de conexão/colaboradora) continua exibido verbatim no card, sem reescrita no frontend', async () => {
+    mockCargaBasica();
+    api.verificarDisparo.mockRejectedValue(new Error(
+      'Este número não está conectado ao WhatsApp. Conecte-o em Configurações antes de disparar.'
+    ));
+
+    await renderPage();
+
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+
+    expect(await screen.findByText(
+      'Este número não está conectado ao WhatsApp. Conecte-o em Configurações antes de disparar.'
+    )).toBeInTheDocument();
+    expect(api.criarDisparo).not.toHaveBeenCalled();
   });
 });
 

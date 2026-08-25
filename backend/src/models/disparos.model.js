@@ -112,16 +112,29 @@ async function listContatosDisponiveis(estadoId, { busca, ordem } = {}) {
 }
 
 /**
- * Valida numeroRemetenteId (existe, ativo, do estadoId informado) e todo
- * contatoId (existe, pertence ao estadoId informado), calculando de quebra
- * os avisos de "disparado nos últimos 3 dias" — usada tanto pelo caminho de
- * só-leitura (verificarDisparo, contra o pool) quanto pelo caminho de
- * escrita (criarDisparo, contra a transação em aberto), recebendo o
- * "executor" (pool ou transaction) que o `sql.Request` deve usar. Não
- * grava nada no banco.
+ * Valida numeroRemetenteId (existe, ativo, do estadoId informado, conectado
+ * ao WhatsApp e com nome_colaboradora preenchido) e todo contatoId (existe,
+ * pertence ao estadoId informado), calculando de quebra os avisos de
+ * "disparado nos últimos 3 dias" — usada tanto pelo caminho de só-leitura
+ * (verificarDisparo, contra o pool) quanto pelo caminho de escrita
+ * (criarDisparo, contra a transação em aberto), recebendo o "executor"
+ * (pool ou transaction) que o `sql.Request` deve usar. Não grava nada no
+ * banco.
+ *
+ * As checagens de status_conexao/nome_colaboradora existem para não deixar
+ * o worker assíncrono (`workers/envioDisparos.worker.js`) ser o único lugar
+ * a barrar um disparo fadado a falhar — sem elas, POST /disparos respondia
+ * 201 mesmo para um número desconectado ou sem colaboradora configurada, e o
+ * operador só descobria o problema minutos depois, quando o worker
+ * processasse a fila. Rodam ANTES da validação de contatoIds, nesta ordem
+ * (estado_conexao primeiro, depois nome_colaboradora), e em ambas as rotas
+ * (verificarDisparo/criarDisparo), já que as duas reaproveitam esta mesma
+ * função — ver CONTRATO-CONTROLE-LIGACOES-API.md, seção "Painel de Disparo".
  *
  * Retorna:
  *   { status: 'numero_invalido' } |
+ *   { status: 'numero_desconectado' } |
+ *   { status: 'numero_sem_colaboradora' } |
  *   { status: 'contatos_invalidos' } |
  *   { status: 'ok', avisos: [{contatoId,nome,telefone}] }
  */
@@ -129,12 +142,20 @@ async function validarNumeroEContatos({ estadoId, numeroRemetenteId, contatoIds 
   const numeroRequest = new sql.Request(executor);
   numeroRequest.input('numeroId', sql.Int, numeroRemetenteId);
   const numeroResult = await numeroRequest.query(
-    'SELECT id, estado_id, ativo FROM NumerosRemetentes WHERE id = @numeroId'
+    'SELECT id, estado_id, ativo, status_conexao, nome_colaboradora FROM NumerosRemetentes WHERE id = @numeroId'
   );
   const numero = numeroResult.recordset[0];
 
   if (!numero || numero.estado_id !== estadoId || !numero.ativo) {
     return { status: 'numero_invalido' };
+  }
+
+  if (numero.status_conexao !== 'conectado') {
+    return { status: 'numero_desconectado' };
+  }
+
+  if (!numero.nome_colaboradora || !numero.nome_colaboradora.trim()) {
+    return { status: 'numero_sem_colaboradora' };
   }
 
   const contatosRequest = new sql.Request(executor);
@@ -173,6 +194,8 @@ async function validarNumeroEContatos({ estadoId, numeroRemetenteId, contatoIds 
  *
  * Retorna:
  *   { status: 'numero_invalido' } |
+ *   { status: 'numero_desconectado' } |
+ *   { status: 'numero_sem_colaboradora' } |
  *   { status: 'contatos_invalidos' } |
  *   { status: 'ok', avisos: [{contatoId,nome,telefone}] }
  */
@@ -182,15 +205,19 @@ async function verificarDisparo({ estadoId, numeroRemetenteId, contatoIds }) {
 }
 
 /**
- * Valida (numeroRemetenteId ativo e do estadoId informado; todo contatoId
- * pertence ao estadoId informado) e grava Disparos + DisparoContatos numa
- * única transação. Não calcula/devolve avisos — isso é responsabilidade
- * exclusiva de verificarDisparo() (GET/POST .../disparos/verificar), que
- * deve ser chamado pelo frontend antes deste, para o usuário poder decidir
- * com o aviso em mãos ainda sem nada gravado.
+ * Valida (numeroRemetenteId ativo, do estadoId informado, conectado e com
+ * nome_colaboradora preenchido; todo contatoId pertence ao estadoId
+ * informado) e grava Disparos + DisparoContatos numa única transação. A
+ * validação roda antes de qualquer INSERT, e um resultado diferente de 'ok'
+ * dá rollback na transação sem gravar nada. Não calcula/devolve avisos —
+ * isso é responsabilidade exclusiva de verificarDisparo() (GET/POST
+ * .../disparos/verificar), que deve ser chamado pelo frontend antes deste,
+ * para o usuário poder decidir com o aviso em mãos ainda sem nada gravado.
  *
  * Retorna:
  *   { status: 'numero_invalido' } |
+ *   { status: 'numero_desconectado' } |
+ *   { status: 'numero_sem_colaboradora' } |
  *   { status: 'contatos_invalidos' } |
  *   { status: 'criado', disparoId, totalContatos }
  */

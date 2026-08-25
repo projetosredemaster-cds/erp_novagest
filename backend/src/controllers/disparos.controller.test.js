@@ -250,6 +250,34 @@ describe('POST /api/controle-ligacoes/disparos', () => {
     expect(res.body).toEqual({ error: 'Todos os contatos devem pertencer ao estado informado.' });
   });
 
+  it('400 quando o model recusa por número desconectado do WhatsApp (nada é gravado)', async () => {
+    disparosModel.criarDisparo.mockResolvedValue({ status: 'numero_desconectado' });
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Este número não está conectado ao WhatsApp. Conecte-o em Configurações antes de disparar.',
+    });
+  });
+
+  it('400 quando o model recusa por número sem nome_colaboradora configurado (nada é gravado)', async () => {
+    disparosModel.criarDisparo.mockResolvedValue({ status: 'numero_sem_colaboradora' });
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Este número não tem nome da colaboradora configurado. Preencha em Configurações antes de disparar.',
+    });
+  });
+
   it('201 — cria o disparo e devolve só disparoId/totalContatos (sem avisos, ver POST /disparos/verificar)', async () => {
     disparosModel.criarDisparo.mockResolvedValue({
       status: 'criado',
@@ -382,6 +410,36 @@ describe('POST /api/controle-ligacoes/disparos/verificar', () => {
 
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: 'Todos os contatos devem pertencer ao estado informado.' });
+  });
+
+  it('400 quando o model recusa por número desconectado do WhatsApp (não chama criarDisparo)', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({ status: 'numero_desconectado' });
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Este número não está conectado ao WhatsApp. Conecte-o em Configurações antes de disparar.',
+    });
+    expect(disparosModel.criarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('400 quando o model recusa por número sem nome_colaboradora configurado (não chama criarDisparo)', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({ status: 'numero_sem_colaboradora' });
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos/verificar')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(payloadValido);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Este número não tem nome da colaboradora configurado. Preencha em Configurações antes de disparar.',
+    });
+    expect(disparosModel.criarDisparo).not.toHaveBeenCalled();
   });
 
   it('200 — devolve avisos não-vazios sem gravar nada (não chama criarDisparo)', async () => {

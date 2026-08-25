@@ -1,0 +1,245 @@
+// Mesmo padrão de guarda usado no resto da suíte (ex.: disparos.service não
+// tem teste próprio guardado assim, mas o worker/controller tem) — todo
+// model é "guardado" por padrão, lançando se alguma função for chamada sem
+// mock explícito, para nunca tentar uma conexão real com o Azure SQL.
+// `baileysSessionService` não é model — só a função usada de fato
+// (`obterSocketConectado`) é espiada/mockada diretamente em cada teste.
+
+const mensagensModel = require('../models/mensagens.model');
+const baileysSessionService = require('../services/baileysSession.service');
+const conversasService = require('./conversas.service');
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+
+  for (const key of Object.keys(mensagensModel)) {
+    if (typeof mensagensModel[key] === 'function') {
+      vi.spyOn(mensagensModel, key).mockImplementation(() => {
+        throw new Error(
+          `[guarda de teste] mensagens.model.${key} foi chamado sem mock explícito — ` +
+          'isso teria tentado uma conexão real com o Azure SQL.'
+        );
+      });
+    }
+  }
+
+  vi.spyOn(baileysSessionService, 'obterSocketConectado').mockReturnValue(null);
+});
+
+describe('conversas.service.listarConversas', () => {
+  it('repassa busca/apenasNaoLidas para o model', async () => {
+    mensagensModel.listConversas.mockResolvedValue([{ contato: { id: 1 } }]);
+
+    const resultado = await conversasService.listarConversas({ busca: 'Maria', apenasNaoLidas: true });
+
+    expect(resultado).toEqual([{ contato: { id: 1 } }]);
+    expect(mensagensModel.listConversas).toHaveBeenCalledWith({ busca: 'Maria', apenasNaoLidas: true });
+  });
+});
+
+describe('conversas.service.contarNotificacoesNaoVistas', () => {
+  it('repassa o total devolvido pelo model', async () => {
+    mensagensModel.contarNotificacoesNaoVistas.mockResolvedValue(5);
+
+    const resultado = await conversasService.contarNotificacoesNaoVistas();
+
+    expect(resultado).toBe(5);
+    expect(mensagensModel.contarNotificacoesNaoVistas).toHaveBeenCalledWith();
+  });
+});
+
+describe('conversas.service.listarNotificacoesPendentes', () => {
+  it('repassa a lista devolvida pelo model', async () => {
+    const itens = [
+      { contatoId: 42, nomeContato: 'Maria', telefone: '5598900000000', preview: 'oi', criado_em: '2026-08-25T12:00:00.000Z' },
+    ];
+    mensagensModel.listNotificacoesPendentes.mockResolvedValue(itens);
+
+    const resultado = await conversasService.listarNotificacoesPendentes();
+
+    expect(resultado).toEqual(itens);
+    expect(mensagensModel.listNotificacoesPendentes).toHaveBeenCalledWith();
+  });
+
+  it('repassa lista vazia sem erro', async () => {
+    mensagensModel.listNotificacoesPendentes.mockResolvedValue([]);
+
+    const resultado = await conversasService.listarNotificacoesPendentes();
+
+    expect(resultado).toEqual([]);
+  });
+
+  /**
+   * A truncagem de `preview` para 80 caracteres (com "…" quando corta) é
+   * lógica interna de `mensagens.model.js: truncarTexto`, usada dentro de
+   * `listNotificacoesPendentes` antes do retorno — não tem teste próprio
+   * (convenção do repo: nenhum `.model.js` tem teste dedicado). Este teste
+   * cobre o contrato de formato daqui pra baixo: o service é um passthrough
+   * fino, então documenta/confirma que ele preserva exatamente o `preview`
+   * já truncado (ou não) que o model devolve, sem reprocessar.
+   */
+  it('preserva o preview truncado (>80 chars) e o preview curto (<=80 chars) tal como o model devolve', async () => {
+    const corpoLongo = 'a'.repeat(90);
+    const previewTruncado = `${'a'.repeat(80)}…`;
+    const itens = [
+      { contatoId: 1, nomeContato: 'Maria', telefone: '5598900000000', preview: previewTruncado, criado_em: '2026-08-25T12:00:00.000Z' },
+      { contatoId: 2, nomeContato: 'João', telefone: '5598900000001', preview: 'ola', criado_em: '2026-08-25T12:01:00.000Z' },
+    ];
+    mensagensModel.listNotificacoesPendentes.mockResolvedValue(itens);
+
+    const resultado = await conversasService.listarNotificacoesPendentes();
+
+    expect(resultado[0].preview).toHaveLength(81);
+    expect(resultado[0].preview.endsWith('…')).toBe(true);
+    expect(corpoLongo.length).toBeGreaterThan(80);
+    expect(resultado[1].preview).toBe('ola');
+  });
+});
+
+describe('conversas.service.listarMensagens', () => {
+  it('retorna null quando o contato não existe (controller decide o 404)', async () => {
+    mensagensModel.existeContato.mockResolvedValue(false);
+
+    const resultado = await conversasService.listarMensagens(999);
+
+    expect(resultado).toBeNull();
+    expect(mensagensModel.listMensagensEMarcarLidas).not.toHaveBeenCalled();
+    expect(mensagensModel.findPrimeiroNumeroRemetenteDaConversa).not.toHaveBeenCalled();
+  });
+
+  it('busca mensagens + numeroRemetenteInicial quando o contato existe', async () => {
+    mensagensModel.existeContato.mockResolvedValue(true);
+    mensagensModel.listMensagensEMarcarLidas.mockResolvedValue([{ id: 1, remetente: 'cliente', corpo: 'oi' }]);
+    mensagensModel.findPrimeiroNumeroRemetenteDaConversa.mockResolvedValue({ id: 3, apelido: 'Teste Junior' });
+
+    const resultado = await conversasService.listarMensagens(42);
+
+    expect(resultado).toEqual({
+      mensagens: [{ id: 1, remetente: 'cliente', corpo: 'oi' }],
+      numeroRemetenteInicial: { id: 3, apelido: 'Teste Junior' },
+    });
+    expect(mensagensModel.listMensagensEMarcarLidas).toHaveBeenCalledWith(42);
+    expect(mensagensModel.findPrimeiroNumeroRemetenteDaConversa).toHaveBeenCalledWith(42);
+  });
+
+  it('numeroRemetenteInicial vem null quando o contato existe mas nunca teve mensagem', async () => {
+    mensagensModel.existeContato.mockResolvedValue(true);
+    mensagensModel.listMensagensEMarcarLidas.mockResolvedValue([]);
+    mensagensModel.findPrimeiroNumeroRemetenteDaConversa.mockResolvedValue(null);
+
+    const resultado = await conversasService.listarMensagens(42);
+
+    expect(resultado).toEqual({ mensagens: [], numeroRemetenteInicial: null });
+  });
+});
+
+describe('conversas.service.responder', () => {
+  const CONTATO_ID = 42;
+
+  it('status=contato_nao_encontrado quando o contato não existe', async () => {
+    mensagensModel.existeContato.mockResolvedValue(false);
+
+    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+
+    expect(resultado).toEqual({ status: 'contato_nao_encontrado' });
+    expect(mensagensModel.findUltimoNumeroRemetenteDaConversa).not.toHaveBeenCalled();
+  });
+
+  it('status=sem_historico quando o contato nunca teve nenhuma mensagem', async () => {
+    mensagensModel.existeContato.mockResolvedValue(true);
+    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(null);
+
+    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+
+    expect(resultado).toEqual({ status: 'sem_historico' });
+    expect(baileysSessionService.obterSocketConectado).not.toHaveBeenCalled();
+  });
+
+  it('status=numero_desconectado quando a sessão Baileys não está conectada', async () => {
+    mensagensModel.existeContato.mockResolvedValue(true);
+    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(3);
+    baileysSessionService.obterSocketConectado.mockReturnValue(null);
+
+    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+
+    expect(resultado).toEqual({ status: 'numero_desconectado' });
+  });
+
+  it('status=sem_whatsapp quando sock.onWhatsApp não confirma o número', async () => {
+    mensagensModel.existeContato.mockResolvedValue(true);
+    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(3);
+    mensagensModel.findTelefoneContato.mockResolvedValue('5598900000000');
+
+    const sendMessage = vi.fn();
+    const onWhatsApp = vi.fn().mockResolvedValue([]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+
+    expect(resultado).toEqual({
+      status: 'sem_whatsapp',
+      erro: 'Número não possui WhatsApp ativo ou não pôde ser verificado.',
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('status=sem_whatsapp quando sock.onWhatsApp lança erro', async () => {
+    mensagensModel.existeContato.mockResolvedValue(true);
+    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(3);
+    mensagensModel.findTelefoneContato.mockResolvedValue('5598900000000');
+
+    const sendMessage = vi.fn();
+    const onWhatsApp = vi.fn().mockRejectedValue(new Error('conexão instável'));
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+
+    expect(resultado).toEqual({ status: 'sem_whatsapp', erro: 'conexão instável' });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('status=falha_envio quando sock.sendMessage lança erro', async () => {
+    mensagensModel.existeContato.mockResolvedValue(true);
+    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(3);
+    mensagensModel.findTelefoneContato.mockResolvedValue('5598900000000');
+
+    const sendMessage = vi.fn().mockRejectedValue(new Error('timeout de rede'));
+    const onWhatsApp = vi.fn().mockResolvedValue([{ jid: '5598900000000@s.whatsapp.net', exists: true }]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+
+    expect(resultado).toEqual({ status: 'falha_envio', erro: 'timeout de rede' });
+    expect(mensagensModel.inserirMensagemEnviada).not.toHaveBeenCalled();
+  });
+
+  it('status=enviada e grava em Mensagens (remetente=colaboradora) usando o jid confirmado', async () => {
+    mensagensModel.existeContato.mockResolvedValue(true);
+    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(3);
+    mensagensModel.findTelefoneContato.mockResolvedValue('5598900000000');
+    mensagensModel.inserirMensagemEnviada.mockResolvedValue({
+      id: 10,
+      remetente: 'colaboradora',
+      corpo: 'oi',
+      criado_em: '2026-08-25T12:00:00.000Z',
+    });
+
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const onWhatsApp = vi.fn().mockResolvedValue([{ jid: '5598900000000@s.whatsapp.net', exists: true }]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+
+    expect(sendMessage).toHaveBeenCalledWith('5598900000000@s.whatsapp.net', { text: 'oi' });
+    expect(mensagensModel.inserirMensagemEnviada).toHaveBeenCalledWith({
+      contatoId: CONTATO_ID,
+      numeroRemetenteId: 3,
+      remetente: 'colaboradora',
+      corpo: 'oi',
+    });
+    expect(resultado).toEqual({
+      status: 'enviada',
+      mensagem: { id: 10, remetente: 'colaboradora', corpo: 'oi', criado_em: '2026-08-25T12:00:00.000Z' },
+    });
+  });
+});

@@ -36,10 +36,18 @@ function formatResumoLinha({ totalImportados, totalLinhas, totalSemEstado, total
   return partes.join(' · ');
 }
 
-function Stat({ label, value }) {
+// `variant` só é aplicado quando a contagem é > 0 — destaque sutil para
+// chamar atenção para duplicados/erros reais, sem alarmar um card zerado.
+const STAT_VARIANTS = {
+  danger: { border: 'border-[var(--danger)]/50', bg: 'bg-[var(--danger-bg)]', value: 'text-[var(--danger)]' },
+  warning: { border: 'border-[var(--warning)]/50', bg: 'bg-[var(--warning-bg)]', value: 'text-[var(--warning)]' },
+};
+
+function Stat({ label, value, variant }) {
+  const v = variant ? STAT_VARIANTS[variant] : null;
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 text-center">
-      <div className="font-display text-[20px] font-extrabold leading-none text-[var(--text)]">{value}</div>
+    <div className={`rounded-lg border px-3 py-2.5 text-center ${v ? `${v.border} ${v.bg}` : 'border-[var(--border)] bg-[var(--panel-alt)]'}`}>
+      <div className={`font-display text-[20px] font-extrabold leading-none ${v ? v.value : 'text-[var(--text)]'}`}>{value}</div>
       <div className="mt-1 text-[11px] uppercase tracking-[.06em] text-[var(--muted)]">{label}</div>
     </div>
   );
@@ -51,9 +59,22 @@ function ResumoStats({ resumo }) {
       <Stat label="Linhas" value={resumo.totalLinhas} />
       <Stat label="Importados" value={resumo.totalImportados} />
       <Stat label="Sem estado" value={resumo.totalSemEstado} />
-      <Stat label="Duplicados" value={resumo.totalDuplicado} />
-      <Stat label="Erros" value={resumo.totalErro} />
+      <Stat label="Duplicados" value={resumo.totalDuplicado} variant={resumo.totalDuplicado > 0 ? 'warning' : undefined} />
+      <Stat label="Erros" value={resumo.totalErro} variant={resumo.totalErro > 0 ? 'danger' : undefined} />
     </div>
+  );
+}
+
+function TipoErroBadge({ tipo }) {
+  const isDuplicado = tipo === 'duplicado';
+  return (
+    <span
+      className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${
+        isDuplicado ? 'bg-[var(--warning-bg)] text-[var(--warning)]' : 'bg-[var(--danger-bg)] text-[var(--danger)]'
+      }`}
+    >
+      {isDuplicado ? 'Duplicado' : 'Erro'}
+    </span>
   );
 }
 
@@ -153,8 +174,8 @@ function DetalheImportacao({ loteId, token, onVoltar }) {
                   {detalhe.erros.map((erro, idx) => (
                     <tr key={`${erro.linha}-${idx}`}>
                       <td className="px-3 py-2 text-[var(--text)]">{erro.linha}</td>
-                      <td className="px-3 py-2 text-[var(--text)]">
-                        {erro.tipo === 'duplicado' ? 'Duplicado' : 'Erro'}
+                      <td className="px-3 py-2">
+                        <TipoErroBadge tipo={erro.tipo} />
                       </td>
                       <td className="px-3 py-2 text-[var(--text)]">{erro.nomePlanilha || '—'}</td>
                       <td className="px-3 py-2 text-[var(--muted)]">{erro.contatoPlanilha || '—'}</td>

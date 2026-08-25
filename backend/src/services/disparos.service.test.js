@@ -128,6 +128,30 @@ describe('disparos.service.verificarDisparo', () => {
     expect(resultado).toEqual({ status: 'contatos_invalidos' });
   });
 
+  it('propaga o status "numero_desconectado" retornado pelo model', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({ status: 'numero_desconectado' });
+
+    const resultado = await disparosService.verificarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      contatoIds: [10],
+    });
+
+    expect(resultado).toEqual({ status: 'numero_desconectado' });
+  });
+
+  it('propaga o status "numero_sem_colaboradora" retornado pelo model', async () => {
+    disparosModel.verificarDisparo.mockResolvedValue({ status: 'numero_sem_colaboradora' });
+
+    const resultado = await disparosService.verificarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      contatoIds: [10],
+    });
+
+    expect(resultado).toEqual({ status: 'numero_sem_colaboradora' });
+  });
+
   it('não chama criarDisparo (rota de verificação nunca grava)', async () => {
     disparosModel.verificarDisparo.mockResolvedValue({ status: 'ok', avisos: [] });
 
@@ -209,6 +233,32 @@ describe('disparos.service.criarDisparo', () => {
     });
 
     expect(resultado).toEqual({ status: 'contatos_invalidos' });
+  });
+
+  it('propaga o status "numero_desconectado" retornado pelo model (nada é gravado)', async () => {
+    disparosModel.criarDisparo.mockResolvedValue({ status: 'numero_desconectado' });
+
+    const resultado = await disparosService.criarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      usuarioId: 1,
+      contatoIds: [10],
+    });
+
+    expect(resultado).toEqual({ status: 'numero_desconectado' });
+  });
+
+  it('propaga o status "numero_sem_colaboradora" retornado pelo model (nada é gravado)', async () => {
+    disparosModel.criarDisparo.mockResolvedValue({ status: 'numero_sem_colaboradora' });
+
+    const resultado = await disparosService.criarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      usuarioId: 1,
+      contatoIds: [10],
+    });
+
+    expect(resultado).toEqual({ status: 'numero_sem_colaboradora' });
   });
 });
 

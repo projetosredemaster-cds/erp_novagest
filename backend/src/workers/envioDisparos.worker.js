@@ -1,6 +1,7 @@
 const disparosModel = require('../models/disparos.model');
 const mensagensTemplatesModel = require('../models/mensagensTemplates.model');
 const numerosRemetentesModel = require('../models/numerosRemetentes.model');
+const mensagensModel = require('../models/mensagens.model');
 const baileysSessionService = require('../services/baileysSession.service');
 
 const INTERVALO_MS = Number(process.env.ENVIO_DISPAROS_INTERVALO_MS) || 15000;
@@ -34,7 +35,7 @@ function calcularProximoTemplate(templatesAtivos, ultimoTemplateUsadoId) {
 }
 
 async function processarItem(item) {
-  const { disparoContatoId, numeroRemetenteId, contatoNome, contatoTelefone } = item;
+  const { disparoContatoId, numeroRemetenteId, contatoId, contatoNome, contatoTelefone } = item;
   const logPrefix =
     `[envioDisparos.worker] disparoContatoId=${disparoContatoId} numeroRemetenteId=${numeroRemetenteId} ` +
     `contato="${contatoNome}" (${contatoTelefone})`;
@@ -114,6 +115,22 @@ async function processarItem(item) {
     mensagemEnviada: mensagem,
   });
   console.log(`${logPrefix}: enviado com sucesso (templateUsadoId=${proximoTemplate.id}).`);
+
+  // Registro em Mensagens (Central de Mensagens) é só histórico/auditoria —
+  // uma falha aqui não deve fazer o worker tratar o envio (que já teve
+  // sucesso via sock.sendMessage, já confirmado acima) como falha, nem
+  // reenviar a mensagem.
+  try {
+    await mensagensModel.inserirMensagemEnviada({
+      contatoId,
+      numeroRemetenteId,
+      remetente: 'ia',
+      corpo: mensagem,
+    });
+  } catch (err) {
+    console.error(`${logPrefix}: falha ao registrar mensagem enviada em Mensagens (envio em si já teve sucesso):`, err);
+  }
+
   return { tentouEnviar: true };
 }
 

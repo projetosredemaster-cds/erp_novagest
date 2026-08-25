@@ -2,9 +2,10 @@ import { NavLink, Link } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { moduleRegistry } from './moduleRegistry.js';
 import { useAuth } from './AuthContext.jsx';
+import UserFooterMenu from './UserFooterMenu.jsx';
 
 export default function Sidebar() {
-  const { isAdmin, logout } = useAuth();
+  const { isAdmin } = useAuth();
   const [configOpen, setConfigOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const configMenuRef = useRef(null);
@@ -126,14 +127,7 @@ export default function Sidebar() {
             </div>
           ) : null}
 
-          <button
-            type="button"
-            onClick={logout}
-            className="flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--panel-alt)] hover:text-[var(--danger)]"
-          >
-            <span className="text-base leading-none">🚪</span>
-            Sair
-          </button>
+          <UserFooterMenu />
         </div>
       </aside>
     </>

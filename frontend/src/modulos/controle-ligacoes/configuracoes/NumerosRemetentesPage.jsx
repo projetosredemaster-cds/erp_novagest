@@ -15,11 +15,17 @@ const inputCls = "w-full rounded-lg border border-[var(--border)] bg-[var(--pane
 const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-4 pt-5 pb-[22px] sm:px-5";
 const tag = "inline-flex items-center gap-1.5 rounded-full bg-[var(--panel-alt)] border border-[var(--border)] pl-2.5 pr-1.5 py-1 text-[12px]";
 
+const STATUS_CONEXAO_INFO = {
+  conectado: { label: 'Conectado', bg: 'bg-[var(--success-bg)]', text: 'text-[var(--success)]' },
+  desconectado: { label: 'Desconectado', bg: 'bg-[var(--danger-bg)]', text: 'text-[var(--danger)]' },
+  aguardando_conexao: { label: 'Aguardando conexão', bg: 'bg-[var(--warning-bg)]', text: 'text-[var(--warning)]' },
+};
+
 function StatusConexaoBadge({ status }) {
-  const label = status === 'aguardando_conexao' ? 'Aguardando conexão' : status;
+  const info = STATUS_CONEXAO_INFO[status] || { label: status, bg: 'bg-[var(--panel-alt)]', text: 'text-[var(--muted)]' };
   return (
-    <span className="w-fit rounded-full bg-[var(--gold)]/15 px-2.5 py-0.5 text-[11.5px] font-semibold text-[var(--gold)]">
-      {label}
+    <span className={`w-fit rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${info.bg} ${info.text}`}>
+      {info.label}
     </span>
   );
 }
@@ -143,7 +149,7 @@ function ConexaoWhatsAppModal({ numero, token, onClose, onConectado }) {
             </p>
           </div>
         ) : status === 'conectado' ? (
-          <div className="px-1 py-8 text-center text-sm font-semibold text-[var(--violet)]">
+          <div className="px-1 py-8 text-center text-sm font-semibold text-[var(--success)]">
             WhatsApp conectado com sucesso!
           </div>
         ) : status === 'erro' ? (

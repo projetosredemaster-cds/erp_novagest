@@ -13,6 +13,10 @@
   --teal: #4fd1c5;
   --danger: #e0645a;
   --danger-bg: rgba(224, 101, 90, 0.12);
+  --success: #34d399;
+  --success-bg: rgba(52, 211, 153, 0.12);
+  --warning: #e3b341;
+  --warning-bg: rgba(227, 179, 65, 0.12);
   --violet: #a78bfa;
 }
 

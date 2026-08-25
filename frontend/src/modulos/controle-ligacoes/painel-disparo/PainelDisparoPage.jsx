@@ -7,9 +7,10 @@
 // fila de contatos, seleção de até 10 contatos e registro da intenção de
 // disparo via POST /disparos (não envia nada de fato — worker de envio é
 // fase futura, fora de escopo).
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../../app/AuthContext.jsx';
 import { fetchPainelDisparo, fetchContatosDisponiveis, verificarDisparo, criarDisparo } from './painelDisparoApi.js';
+import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
 
 const btn = "bg-[var(--violet)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
 const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--panel-alt)] disabled:cursor-not-allowed disabled:opacity-50";
@@ -26,11 +27,17 @@ const ORDENS = [
 const DEBOUNCE_BUSCA_MS = 400;
 const MAX_CONTATOS_POR_DISPARO = 10;
 
+const STATUS_CONEXAO_INFO = {
+  conectado: { label: 'Conectado', bg: 'bg-[var(--success-bg)]', text: 'text-[var(--success)]' },
+  desconectado: { label: 'Desconectado', bg: 'bg-[var(--danger-bg)]', text: 'text-[var(--danger)]' },
+  aguardando_conexao: { label: 'Aguardando conexão', bg: 'bg-[var(--warning-bg)]', text: 'text-[var(--warning)]' },
+};
+
 function StatusConexaoBadge({ status }) {
-  const label = status === 'aguardando_conexao' ? 'Aguardando conexão' : status;
+  const info = STATUS_CONEXAO_INFO[status] || { label: status, bg: 'bg-[var(--panel-alt)]', text: 'text-[var(--muted)]' };
   return (
-    <span className="w-fit shrink-0 rounded-full bg-[var(--gold)]/15 px-2.5 py-0.5 text-[11px] font-semibold text-[var(--gold)]">
-      {label}
+    <span className={`w-fit shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${info.bg} ${info.text}`}>
+      {info.label}
     </span>
   );
 }
@@ -90,12 +97,49 @@ function AvisosModal({ avisos, confirmando, erro, onCancelar, onConfirmar }) {
   );
 }
 
-function EstadoDisparoCard({ token, resumo, onFlash }) {
+function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
   const { estado, totalContatos, numerosAtivos } = resumo;
 
-  const [numeroRemetenteId, setNumeroRemetenteId] = useState(
-    numerosAtivos.length > 0 ? String(numerosAtivos[0].id) : ''
-  );
+  // Elegibilidade de disparo por número (independente do statusConexao que
+  // `GET /painel-disparo` já devolve): um número só é elegível se estiver
+  // conectado E tiver nome de colaboradora configurado — os dois campos são
+  // exigidos pela validação server-side (`POST /disparos`/`/disparos/verificar`),
+  // aqui só antecipamos a checagem pra UX, sem duplicar a fonte de verdade
+  // (o 400 do backend continua sendo o guarda final, ver disparoError abaixo).
+  // `numerosDetalhes` é `null` enquanto a busca complementar de
+  // PainelDisparoPage ainda não settled — nesse intervalo, todo número é
+  // tratado como não elegível (mais seguro que liberar sem saber).
+  const elegibilidadePorNumero = useMemo(() => {
+    const mapa = new Map();
+    numerosAtivos.forEach((n) => {
+      const detalhe = numerosDetalhes?.get(n.id);
+      const nomeColaboradora = detalhe?.nomeColaboradora;
+      const temNomeColaboradora = typeof nomeColaboradora === 'string' && nomeColaboradora.trim() !== '';
+      const conectado = n.statusConexao === 'conectado';
+      const elegivel = conectado && temNomeColaboradora;
+      mapa.set(n.id, {
+        elegivel,
+        // Prioridade pro motivo de desconexão quando os dois faltam, pra não
+        // mostrar dois motivos ao mesmo tempo (ver instrução da tarefa).
+        motivo: elegivel ? null : (!conectado ? 'desconectado' : 'sem colaboradora configurada'),
+      });
+    });
+    return mapa;
+  }, [numerosAtivos, numerosDetalhes]);
+
+  // Seleção do número usado no disparo: `numeroRemetenteIdManual` é `null`
+  // até o usuário mexer no <select> pela primeira vez; enquanto isso, o valor
+  // efetivo é sempre DERIVADO (não guardado em estado próprio nem sincronizado
+  // via efeito) a partir de `elegibilidadePorNumero` — prefere o primeiro
+  // número elegível, caindo pro primeiro da lista (mesmo inelegível) se
+  // nenhum for elegível, só pra não deixar o select vazio. Como é derivado a
+  // cada render, atualiza sozinho assim que `numerosDetalhes` chega da API,
+  // sem precisar de um useEffect pra "reconciliar" a escolha inicial.
+  const [numeroRemetenteIdManual, setNumeroRemetenteIdManual] = useState(null);
+  const numeroPreferido = numerosAtivos.find((n) => elegibilidadePorNumero.get(n.id)?.elegivel) || numerosAtivos[0] || null;
+  const numeroRemetenteId = numeroRemetenteIdManual !== null
+    ? numeroRemetenteIdManual
+    : (numeroPreferido ? String(numeroPreferido.id) : '');
 
   const estadoId = estado.id;
 
@@ -297,7 +341,18 @@ function EstadoDisparoCard({ token, resumo, onFlash }) {
   }
 
   const semNumeroAtivo = numerosAtivos.length === 0;
-  const disparoDesabilitado = disparando || selecionados.size === 0 || semNumeroAtivo;
+  const algumNumeroElegivel = numerosAtivos.some((n) => elegibilidadePorNumero.get(n.id)?.elegivel);
+  const nenhumNumeroElegivel = !semNumeroAtivo && !algumNumeroElegivel;
+  const disparoDesabilitado = disparando || selecionados.size === 0 || semNumeroAtivo || nenhumNumeroElegivel;
+
+  // Detalhe (telefone real + colaboradora) do número atualmente selecionado
+  // no <select> — só usado para a linha informativa "📱 ... · Atendido por
+  // ...", que só aparece quando o número escolhido é elegível E já tem um
+  // `numero` (telefone) conectado preenchido (defensivo: elegibilidade já
+  // exige `statusConexao==='conectado'`, mas não custa checar de novo aqui
+  // em vez de presumir que os dois sempre andam juntos).
+  const numeroSelecionadoElegivel = elegibilidadePorNumero.get(Number(numeroRemetenteId))?.elegivel;
+  const numeroSelecionadoDetalhe = numerosDetalhes?.get(Number(numeroRemetenteId));
 
   return (
     <div className={card}>
@@ -335,11 +390,16 @@ function EstadoDisparoCard({ token, resumo, onFlash }) {
               id={`numero-${estado.id}`}
               className={selectCls}
               value={numeroRemetenteId}
-              onChange={(e) => setNumeroRemetenteId(e.target.value)}
+              onChange={(e) => setNumeroRemetenteIdManual(e.target.value)}
             >
-              {numerosAtivos.map((n) => (
-                <option key={n.id} value={n.id}>{n.apelido}</option>
-              ))}
+              {numerosAtivos.map((n) => {
+                const info = elegibilidadePorNumero.get(n.id);
+                return (
+                  <option key={n.id} value={n.id} disabled={!info?.elegivel}>
+                    {n.apelido}{info?.motivo ? ` (${info.motivo})` : ''}
+                  </option>
+                );
+              })}
             </select>
             {numerosAtivos.find((n) => String(n.id) === numeroRemetenteId) ? (
               <StatusConexaoBadge
@@ -350,6 +410,16 @@ function EstadoDisparoCard({ token, resumo, onFlash }) {
           <p className="mt-1 text-[11px] text-[var(--muted)]">
             A escolha acima não filtra a fila abaixo — a lista de contatos é sempre a do estado inteiro.
           </p>
+          {nenhumNumeroElegivel ? (
+            <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 text-[12.5px] text-[var(--muted)]">
+              Nenhum número deste estado está pronto para disparo. Configure a conexão e o nome da colaboradora em Configurações.
+            </div>
+          ) : null}
+          {numeroSelecionadoElegivel && numeroSelecionadoDetalhe?.numero ? (
+            <div className="mt-2 rounded-lg border border-[var(--success)]/30 bg-[var(--success-bg)] px-3 py-2.5 text-[13px] text-[var(--success)]">
+              📱 {numeroSelecionadoDetalhe.numero} · Atendido por {numeroSelecionadoDetalhe.nomeColaboradora}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -471,6 +541,32 @@ export default function PainelDisparoPage() {
     carregarPainel();
   }, [carregarPainel]);
 
+  // Busca complementar, uma única vez pro componente inteiro (não por card):
+  // `GET /painel-disparo` não devolve `nomeColaboradora` de cada número
+  // remetente, então cruzamos aqui com `GET /numeros-remetentes` (que já tem
+  // `statusConexao`+`nomeColaboradora`) pra cada EstadoDisparoCard calcular
+  // elegibilidade de disparo sem precisar de uma rota nova. `numerosDetalhes`
+  // fica `null` até essa busca settle; falha não bloqueia o resto do painel —
+  // vira um Map vazio, e cada card trata isso como "nenhum número elegível"
+  // (mais seguro que liberar sem saber).
+  const [numerosDetalhes, setNumerosDetalhes] = useState(null);
+
+  const carregarNumerosDetalhes = useCallback(() => {
+    fetchNumerosRemetentes(token)
+      .then((lista) => {
+        const mapa = new Map();
+        (lista || []).forEach((n) => {
+          mapa.set(n.id, { statusConexao: n.statusConexao, nomeColaboradora: n.nomeColaboradora, numero: n.numero });
+        });
+        setNumerosDetalhes(mapa);
+      })
+      .catch(() => setNumerosDetalhes(new Map()));
+  }, [token]);
+
+  useEffect(() => {
+    carregarNumerosDetalhes();
+  }, [carregarNumerosDetalhes]);
+
   function retryPainel() {
     setLoading(true);
     setLoadError(null);
@@ -497,7 +593,13 @@ export default function PainelDisparoPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {painel.map((resumo) => (
-              <EstadoDisparoCard key={resumo.estado.id} token={token} resumo={resumo} onFlash={flash} />
+              <EstadoDisparoCard
+                key={resumo.estado.id}
+                token={token}
+                resumo={resumo}
+                onFlash={flash}
+                numerosDetalhes={numerosDetalhes}
+              />
             ))}
           </div>
         )}

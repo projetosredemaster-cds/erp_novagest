@@ -11,6 +11,8 @@ import ControleLigacoesHomePage from '../modulos/controle-ligacoes/ControleLigac
 import NumerosRemetentesPage from '../modulos/controle-ligacoes/configuracoes/NumerosRemetentesPage.jsx';
 import ImportacaoPage from '../modulos/controle-ligacoes/importacao/ImportacaoPage.jsx';
 import PainelDisparoPage from '../modulos/controle-ligacoes/painel-disparo/PainelDisparoPage.jsx';
+import ConversasPage from '../modulos/controle-ligacoes/conversas/ConversasPage.jsx';
+import UsuariosPage from '../modulos/admin/UsuariosPage.jsx';
 import { moduleRegistry } from '../app/moduleRegistry.js';
 
 export default function AppRoutes() {
@@ -56,7 +58,11 @@ export default function AppRoutes() {
           <Route index element={<ControleLigacoesHomePage />} />
           <Route path="configuracoes/numeros-remetentes" element={<NumerosRemetentesPage />} />
           <Route path="importacao" element={<ImportacaoPage />} />
+          <Route path="conversas" element={<ConversasPage />} />
           <Route path="painel-disparo" element={<PainelDisparoPage />} />
+          <Route element={<RequireAdmin />}>
+            <Route path="usuarios" element={<UsuariosPage />} />
+          </Route>
         </Route>
       </Route>
     </Routes>

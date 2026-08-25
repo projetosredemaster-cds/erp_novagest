@@ -109,6 +109,18 @@ async function verificar(req, res) {
         .json({ error: 'Número remetente inválido para o estado informado.' });
     }
 
+    if (resultado.status === 'numero_desconectado') {
+      return res.status(400).json({
+        error: 'Este número não está conectado ao WhatsApp. Conecte-o em Configurações antes de disparar.',
+      });
+    }
+
+    if (resultado.status === 'numero_sem_colaboradora') {
+      return res.status(400).json({
+        error: 'Este número não tem nome da colaboradora configurado. Preencha em Configurações antes de disparar.',
+      });
+    }
+
     if (resultado.status === 'contatos_invalidos') {
       return res
         .status(400)
@@ -142,6 +154,18 @@ async function criar(req, res) {
       return res
         .status(400)
         .json({ error: 'Número remetente inválido para o estado informado.' });
+    }
+
+    if (resultado.status === 'numero_desconectado') {
+      return res.status(400).json({
+        error: 'Este número não está conectado ao WhatsApp. Conecte-o em Configurações antes de disparar.',
+      });
+    }
+
+    if (resultado.status === 'numero_sem_colaboradora') {
+      return res.status(400).json({
+        error: 'Este número não tem nome da colaboradora configurado. Preencha em Configurações antes de disparar.',
+      });
     }
 
     if (resultado.status === 'contatos_invalidos') {

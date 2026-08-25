@@ -5,6 +5,7 @@ const estadosController = require('../controllers/estados.controller');
 const numerosRemetentesController = require('../controllers/numerosRemetentes.controller');
 const importacaoController = require('../controllers/importacao.controller');
 const disparosController = require('../controllers/disparos.controller');
+const conversasController = require('../controllers/conversas.controller');
 
 const router = express.Router();
 
@@ -68,5 +69,18 @@ router.post('/disparos', disparosController.criar);
 // Envio de Disparos (v6) — ver CONTRATO-CONTROLE-LIGACOES-API.md. Verbo GET
 // novo, sem conflito com as rotas POST /disparos* acima.
 router.get('/disparos/:id', disparosController.detalhe);
+
+// Central de Mensagens (v7) — ver CONTRATO-CONTROLE-LIGACOES-API.md.
+router.get('/conversas', conversasController.listar);
+// '/conversas/stream' (SSE) não colide com '/conversas/:contatoId/mensagens'
+// (segmentos de path diferentes), mas fica registrada aqui ao lado das
+// demais rotas de '/conversas' por legibilidade.
+router.get('/conversas/stream', conversasController.stream);
+router.get('/conversas/:contatoId/mensagens', conversasController.mensagens);
+router.post('/conversas/:contatoId/mensagens', conversasController.responder);
+// Contador do sino de notificações (mensagens "primeira resposta de
+// cliente" ainda não vistas) — não é uma rota de '/conversas/*', mas fica
+// nesta seção por ser a mesma tabela/feature (Central de Mensagens).
+router.get('/notificacoes', conversasController.notificacoes);
 
 module.exports = router;

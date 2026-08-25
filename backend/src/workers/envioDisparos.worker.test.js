@@ -13,6 +13,7 @@ process.env.ENVIO_DISPAROS_LOTE_TAMANHO = '5';
 const disparosModel = require('../models/disparos.model');
 const mensagensTemplatesModel = require('../models/mensagensTemplates.model');
 const numerosRemetentesModel = require('../models/numerosRemetentes.model');
+const mensagensModel = require('../models/mensagens.model');
 const baileysSessionService = require('../services/baileysSession.service');
 const worker = require('./envioDisparos.worker');
 
@@ -60,6 +61,17 @@ beforeEach(() => {
       vi.spyOn(numerosRemetentesModel, key).mockImplementation(() => {
         throw new Error(
           `[guarda de teste] numerosRemetentes.model.${key} foi chamado sem mock explícito — ` +
+          'isso teria tentado uma conexão real com o Azure SQL.'
+        );
+      });
+    }
+  }
+
+  for (const key of Object.keys(mensagensModel)) {
+    if (typeof mensagensModel[key] === 'function') {
+      vi.spyOn(mensagensModel, key).mockImplementation(() => {
+        throw new Error(
+          `[guarda de teste] mensagens.model.${key} foi chamado sem mock explícito — ` +
           'isso teria tentado uma conexão real com o Azure SQL.'
         );
       });
@@ -322,6 +334,56 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
 
     expect(sendMessage).toHaveBeenCalledWith(jidResolvido, { text: 'Oi Ana' });
     expect(sendMessage).not.toHaveBeenCalledWith('5511988887777@s.whatsapp.net', expect.anything());
+  });
+
+  it('registra a mensagem enviada em Mensagens (remetente=ia) após um envio bem-sucedido', async () => {
+    const item = itemPendente({ contatoId: 777, contatoTelefone: '5511988887777' });
+    disparosModel.listContatosPendentesParaEnvio.mockResolvedValue([item]);
+    disparosModel.marcarContatoEnviado.mockResolvedValue(undefined);
+    mensagensModel.inserirMensagemEnviada.mockResolvedValue({ id: 1 });
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue('conectado');
+    numerosRemetentesModel.findNomeColaboradoraById.mockResolvedValue('Ana');
+    mensagensTemplatesModel.listTemplatesAtivosOrdenados.mockResolvedValue([
+      { id: 1, corpo: 'Oi {nomeColaboradora}', ordem: 1 },
+    ]);
+    mensagensTemplatesModel.getUltimoTemplateUsadoId.mockResolvedValue(null);
+
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const onWhatsApp = vi.fn().mockResolvedValue([{ jid: '5511988887777@s.whatsapp.net', exists: true }]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    await processarCicloEnvio();
+
+    expect(mensagensModel.inserirMensagemEnviada).toHaveBeenCalledWith({
+      contatoId: 777,
+      numeroRemetenteId: item.numeroRemetenteId,
+      remetente: 'ia',
+      corpo: 'Oi Ana',
+    });
+  });
+
+  it('falha ao registrar em Mensagens não derruba o ciclo nem desfaz o envio já confirmado', async () => {
+    const item = itemPendente();
+    disparosModel.listContatosPendentesParaEnvio.mockResolvedValue([item]);
+    disparosModel.marcarContatoEnviado.mockResolvedValue(undefined);
+    mensagensModel.inserirMensagemEnviada.mockRejectedValue(new Error('falha ao gravar Mensagens'));
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue('conectado');
+    numerosRemetentesModel.findNomeColaboradoraById.mockResolvedValue('Ana');
+    mensagensTemplatesModel.listTemplatesAtivosOrdenados.mockResolvedValue([
+      { id: 1, corpo: 'Oi {nomeColaboradora}', ordem: 1 },
+    ]);
+    mensagensTemplatesModel.getUltimoTemplateUsadoId.mockResolvedValue(null);
+
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const onWhatsApp = vi.fn().mockResolvedValue([{ jid: `${item.contatoTelefone}@s.whatsapp.net`, exists: true }]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    await expect(processarCicloEnvio()).resolves.toBeUndefined();
+
+    expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledTimes(1);
+    expect(disparosModel.marcarContatoFalha).not.toHaveBeenCalled();
   });
 
   it('marca falha (sem tentar enviar) quando sock.onWhatsApp lança erro inesperado', async () => {
