@@ -2,15 +2,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext.jsx';
 
-/**
- * Bloco de usuário exibido no rodapé das duas sidebars do sistema (ERP normal
- * e Controle de Ligações). Mostra o "nome" derivado do e-mail + um indicador
- * de status fixo, e abre um pequeno menu com a ação de logout ao ser clicado.
- *
- * Compartilhado entre Sidebar.jsx (accent --teal) e ControleLigacoesShell.jsx
- * (accent --violet) — por isso o chrome do próprio menu usa só neutros
- * (--panel-alt/--border/--muted/--text), sem fixar nenhuma cor de destaque.
- */
 export default function UserFooterMenu() {
   const { usuario, logout } = useAuth();
   const [open, setOpen] = useState(false);

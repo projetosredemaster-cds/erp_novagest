@@ -116,10 +116,6 @@ async function processarItem(item) {
   });
   console.log(`${logPrefix}: enviado com sucesso (templateUsadoId=${proximoTemplate.id}).`);
 
-  // Registro em Mensagens (Central de Mensagens) é só histórico/auditoria —
-  // uma falha aqui não deve fazer o worker tratar o envio (que já teve
-  // sucesso via sock.sendMessage, já confirmado acima) como falha, nem
-  // reenviar a mensagem.
   try {
     await mensagensModel.inserirMensagemEnviada({
       contatoId,

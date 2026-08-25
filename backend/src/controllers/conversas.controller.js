@@ -24,16 +24,6 @@ async function listar(req, res) {
   }
 }
 
-/**
- * GET /notificacoes — contagem de notificações não vistas do sino do
- * frontend (mensagens que são "primeira resposta de cliente"/handoff
- * IA→humano ainda com `lida = 0`), para o painel decidir se mostra um
- * badge/contador, mais os `itens` mais recentes (contatoId/nomeContato/
- * telefone/preview/criado_em) para o dropdown do sino listar. `naoVistas`
- * pode ser maior que `itens.length` quando houver mais de 10 pendentes —
- * `itens` mostra só as mais recentes (ver
- * `mensagens.model.js: listNotificacoesPendentes`).
- */
 async function notificacoes(req, res) {
   try {
     const [total, itens] = await Promise.all([
@@ -62,8 +52,6 @@ async function mensagens(req, res) {
       return res.status(404).json({ error: 'Contato não encontrado.' });
     }
 
-    // `resultado` já vem no formato { mensagens, numeroRemetenteInicial }
-    // montado por conversas.service.js — nenhuma composição extra aqui.
     return res.status(200).json(resultado);
   } catch (err) {
     console.error('[conversas.controller] Erro ao listar mensagens do contato:', err);
@@ -116,29 +104,6 @@ async function responder(req, res) {
   }
 }
 
-/**
- * GET /conversas/stream (SSE)
- *
- * Push em tempo real para a tela de Conversas, reaproveitando o mesmo padrão
- * de headers/escrita do stream de Conexão Baileys (ver
- * `numerosRemetentes.controller.js: conexaoStream`) — com uma diferença
- * deliberada: este stream NÃO se encerra sozinho após emitir um evento, ele
- * fica aberto até o cliente desconectar (`req.on('close', ...)`), porque a
- * tela de Conversas permanece aberta indefinidamente enquanto o operador
- * estiver nela.
- *
- * Único evento emitido, a cada `'mensagem-recebida'` no canal compartilhado
- * `mensagensEvents.service.js`:
- *   event: nova-mensagem
- *   data: {"contatoId":42,"numeroRemetenteId":17,"primeiraResposta":true}
- * (sem corpo da mensagem — o cliente decide se recarrega a lista/conversa
- * aberta). `primeiraResposta` reflete se aquela mensagem específica foi a
- * primeira de cliente já recebida daquele contato (não "primeira do dia" —
- * ver `baileysSession.service.js: handleMessagesUpsert` e a seção "Sino de
- * notificações" do contrato); repassado tal como veio do emit, sem lógica
- * adicional aqui. Broadcast: múltiplos clientes conectados simultaneamente
- * recebem o mesmo evento, cada um com seu próprio listener registrado aqui.
- */
 function stream(req, res) {
   res.set({
     'Content-Type': 'text/event-stream',

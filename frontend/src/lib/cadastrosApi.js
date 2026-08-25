@@ -1,10 +1,3 @@
-// style-system: n/a (módulo de dados, sem JSX)
-// Camada de acesso à API do módulo Cadastros (Diretor/Rede/Loja/Responsavel).
-// Fica em src/lib (ao lado de apiClient.js) em vez de dentro de
-// modulos/ranking ou modulos/margens porque é cadastro COMPARTILHADO entre
-// os dois módulos de negócio (e qualquer módulo futuro) — ver
-// CONTRATO-CADASTROS-API.md. Todas as rotas de /api/cadastros/* exigem
-// autenticação (mesmo padrão de apiRequest usado por rankingApi.js).
 import { apiRequest } from './apiClient.js';
 
 function request(path, options) {
@@ -33,8 +26,6 @@ export function removerDiretor(id) {
   return request(`/api/cadastros/diretores/${id}`, { method: 'DELETE' });
 }
 
-// GET /api/cadastros/redes — redes visíveis com diretor + responsável (GG) +
-// lojas físicas aninhadas (usado pelo módulo Margens).
 export function fetchRedes() {
   return request('/api/cadastros/redes');
 }
@@ -64,8 +55,6 @@ export function criarLoja({ redeId, nome }) {
   });
 }
 
-// PUT é a única forma de "remover" uma loja da operação (ativo: false) — não existe
-// rota DELETE para Loja (ver CONTRATO-CADASTROS-API.md, seção 11).
 export function atualizarLoja(id, { nome, ativo, redeId }) {
   return request(`/api/cadastros/lojas/${id}`, {
     method: 'PUT',

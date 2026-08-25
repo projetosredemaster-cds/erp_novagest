@@ -4,16 +4,7 @@ function isPositiveInteger(value) {
   return Number.isInteger(value) && value > 0;
 }
 
-/**
- * Validação de formato compartilhada entre POST /disparos e
- * POST /disparos/verificar — as duas rotas aceitam exatamente o mesmo
- * corpo de requisição e rodam exatamente as mesmas checagens de 400 antes
- * de chamar o service (ver CONTRATO-CONTROLE-LIGACOES-API.md, seção
- * "Painel de Disparo (v3)"). Retorna `{ erro: { status, body } }` no
- * primeiro problema encontrado, ou `{ estadoIdNum, numeroRemetenteIdNum,
- * contatoIdsNum }` quando o formato está OK (a existência/pertencimento
- * real contra o banco ainda é responsabilidade do service/model).
- */
+
 function validarCorpoDisparo(body) {
   const { estadoId, numeroRemetenteId, contatoIds } = body;
 
@@ -29,10 +20,6 @@ function validarCorpoDisparo(body) {
   const numeroRemetenteIdNum = Number(numeroRemetenteId);
   const contatoIdsNum = contatoIds.map((id) => Number(id));
 
-  // Formato inválido de estadoId/numeroRemetenteId é tratado como "número
-  // remetente inválido" (mesma mensagem da checagem de existência/ativo,
-  // já que os dois casos representam o mesmo problema para quem chama a
-  // rota: não é possível disparar com esse número para esse estado).
   if (!isPositiveInteger(estadoIdNum) || !isPositiveInteger(numeroRemetenteIdNum)) {
     return {
       erro: {
@@ -42,8 +29,6 @@ function validarCorpoDisparo(body) {
     };
   }
 
-  // Da mesma forma, um contatoId em formato inválido é tratado como um
-  // contato que não pertence ao estado informado.
   if (!contatoIdsNum.every(isPositiveInteger)) {
     return {
       erro: {

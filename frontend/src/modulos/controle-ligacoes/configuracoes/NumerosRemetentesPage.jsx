@@ -38,25 +38,12 @@ function AtivoBadge({ ativo }) {
   );
 }
 
-// Modal de conexão via QR Code (Baileys). Consome o stream SSE de
-// `GET .../conexao/stream` através de `abrirStreamConexao` (ver comentário
-// detalhado em controleLigacoesConfigApi.js sobre por que é fetch + parsing
-// manual em vez de EventSource nativo). `onConectado` é chamado tanto para
-// o evento `conectado` quanto `ja_conectado` (mesmo tratamento) — a decisão
-// de UX aqui é: o componente pai fecha o modal, mostra um flash de sucesso
-// na tela principal e rebusca a lista completa (não faz patch otimista com
-// o `numero` do payload do evento), por ser mais simples e mais correto
-// (reflete exatamente o que o servidor persistiu).
 function ConexaoWhatsAppModal({ numero, token, onClose, onConectado }) {
   const [status, setStatus] = useState('conectando'); // 'conectando' | 'qr' | 'conectado' | 'erro'
   const [qr, setQr] = useState(null);
   const [erro, setErro] = useState(null);
   const abortRef = useRef(null);
 
-  // Só inicia a leitura do stream — nenhum setState síncrono aqui (os
-  // `setQr`/`setStatus`/`setErro` só acontecem dentro dos callbacks
-  // assíncronos `onEvent`/`catch`), pra não disparar setState direto dentro
-  // do corpo do efeito abaixo (react-hooks/set-state-in-effect).
   function abrirConexao() {
     const controller = new AbortController();
     abortRef.current = controller;
@@ -86,12 +73,9 @@ function ConexaoWhatsAppModal({ numero, token, onClose, onConectado }) {
 
   useEffect(() => {
     abrirConexao();
-    // cancela a leitura do stream tanto ao fechar o modal (handleClose,
-    // abaixo) quanto por qualquer outro motivo de desmonte do componente.
     return () => {
       abortRef.current?.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleClose() {
@@ -99,8 +83,6 @@ function ConexaoWhatsAppModal({ numero, token, onClose, onConectado }) {
     onClose();
   }
 
-  // "Tentar novamente" (fora do efeito, disparado por clique) — aqui sim
-  // reseta o estado visível antes de reabrir o stream do zero.
   function handleRetry() {
     setStatus('conectando');
     setQr(null);
@@ -145,7 +127,7 @@ function ConexaoWhatsAppModal({ numero, token, onClose, onConectado }) {
             </div>
             <p className="text-center text-[12.5px] text-[var(--muted)]">
               Abra o WhatsApp no celular, vá em Aparelhos conectados e escaneie o QR Code. Um novo código é
-              gerado automaticamente a cada ~20 segundos.
+              gerado automaticamente a cada 20 segundos.
             </p>
           </div>
         ) : status === 'conectado' ? (
@@ -202,9 +184,6 @@ export default function NumerosRemetentesPage() {
     runLoadNumeros();
   }
 
-  // sem reset síncrono de estado (loadingEstados/estadosError já nascem
-  // corretos) para poder ser chamada direto no corpo do efeito de carga
-  // inicial, mesmo padrão de runLoadNumeros/runLoadUsuarios.
   function runLoadEstados() {
     fetchEstados(token)
       .then((lista) => setEstados(lista || []))
@@ -215,10 +194,9 @@ export default function NumerosRemetentesPage() {
   useEffect(() => {
     runLoadNumeros();
     runLoadEstados();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
-  // --- formulário de criação/edição de Número Remetente (modal) ---
   const [formOpen, setFormOpen] = useState(false);
   const [editingNumero, setEditingNumero] = useState(null);
   const [apelido, setApelido] = useState('');
@@ -226,11 +204,7 @@ export default function NumerosRemetentesPage() {
   const [nomeColaboradora, setNomeColaboradora] = useState('');
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
-
-  // --- modal de conexão WhatsApp (QR Code via Baileys) ---
   const [conexaoNumero, setConexaoNumero] = useState(null);
-
-  // --- mini-formulário inline "Cadastrar novo estado" ---
   const [showEstadoForm, setShowEstadoForm] = useState(false);
   const [novoEstadoNome, setNovoEstadoNome] = useState('');
   const [novoEstadoUf, setNovoEstadoUf] = useState('');
@@ -252,9 +226,6 @@ export default function NumerosRemetentesPage() {
     setEditingNumero(null);
     setApelido('');
     setEstadoId('');
-    // POST não aceita nomeColaboradora (nasce sempre null) — o campo fica
-    // desabilitado no modo de criação (ver JSX abaixo) e só é preenchível
-    // depois, editando o número já criado.
     setNomeColaboradora('');
     setFormError(null);
     resetEstadoForm();
@@ -290,9 +261,6 @@ export default function NumerosRemetentesPage() {
 
     setSaving(true);
     const payload = { apelido: apelido.trim(), estadoId: Number(estadoId) };
-    // nomeColaboradora só é enviado ao editar (POST não suporta o campo,
-    // ver openCreateForm acima); string vazia é convertida pra `null`
-    // (o backend também normaliza, mas evita mandar espaço à toa).
     if (editingNumero) {
       payload.nomeColaboradora = nomeColaboradora.trim() ? nomeColaboradora.trim() : null;
     }
@@ -341,9 +309,6 @@ export default function NumerosRemetentesPage() {
     setConexaoNumero(null);
   }
 
-  // Rebusca a lista inteira (em vez de patch otimista com o payload do
-  // evento `conectado`, que só traz `numero`) — mais simples e reflete
-  // exatamente o que o servidor persistiu.
   function handleConexaoConcluida() {
     setConexaoNumero(null);
     flash('WhatsApp conectado com sucesso.');
@@ -360,7 +325,6 @@ export default function NumerosRemetentesPage() {
       .catch((err) => flash(err.message || 'Erro ao desconectar WhatsApp.', 'error'));
   }
 
-  // --- tags de DDD do mini-formulário de Estado ---
   function addDddTag() {
     const valor = dddInput.trim();
     if (!valor) return;

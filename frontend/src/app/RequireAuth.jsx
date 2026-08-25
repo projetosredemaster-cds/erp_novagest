@@ -15,8 +15,6 @@ export default function RequireAuth() {
     return <Navigate to="/login" replace />;
   }
 
-  // Operador de cobrança nunca acessa o ERP normal, mesmo sabendo a URL
-  // direta — o shell dele mora em /controle-ligacoes.
   if (isOperadorCobranca) {
     return <Navigate to="/controle-ligacoes" replace />;
   }

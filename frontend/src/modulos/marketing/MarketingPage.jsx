@@ -335,7 +335,7 @@ export default function MarketingPage() {
             <>
               <h2 className="font-display text-[20px] font-bold m-0 mb-1">Resumo geral do mês</h2>
               <p className="text-[12px] text-[var(--muted)] mb-4">
-                Visão consolidada de todos os diretores, redes e lojas no período selecionado — não é afetada
+                Visão consolidada de todos os diretores, redes e lojas no período selecionado, não é afetada
                 pelo filtro de Diretor acima.
               </p>
 

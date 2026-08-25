@@ -1,15 +1,3 @@
-// style-system: Tailwind
-// Importação de contatos (CONTRATO-CONTROLE-LIGACOES-API.md, "Importação
-// (v3)"). Upload de planilha + histórico de todos os lotes já importados.
-//
-// v3: a escolha de número remetente por Estado deixou de acontecer aqui —
-// agora acontece no Painel de Disparo, no momento do disparo. Não existe
-// mais "lote pendente de confirmação": toda importação nasce completa, os
-// contatos já ficam disponíveis assim que o upload termina. Por isso esta
-// tela não tem mais nenhum formulário de escolha de número/confirmação —
-// só o upload e uma lista/detalhe (view por state, sem rota nova, mesmo
-// padrão que RankingPage/MargensPage já usam para alternar sub-telas) do
-// que já foi importado.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../../app/AuthContext.jsx';
 import { importarContatos, fetchHistoricoImportacoes, fetchDetalheImportacao } from './importacaoApi.js';
@@ -19,8 +7,6 @@ const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)
 const inputCls = "w-full rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-3 sm:py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--violet)]";
 const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-4 pt-5 pb-[22px] sm:px-5";
 
-// Data + hora legível (ex.: "24/08/2026 14:35") — o histórico lista vários
-// lotes, possivelmente do mesmo dia, então a hora ajuda a diferenciar.
 function formatDataHora(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -36,8 +22,6 @@ function formatResumoLinha({ totalImportados, totalLinhas, totalSemEstado, total
   return partes.join(' · ');
 }
 
-// `variant` só é aplicado quando a contagem é > 0 — destaque sutil para
-// chamar atenção para duplicados/erros reais, sem alarmar um card zerado.
 const STAT_VARIANTS = {
   danger: { border: 'border-[var(--danger)]/50', bg: 'bg-[var(--danger-bg)]', value: 'text-[var(--danger)]' },
   warning: { border: 'border-[var(--warning)]/50', bg: 'bg-[var(--warning-bg)]', value: 'text-[var(--warning)]' },
@@ -78,16 +62,10 @@ function TipoErroBadge({ tipo }) {
   );
 }
 
-// --- Detalhe de um lote (view === 'detalhe') ---
 function DetalheImportacao({ loteId, token, onVoltar }) {
   const [detalhe, setDetalhe] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  // Sem setState síncrono no corpo (regra `set-state-in-effect`) — os
-  // estados iniciais (`loading=true`, `error=null`) já cobrem a carga
-  // disparada pelo efeito de montagem; só o botão "Tentar novamente"
-  // (`retry`, disparado por clique, fora de um efeito) reseta manualmente.
   const carregar = useCallback(() => {
     fetchDetalheImportacao(token, loteId)
       .then((dados) => { setDetalhe(dados); setError(null); })
@@ -204,7 +182,6 @@ export default function ImportacaoPage() {
     flashTimer.current = setTimeout(() => setFlashMsg(null), type === 'error' ? 4200 : 1600);
   }
 
-  // 'lista' (upload + histórico) ou 'detalhe' (um lote específico)
   const [view, setView] = useState('lista');
   const [detalheLoteId, setDetalheLoteId] = useState(null);
 
@@ -218,23 +195,16 @@ export default function ImportacaoPage() {
     setDetalheLoteId(null);
   }
 
-  // --- upload ---
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
   const [resultadoUpload, setResultadoUpload] = useState(null);
   const fileInputRef = useRef(null);
 
-  // --- histórico ---
   const [historico, setHistorico] = useState([]);
   const [loadingHistorico, setLoadingHistorico] = useState(true);
   const [historicoError, setHistoricoError] = useState(null);
 
-  // Sem setState síncrono no corpo (regra `set-state-in-effect`) — os
-  // estados iniciais (`loadingHistorico=true`, `historicoError=null`) já
-  // cobrem a carga disparada pelo efeito de montagem; `retryHistorico`
-  // (clique/pós-upload, sempre fora de um efeito) reseta manualmente antes
-  // de chamar de novo.
   const carregarHistorico = useCallback(() => {
     fetchHistoricoImportacoes(token)
       .then((lista) => { setHistorico(lista || []); setHistoricoError(null); })

@@ -1,12 +1,3 @@
-// Mesmo padrão de guarda usado no resto da suíte (ex.: disparos.service.test.js):
-// todo model é "guardado" por padrão, lançando se alguma função for chamada
-// sem mock explícito — isso teria tentado uma conexão real com o Azure SQL.
-// `baileysSessionService` não é model (não fala com o banco), então não
-// recebe a mesma guarda — só as duas funções que o worker realmente usa
-// (`getStatusEmMemoria`/`obterSocketConectado`) são espiadas/mockadas
-// diretamente em cada teste. O delay entre mensagens é zerado via env var
-// ANTES do require do worker (lido uma única vez, no topo do módulo) para
-// os testes não dependerem de tempo real.
 process.env.ENVIO_DISPAROS_DELAY_ENTRE_MENSAGENS_MS = '0';
 process.env.ENVIO_DISPAROS_LOTE_TAMANHO = '5';
 
@@ -186,13 +177,10 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
 
     await processarCicloEnvio();
 
-    // item 1: sem sessão conectada — falha sem tentar template
     expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(1, 'Número não está conectado.');
 
-    // item 2: sem nome_colaboradora — falha sem tentar template
     expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(2, 'Número sem nome de colaboradora configurado.');
 
-    // item 3: envia com sucesso — avança a rotação via marcarContatoEnviado
     expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledTimes(1);
     expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledWith({
       disparoContatoId: 3,
@@ -200,13 +188,10 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
       mensagemEnviada: 'E aí Ana!',
     });
 
-    // item 4: falha no sendMessage — falha, sem avançar ConfiguracoesEnvio
     expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(4, 'timeout de rede');
 
-    // nenhum item além do 3 deve ter avançado a rotação
     expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledTimes(1);
 
-    // itens 1 e 2 nunca chegaram a calcular/consumir template algum
     expect(mensagensTemplatesModel.listTemplatesAtivosOrdenados).toHaveBeenCalledTimes(2); // só itens 3 e 4
   });
 
@@ -258,7 +243,7 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
 
     expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledWith({
       disparoContatoId: item.disparoContatoId,
-      templateUsadoId: 10, // ciclou de volta ao primeiro
+      templateUsadoId: 10, 
       mensagemEnviada: 'Template 1 Ana',
     });
   });
@@ -326,7 +311,7 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
     mensagensTemplatesModel.getUltimoTemplateUsadoId.mockResolvedValue(null);
 
     const sendMessage = vi.fn().mockResolvedValue(undefined);
-    const jidResolvido = '551188887777@s.whatsapp.net'; // sem o 9º dígito extra
+    const jidResolvido = '551188887777@s.whatsapp.net';
     const onWhatsApp = vi.fn().mockResolvedValue([{ jid: jidResolvido, exists: true }]);
     baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
 

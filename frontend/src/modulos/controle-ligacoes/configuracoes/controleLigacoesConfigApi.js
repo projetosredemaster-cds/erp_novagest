@@ -1,10 +1,3 @@
-// style-system: n/a (módulo de dados, sem JSX)
-// Camada de acesso à API do módulo Controle de Ligações — Estados e Números
-// Remetentes (CONTRATO-CONTROLE-LIGACOES-API.md, seções 3 a 8). Fica dentro
-// de modulos/controle-ligacoes/configuracoes por ser exclusivo deste módulo
-// isolado (diferente de cadastrosApi.js, que é compartilhado entre módulos
-// do ERP normal). `token` é sempre passado explicitamente pelo componente
-// chamador (via `useAuth().token`), mesmo padrão de authApi.js/UsuariosPage.
 import { apiRequest } from '../../../lib/apiClient.js';
 
 export function fetchEstados(token) {
@@ -31,10 +24,6 @@ export function criarNumeroRemetente(token, { apelido, estadoId }) {
   });
 }
 
-// Atualização parcial (seção 7 do contrato): envia só os campos informados.
-// `nomeColaboradora` segue o mesmo padrão condicional dos demais campos —
-// omitir não altera nada; string vazia/`null` é repassada como está (o
-// backend já normaliza pra `null`, ver PUT /numeros-remetentes/:id).
 export function atualizarNumeroRemetente(token, id, { apelido, estadoId, ativo, nomeColaboradora } = {}) {
   const body = {};
   if (apelido !== undefined) body.apelido = apelido;
@@ -61,24 +50,6 @@ export function desconectarNumeroRemetente(token, id) {
   });
 }
 
-// --- Conexão WhatsApp via Baileys (SSE) ---
-// O `EventSource` nativo do browser não permite enviar headers customizados,
-// e a API autentica via `Authorization: Bearer <token>` (sem fallback de
-// token por query string). Por isso este stream é consumido via `fetch`
-// (que já envia o header Authorization normalmente, igual a qualquer outra
-// chamada do projeto) + leitura manual do corpo como stream
-// (`response.body.getReader()` + `TextDecoder`), com parsing manual do
-// formato SSE (linhas `event: <nome>` / `data: <json>`, eventos separados
-// por linha em branco). Não usar `new EventSource(...)` aqui — falharia
-// silenciosamente com 401 (sem header nenhum).
-//
-// Não passa por `apiRequest` (que sempre faz `await response.json()` no
-// fim, incompatível com um corpo de stream contínuo).
-//
-// `onEvent(event, data)` é chamado a cada evento SSE completo recebido.
-// `signal` (AbortController) permite cancelar a leitura a qualquer momento
-// (fechar o modal, desmontar o componente) — ver ConexaoWhatsAppModal em
-// NumerosRemetentesPage.jsx.
 export async function abrirStreamConexao(token, id, { onEvent, signal } = {}) {
   const baseUrl = import.meta.env.VITE_API_URL;
   const response = await fetch(`${baseUrl}/api/controle-ligacoes/numeros-remetentes/${id}/conexao/stream`, {

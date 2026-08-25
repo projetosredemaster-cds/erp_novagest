@@ -1,9 +1,5 @@
 const { sql, getPool } = require('../config/db');
 
-/**
- * Todos os DDDs cadastrados, com o Estado dono de cada um — usado para
- * agrupar os contatos da planilha por Estado sem 1 query por linha.
- */
 async function listEstadoDDDs() {
   const pool = await getPool();
   const result = await pool.request().query(`
@@ -14,13 +10,6 @@ async function listEstadoDDDs() {
   return result.recordset;
 }
 
-/**
- * Dos telefones informados, devolve os que já existem em Contatos (de
- * qualquer lote), com o respectivo id — telefone é UNIQUE globalmente.
- * O id é usado para gravar LoteImportacaoErros.contato_existente_id na
- * linha rejeitada por duplicidade. Cada telefone é seu próprio parâmetro
- * (nunca concatenado na string SQL).
- */
 async function listTelefonesExistentes(telefones) {
   if (!telefones || telefones.length === 0) {
     return [];
@@ -40,15 +29,6 @@ async function listTelefonesExistentes(telefones) {
   return result.recordset;
 }
 
-/**
- * Cria o LotesImportacao, todos os Contatos válidos (com/sem Estado) e todas
- * as linhas rejeitadas (LoteImportacaoErros), numa única transação. Nunca
- * atribui numero_remetente_id — a partir da v3 essa escolha acontece no
- * Painel de Disparo, não mais na importação (ver CONTRATO-CONTROLE-LIGACOES-API.md,
- * seção "Importação (v3)"). `LotesImportacao.confirmado` não é mais gravado
- * explicitamente aqui — a coluna continua existindo no schema (default 0),
- * só deixou de ter uso neste fluxo.
- */
 async function criarLoteEContatos({
   nomeArquivo,
   usuarioId,
@@ -135,12 +115,6 @@ async function criarLoteEContatos({
   }
 }
 
-/**
- * Todos os lotes de importação (não só pendentes — a v3 não tem mais o
- * conceito de "pendente de confirmação"), mais recentes primeiro.
- * `usuarioEmail` vem de um LEFT JOIN com Usuarios (LEFT, não INNER, para não
- * sumir um lote antigo se o usuário que importou já tiver sido excluído).
- */
 async function listHistorico() {
   const pool = await getPool();
   const result = await pool.request().query(`
@@ -161,12 +135,6 @@ async function listHistorico() {
   return result.recordset;
 }
 
-/**
- * Detalhe de um lote: resumo + porEstado (SEM filtro de numero_remetente_id
- * — sempre o total real do lote, diferente da extinta "pendentes") + a lista
- * de erros/duplicados gravados em LoteImportacaoErros. Devolve null se o
- * lote não existir.
- */
 async function getDetalheLote(loteId) {
   const pool = await getPool();
 

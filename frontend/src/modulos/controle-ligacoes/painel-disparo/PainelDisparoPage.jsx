@@ -1,23 +1,8 @@
-// style-system: Tailwind
-// Painel de Disparo (CONTRATO-CONTROLE-LIGACOES-API.md, adendo "Painel de
-// Disparo (v3)", seções 12-14). Um card por Estado: escolha manual de qual
-// número remetente ativo está sendo usado NESTE disparo (a escolha nunca
-// filtra a lista de contatos abaixo, que é sempre a do Estado inteiro — essa
-// é a decisão de negócio central do contrato), filtro de busca/ordenação da
-// fila de contatos, seleção de até 10 contatos e registro da intenção de
-// disparo via POST /disparos (não envia nada de fato — worker de envio é
-// fase futura, fora de escopo).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../../app/AuthContext.jsx';
 import { fetchPainelDisparo, fetchContatosDisponiveis, verificarDisparo, criarDisparo } from './painelDisparoApi.js';
 import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
 
-// Tema claro escopado: todos os tokens `--pd-*` são definidos pela classe
-// `.painel-disparo-light-theme` (em index.css), aplicada só no elemento raiz
-// desta página — nada aqui vaza para o resto do ERP nem para as outras telas
-// do Controle de Ligações. Bordas de controles interativos (input/select/botão
-// fantasma) ficam em opacidade cheia por afordância; bordas decorativas (card,
-// modal, caixas informativas, divisórias) usam `/60`.
 const btn = "bg-[var(--pd-accent)] text-white border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
 const btnGhost = "bg-transparent border border-[var(--pd-border)] text-[var(--pd-text-primary)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--pd-surface-alt)] disabled:cursor-not-allowed disabled:opacity-50";
 const inputCls = "w-full rounded-lg border border-[var(--pd-border)] bg-[var(--pd-surface-alt)] px-3 py-2.5 sm:py-2 text-sm text-[var(--pd-text-primary)] focus:outline-none focus:border-[var(--pd-accent)]";
@@ -56,10 +41,6 @@ function AvisoContatadoBadge() {
   );
 }
 
-// Modal exibido ANTES de gravar, quando POST /disparos/verificar volta com
-// avisos não vazios — nesse ponto nada foi persistido ainda (verificar não
-// grava nada). O usuário decide: "Cancelar" (desiste, nada é gravado) ou
-// "Disparar mesmo assim" (só aí chama POST /disparos de verdade).
 function AvisosModal({ avisos, confirmando, erro, onCancelar, onConfirmar }) {
   return (
     <div
@@ -105,16 +86,6 @@ function AvisosModal({ avisos, confirmando, erro, onCancelar, onConfirmar }) {
 
 function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
   const { estado, totalContatos, numerosAtivos } = resumo;
-
-  // Elegibilidade de disparo por número (independente do statusConexao que
-  // `GET /painel-disparo` já devolve): um número só é elegível se estiver
-  // conectado E tiver nome de colaboradora configurado — os dois campos são
-  // exigidos pela validação server-side (`POST /disparos`/`/disparos/verificar`),
-  // aqui só antecipamos a checagem pra UX, sem duplicar a fonte de verdade
-  // (o 400 do backend continua sendo o guarda final, ver disparoError abaixo).
-  // `numerosDetalhes` é `null` enquanto a busca complementar de
-  // PainelDisparoPage ainda não settled — nesse intervalo, todo número é
-  // tratado como não elegível (mais seguro que liberar sem saber).
   const elegibilidadePorNumero = useMemo(() => {
     const mapa = new Map();
     numerosAtivos.forEach((n) => {
@@ -125,22 +96,12 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
       const elegivel = conectado && temNomeColaboradora;
       mapa.set(n.id, {
         elegivel,
-        // Prioridade pro motivo de desconexão quando os dois faltam, pra não
-        // mostrar dois motivos ao mesmo tempo (ver instrução da tarefa).
         motivo: elegivel ? null : (!conectado ? 'desconectado' : 'sem colaboradora configurada'),
       });
     });
     return mapa;
   }, [numerosAtivos, numerosDetalhes]);
 
-  // Seleção do número usado no disparo: `numeroRemetenteIdManual` é `null`
-  // até o usuário mexer no <select> pela primeira vez; enquanto isso, o valor
-  // efetivo é sempre DERIVADO (não guardado em estado próprio nem sincronizado
-  // via efeito) a partir de `elegibilidadePorNumero` — prefere o primeiro
-  // número elegível, caindo pro primeiro da lista (mesmo inelegível) se
-  // nenhum for elegível, só pra não deixar o select vazio. Como é derivado a
-  // cada render, atualiza sozinho assim que `numerosDetalhes` chega da API,
-  // sem precisar de um useEffect pra "reconciliar" a escolha inicial.
   const [numeroRemetenteIdManual, setNumeroRemetenteIdManual] = useState(null);
   const numeroPreferido = numerosAtivos.find((n) => elegibilidadePorNumero.get(n.id)?.elegivel) || numerosAtivos[0] || null;
   const numeroRemetenteId = numeroRemetenteIdManual !== null
@@ -149,86 +110,33 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
 
   const estadoId = estado.id;
 
-  // `busca`/`ordem` são estados primitivos separados (não um objeto
-  // `{ busca, ordem }` único) de propósito: dependência de efeito precisa
-  // ser um valor primitivo estável para o React comparar com `Object.is` —
-  // um objeto literal recriado a cada render (ou recriado a cada chamada de
-  // `setFiltros`, mesmo via updater funcional) muda de referência mesmo
-  // quando o conteúdo é idêntico, e é a causa mais comum de efeito rodando
-  // em loop. `buscaInput` é o valor "cru" digitado; `busca` só é atualizado
-  // (com debounce) 400ms depois do usuário parar de digitar.
   const [buscaInput, setBuscaInput] = useState('');
   const [busca, setBusca] = useState('');
   const [ordemState, setOrdemState] = useState('nome_asc');
-
-  // Guarda o último valor de `busca` efetivamente "commitado" (aplicado de
-  // verdade num carregamento). Necessário porque o efeito de debounce abaixo
-  // depende de `[buscaInput]`, que já começa em `''` — ou seja, o efeito
-  // sempre roda também na montagem inicial, mesmo sem o usuário ter digitado
-  // nada. Sem essa checagem, o timer de 400ms força setLoadingContatos(true)
-  // incondicionalmente; como `busca` já é `''` (estado inicial) o
-  // setBusca('') vira no-op (Object.is bail-out), `carregarContatos` não
-  // muda de referência, o efeito de fetch não roda de novo, e o card fica
-  // travado em "Carregando contatos..." para sempre. Inicializado com o
-  // mesmo valor inicial de `busca` (`''`).
   const ultimaBuscaAplicadaRef = useRef('');
-
-  // loadingContatos/contatosError começam já com o valor certo para a carga
-  // inicial (true/null) — outras chamadas (busca com debounce, troca de
-  // ordenação, "Tentar novamente") resetam os dois no próprio disparador da
-  // mudança (handler de evento ou callback de setTimeout), nunca de forma
-  // síncrona dentro do corpo do useEffect de busca (abaixo): o
-  // eslint-plugin-react-hooks (regra `set-state-in-effect`) proíbe setState
-  // síncrono direto no corpo de um efeito, exatamente para evitar o padrão
-  // que causa render em cascata/loop.
   const [contatos, setContatos] = useState([]);
   const [loadingContatos, setLoadingContatos] = useState(true);
   const [contatosError, setContatosError] = useState(null);
-
-  // Ignora resposta de uma chamada que ficou obsoleta (ex.: usuário troca a
-  // ordenação antes da resposta da busca anterior voltar) — sem isso, uma
-  // resposta antiga chegando depois de uma mais nova poderia sobrescrever o
-  // resultado correto já exibido. Não depende de nenhuma opção de
-  // cancelamento no fetch, só compara "essa ainda é a chamada mais recente?"
-  // no momento em que a Promise resolve.
   const requestIdRef = useRef(0);
 
-  // Memoizado com useCallback, dependências 100% primitivas
-  // (token/estadoId/busca/ordemState) — a única forma de o efeito abaixo
-  // rodar de novo é uma dessas primitivas realmente mudar de valor, nunca
-  // por causa de uma referência de objeto/função recriada à toa a cada
-  // render. Todo setState aqui dentro acontece só nos callbacks assíncronos
-  // (.then/.catch/.finally), nunca de forma síncrona no corpo da função.
   const carregarContatos = useCallback(() => {
     const requestId = ++requestIdRef.current;
     fetchContatosDisponiveis(token, estadoId, { busca, ordem: ordemState })
       .then((lista) => {
-        if (requestIdRef.current !== requestId) return; // resposta obsoleta
+        if (requestIdRef.current !== requestId) return;
         setContatos(lista || []);
-        setContatosError(null); // sucesso sempre limpa um erro anterior
+        setContatosError(null); 
       })
       .catch((err) => {
         if (requestIdRef.current !== requestId) return;
         setContatosError(err.message || 'Erro ao carregar contatos.');
       })
       .finally(() => {
-        // Encerra o loading sempre (sucesso ou erro) — nunca só no caminho
-        // feliz — mas só para a chamada que ainda é a mais recente; uma
-        // chamada obsoleta não deve "reabrir" o loading depois que uma mais
-        // nova já terminou.
         if (requestIdRef.current !== requestId) return;
         setLoadingContatos(false);
       });
   }, [token, estadoId, busca, ordemState]);
 
-  // Debounce: só atualiza `busca` (e por consequência dispara o efeito
-  // abaixo, via a mudança de `carregarContatos`) 400ms depois do usuário
-  // parar de digitar. O reset de loading/erro acontece aqui, dentro do
-  // callback do setTimeout — não dentro do corpo do useEffect. Esse efeito
-  // roda também na montagem inicial (porque `buscaInput` já começa em `''`),
-  // então o callback só prossegue (loading/erro/busca) quando o valor
-  // trimado realmente difere do último valor já aplicado — evita reabrir o
-  // loading sem nunca reagendar um fetch (ver comentário no ref acima).
   useEffect(() => {
     const timer = setTimeout(() => {
       const valorTrimado = buscaInput.trim();
@@ -253,11 +161,6 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
     carregarContatos();
   }
 
-  // Roda na carga inicial e sempre que busca/ordem mudarem de verdade —
-  // nunca em loop, porque `carregarContatos` só muda de referência quando
-  // uma das primitivas de que depende muda. Não faz setState síncrono aqui
-  // dentro (só delega para uma função cujo próprio setState é sempre
-  // assíncrono, em callbacks de Promise).
   useEffect(() => {
     carregarContatos();
   }, [carregarContatos]);
@@ -288,11 +191,6 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
   const [confirmandoAvisos, setConfirmandoAvisos] = useState(false);
   const [avisosError, setAvisosError] = useState(null);
 
-  // Efetiva o disparo de verdade (POST /disparos) e trata o pós-sucesso comum
-  // aos dois caminhos possíveis (sem aviso, ou "Disparar mesmo assim" depois
-  // de aviso): flash de sucesso, limpar seleção do card e rechamar
-  // carregarContatos() pra badge "Contatado há menos de 3 dias" refletir o
-  // disparo recém-criado sem precisar recarregar a página.
   function efetivarDisparo() {
     return criarDisparo(token, {
       estadoId: estado.id,
@@ -302,7 +200,7 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
       setSelecionados(new Set());
       setSelectionError(null);
       onFlash('Disparo registrado.');
-      carregarContatos(); // dispara em paralelo, não precisa aguardar
+      carregarContatos();
     });
   }
 
@@ -318,14 +216,10 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
     })
       .then((resultado) => {
         if (resultado?.avisos?.length > 0) {
-          // Há aviso: não grava nada ainda, abre o modal e preserva a
-          // seleção intacta (usuário pode desmarcar os avisados e tentar de
-          // novo, ou cancelar).
           setAvisos(resultado.avisos);
           return;
         }
-        // Sem aviso: efetiva o disparo automaticamente, sem exigir um
-        // segundo clique do usuário.
+
         return efetivarDisparo();
       })
       .catch((err) => setDisparoError(err.message || 'Erro ao registrar disparo.'))
@@ -350,13 +244,6 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
   const algumNumeroElegivel = numerosAtivos.some((n) => elegibilidadePorNumero.get(n.id)?.elegivel);
   const nenhumNumeroElegivel = !semNumeroAtivo && !algumNumeroElegivel;
   const disparoDesabilitado = disparando || selecionados.size === 0 || semNumeroAtivo || nenhumNumeroElegivel;
-
-  // Detalhe (telefone real + colaboradora) do número atualmente selecionado
-  // no <select> — só usado para a linha informativa "📱 ... · Atendido por
-  // ...", que só aparece quando o número escolhido é elegível E já tem um
-  // `numero` (telefone) conectado preenchido (defensivo: elegibilidade já
-  // exige `statusConexao==='conectado'`, mas não custa checar de novo aqui
-  // em vez de presumir que os dois sempre andam juntos).
   const numeroSelecionadoElegivel = elegibilidadePorNumero.get(Number(numeroRemetenteId))?.elegivel;
   const numeroSelecionadoDetalhe = numerosDetalhes?.get(Number(numeroRemetenteId));
 
@@ -414,7 +301,7 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
             ) : null}
           </div>
           <p className="mt-1 text-[11px] text-[var(--pd-text-secondary)]">
-            A escolha acima não filtra a fila abaixo — a lista de contatos é sempre a do estado inteiro.
+            A escolha acima não filtra a fila abaixo, a lista de contatos é sempre a do estado inteiro.
           </p>
           {nenhumNumeroElegivel ? (
             <div className="mt-2 rounded-lg border border-[var(--pd-border)]/60 bg-[var(--pd-surface-alt)] px-3 py-2.5 text-[12.5px] text-[var(--pd-text-secondary)]">
@@ -527,34 +414,20 @@ export default function PainelDisparoPage() {
     clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlashMsg(null), type === 'error' ? 4200 : 1600);
   }
-
-  // Memoizado com useCallback, dependência primitiva só de `token` — mesmo
-  // raciocínio do `carregarContatos` de EstadoDisparoCard abaixo: o efeito
-  // de carga inicial só roda de novo se `token` realmente mudar de valor.
-  // Nenhum setState síncrono aqui dentro (regra `set-state-in-effect`) — só
-  // nos callbacks assíncronos de `.then/.catch/.finally`.
   const carregarPainel = useCallback(() => {
     fetchPainelDisparo(token)
       .then((lista) => {
         setPainel(lista || []);
-        setLoadError(null); // sucesso sempre limpa um erro anterior
+        setLoadError(null);
       })
       .catch((err) => setLoadError(err.message || 'Erro ao carregar painel de disparo.'))
-      .finally(() => setLoading(false)); // sempre encerra o loading, sucesso ou erro
+      .finally(() => setLoading(false));
   }, [token]);
 
   useEffect(() => {
     carregarPainel();
   }, [carregarPainel]);
 
-  // Busca complementar, uma única vez pro componente inteiro (não por card):
-  // `GET /painel-disparo` não devolve `nomeColaboradora` de cada número
-  // remetente, então cruzamos aqui com `GET /numeros-remetentes` (que já tem
-  // `statusConexao`+`nomeColaboradora`) pra cada EstadoDisparoCard calcular
-  // elegibilidade de disparo sem precisar de uma rota nova. `numerosDetalhes`
-  // fica `null` até essa busca settle; falha não bloqueia o resto do painel —
-  // vira um Map vazio, e cada card trata isso como "nenhum número elegível"
-  // (mais seguro que liberar sem saber).
   const [numerosDetalhes, setNumerosDetalhes] = useState(null);
 
   const carregarNumerosDetalhes = useCallback(() => {

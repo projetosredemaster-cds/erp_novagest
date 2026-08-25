@@ -52,14 +52,8 @@ describe('GET /api/controle-ligacoes/* — cache/ETag desabilitado', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(primeira.status).toBe(200);
-    // Reproduz o bug original: o Express (via app.set('etag', 'weak'), default
-    // global não sobrescrito) ainda computa um ETag pra resposta — a correção
-    // não é impedir esse cálculo, é impedir que ele resulte em 304.
     expect(primeira.headers.etag).toBeDefined();
 
-    // Simula exatamente o cenário do bug de produção: o cliente guardou o
-    // ETag da resposta anterior e reenvia como If-None-Match — antes da
-    // correção, isso fazia o Express responder 304 com corpo vazio.
     const segunda = await request(app)
       .get('/api/controle-ligacoes/estados')
       .set('Authorization', `Bearer ${token}`)

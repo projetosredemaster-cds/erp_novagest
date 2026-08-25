@@ -11,9 +11,7 @@ export function fetchEntradas(data) {
 
 export function salvarEntrada({ data, lojaId, faturamento, custoProduto, totalTar, margemInformada }) {
   const body = { data, lojaId, faturamento, custoProduto, totalTar };
-  // só inclui a chave quando informada — campo ausente/undefined/null mantém o formato
-  // de hoje idêntico no caminho "só Total Tar" (o backend trata ausência como "não
-  // informado" e grava franquia=0, ver CONTRATO-MARGENS-API.md).
+
   if (margemInformada !== undefined && margemInformada !== null) {
     body.margemInformada = margemInformada;
   }

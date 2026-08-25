@@ -371,30 +371,11 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
   });
 });
 
-/**
- * `GET /conversas/stream` (SSE) nunca se encerra sozinho — diferente do
- * stream de Conexão Baileys (`numerosRemetentes.controller.test.js`), cujos
- * testes conseguem simplesmente `await request(app).get(...)` porque o
- * próprio handler chama `res.end()` depois de "conectado"/"erro". Aqui a
- * conexão só fecha quando o CLIENTE desconecta — por isso os testes abrem
- * uma conexão real (via `supertest` sobre um socket de verdade, com
- * `.buffer(false)` + o evento `'response'` cru do Node) e abortam do lado do
- * cliente assim que já capturaram o suficiente, simulando "aba fechada".
- */
 describe('GET /api/controle-ligacoes/conversas/stream', () => {
   afterEach(() => {
     mensagensEventsService.removeAllListeners('mensagem-recebida');
   });
 
-  /**
-   * Abre `GET /conversas/stream`, acumula os chunks recebidos e aborta a
-   * conexão do lado do cliente assim que `deveEncerrar(bufferAcumulado)`
-   * disser que sim. `aoConectar` roda assim que os headers chegam (antes de
-   * qualquer dado), útil para emitir o evento de teste no canal
-   * `mensagensEvents.service.js` depois que o listener já foi registrado no
-   * servidor (a resposta do 'response' do cliente só chega depois que o
-   * servidor já rodou tudo síncrono da rota, incluindo o `.on(...)`).
-   */
   function conectarStream({ aoConectar, deveEncerrar } = {}) {
     return new Promise((resolve, reject) => {
       const test = request(app)
@@ -408,9 +389,6 @@ describe('GET /api/controle-ligacoes/conversas/stream', () => {
       test.on('response', (res) => {
         headers = res.headers;
         res.on('error', () => {
-          // Esperado ao abortar do lado do cliente (ECONNRESET/aborted) —
-          // sinal de que a conexão foi encerrada de propósito, não uma
-          // falha real.
         });
         res.on('data', (chunk) => {
           body += chunk.toString();
@@ -465,8 +443,6 @@ describe('GET /api/controle-ligacoes/conversas/stream', () => {
         'event: nova-mensagem\ndata: {"contatoId":42,"numeroRemetenteId":17}\n\n'
       );
 
-      // Dá tempo do 'close' do lado do servidor (disparado pelo abort do
-      // cliente) processar antes de checar a remoção do listener.
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(offSpy).toHaveBeenCalledWith('mensagem-recebida', expect.any(Function));
       expect(onSpy.mock.calls[0][1]).toBe(offSpy.mock.calls[0][1]);

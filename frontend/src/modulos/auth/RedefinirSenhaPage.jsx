@@ -1,4 +1,3 @@
-// style-system: Tailwind
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { redefinirSenha } from './authApi.js';

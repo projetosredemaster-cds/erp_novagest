@@ -16,7 +16,7 @@ function redirectPathForRole(role) {
 export default function LoginPage() {
   const { login, loginReativacao } = useAuth();
   const navigate = useNavigate();
-  const [modo, setModo] = useState('erp'); // 'erp' | 'reativacao'
+  const [modo, setModo] = useState('erp');
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [error, setError] = useState(null);

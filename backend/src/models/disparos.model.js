@@ -7,11 +7,6 @@ const ORDENACOES = {
   recentes: 'c.criado_em DESC',
 };
 
-// Sub-query compartilhada de "contato disparado nos últimos 3 dias" —
-// independente de qual numero_remetente_id foi usado no disparo anterior
-// (ver "Contexto e decisões de design" em CONTRATO-CONTROLE-LIGACOES-API.md,
-// seção Painel de Disparo v3). Usada por listContatosDisponiveis() e por
-// validarNumeroEContatos() abaixo — não duplique este texto em outro lugar.
 const SQL_DISPARADO_ULTIMOS_3_DIAS = `CASE WHEN EXISTS (
         SELECT 1
         FROM DisparoContatos dc
@@ -20,14 +15,6 @@ const SQL_DISPARADO_ULTIMOS_3_DIAS = `CASE WHEN EXISTS (
           AND d.criado_em >= DATEADD(day, -3, SYSUTCDATETIME())
       ) THEN 1 ELSE 0 END`;
 
-/**
- * Painel de Disparo — todo Estado cadastrado, com seus números remetentes
- * ativos e a contagem de contatos vinculados. Inclui Estado sem número
- * ativo e/ou sem contato (numerosAtivos: [], totalContatos: 0) de propósito
- * — ver "Contexto e decisões de design" em CONTRATO-CONTROLE-LIGACOES-API.md
- * (seção Painel de Disparo v3): o frontend precisa distinguir "estado
- * vazio" de "estado inexistente".
- */
 async function listPainelDisparo() {
   const pool = await getPool();
 
@@ -72,12 +59,7 @@ async function listPainelDisparo() {
   }));
 }
 
-/**
- * Contatos de um Estado (NÃO filtra por numero_remetente_id — um contato
- * não fica travado ao número que o originou, ver decisão de design no
- * contrato). `disparadoUltimos3Dias` é sempre recalculado aqui a partir de
- * Disparos+DisparoContatos, nunca confiado do chamador.
- */
+
 async function listContatosDisponiveis(estadoId, { busca, ordem } = {}) {
   const pool = await getPool();
   const request = pool.request();
@@ -111,33 +93,7 @@ async function listContatosDisponiveis(estadoId, { busca, ordem } = {}) {
   }));
 }
 
-/**
- * Valida numeroRemetenteId (existe, ativo, do estadoId informado, conectado
- * ao WhatsApp e com nome_colaboradora preenchido) e todo contatoId (existe,
- * pertence ao estadoId informado), calculando de quebra os avisos de
- * "disparado nos últimos 3 dias" — usada tanto pelo caminho de só-leitura
- * (verificarDisparo, contra o pool) quanto pelo caminho de escrita
- * (criarDisparo, contra a transação em aberto), recebendo o "executor"
- * (pool ou transaction) que o `sql.Request` deve usar. Não grava nada no
- * banco.
- *
- * As checagens de status_conexao/nome_colaboradora existem para não deixar
- * o worker assíncrono (`workers/envioDisparos.worker.js`) ser o único lugar
- * a barrar um disparo fadado a falhar — sem elas, POST /disparos respondia
- * 201 mesmo para um número desconectado ou sem colaboradora configurada, e o
- * operador só descobria o problema minutos depois, quando o worker
- * processasse a fila. Rodam ANTES da validação de contatoIds, nesta ordem
- * (estado_conexao primeiro, depois nome_colaboradora), e em ambas as rotas
- * (verificarDisparo/criarDisparo), já que as duas reaproveitam esta mesma
- * função — ver CONTRATO-CONTROLE-LIGACOES-API.md, seção "Painel de Disparo".
- *
- * Retorna:
- *   { status: 'numero_invalido' } |
- *   { status: 'numero_desconectado' } |
- *   { status: 'numero_sem_colaboradora' } |
- *   { status: 'contatos_invalidos' } |
- *   { status: 'ok', avisos: [{contatoId,nome,telefone}] }
- */
+
 async function validarNumeroEContatos({ estadoId, numeroRemetenteId, contatoIds }, executor) {
   const numeroRequest = new sql.Request(executor);
   numeroRequest.input('numeroId', sql.Int, numeroRemetenteId);
@@ -186,41 +142,11 @@ async function validarNumeroEContatos({ estadoId, numeroRemetenteId, contatoIds 
   return { status: 'ok', avisos };
 }
 
-/**
- * Só verifica (nunca grava): mesmas validações de criarDisparo, rodadas
- * contra o pool normal (sem transação de escrita), devolvendo os avisos de
- * contatos já disparados nos últimos 3 dias para a tela decidir se pede
- * confirmação ao usuário antes de chamar POST /disparos de fato.
- *
- * Retorna:
- *   { status: 'numero_invalido' } |
- *   { status: 'numero_desconectado' } |
- *   { status: 'numero_sem_colaboradora' } |
- *   { status: 'contatos_invalidos' } |
- *   { status: 'ok', avisos: [{contatoId,nome,telefone}] }
- */
 async function verificarDisparo({ estadoId, numeroRemetenteId, contatoIds }) {
   const pool = await getPool();
   return validarNumeroEContatos({ estadoId, numeroRemetenteId, contatoIds }, pool);
 }
 
-/**
- * Valida (numeroRemetenteId ativo, do estadoId informado, conectado e com
- * nome_colaboradora preenchido; todo contatoId pertence ao estadoId
- * informado) e grava Disparos + DisparoContatos numa única transação. A
- * validação roda antes de qualquer INSERT, e um resultado diferente de 'ok'
- * dá rollback na transação sem gravar nada. Não calcula/devolve avisos —
- * isso é responsabilidade exclusiva de verificarDisparo() (GET/POST
- * .../disparos/verificar), que deve ser chamado pelo frontend antes deste,
- * para o usuário poder decidir com o aviso em mãos ainda sem nada gravado.
- *
- * Retorna:
- *   { status: 'numero_invalido' } |
- *   { status: 'numero_desconectado' } |
- *   { status: 'numero_sem_colaboradora' } |
- *   { status: 'contatos_invalidos' } |
- *   { status: 'criado', disparoId, totalContatos }
- */
 async function criarDisparo({ estadoId, numeroRemetenteId, usuarioId, contatoIds }) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
@@ -270,14 +196,6 @@ async function criarDisparo({ estadoId, numeroRemetenteId, usuarioId, contatoIds
   }
 }
 
-/**
- * Busca até `loteTamanho` linhas de `DisparoContatos` com `status='pendente'`,
- * juntando `Disparos` (pra saber `numero_remetente_id`) e `Contatos` (pra
- * saber telefone/nome) — usada pelo worker de envio
- * (`workers/envioDisparos.worker.js: processarCicloEnvio`). Ordenada por
- * `dc.id` (mais antigo primeiro), sem nenhum filtro por Estado/número — o
- * worker roda para a fila inteira, independente de quem criou o disparo.
- */
 async function listContatosPendentesParaEnvio(loteTamanho) {
   const pool = await getPool();
   const result = await pool
@@ -308,14 +226,6 @@ async function listContatosPendentesParaEnvio(loteTamanho) {
   }));
 }
 
-/**
- * Marca um item da fila como `'falha'`, gravando o motivo. Usada tanto para
- * falha de pré-condição (sessão desconectada, sem colaboradora, sem
- * template ativo — a rotação de `ConfiguracoesEnvio` NÃO é tocada nesses
- * casos) quanto para falha real de envio via Baileys (`sock.sendMessage`
- * lançou) — em nenhum dos dois casos `ConfiguracoesEnvio` é gravado, e não
- * há retry automático nesta fase (ver worker).
- */
 async function marcarContatoFalha(disparoContatoId, erro) {
   const pool = await getPool();
   await pool
@@ -329,15 +239,6 @@ async function marcarContatoFalha(disparoContatoId, erro) {
     `);
 }
 
-/**
- * Marca um item da fila como `'enviado'` e avança a rotação de template
- * (`ConfiguracoesEnvio.ultimo_template_usado_id`) — as duas gravações
- * acontecem numa única transação curta, para nunca persistir uma sem a
- * outra (ver decisão de design no worker: o cálculo de qual seria o
- * próximo template roda ANTES desta função, fora de transação; a chamada de
- * rede ao Baileys também acontece antes, fora de transação; só a gravação
- * do resultado de sucesso, aqui, é atômica).
- */
 async function marcarContatoEnviado({ disparoContatoId, templateUsadoId, mensagemEnviada }) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
@@ -368,12 +269,6 @@ async function marcarContatoEnviado({ disparoContatoId, templateUsadoId, mensage
   }
 }
 
-/**
- * Detalhe completo de um Disparo (Estado, Número Remetente e a lista de
- * contatos com o status individual de envio de cada um) — usada por
- * `GET /api/controle-ligacoes/disparos/:id`. Retorna `null` se o disparo não
- * existir.
- */
 async function findDisparoDetalhe(id) {
   const pool = await getPool();
 

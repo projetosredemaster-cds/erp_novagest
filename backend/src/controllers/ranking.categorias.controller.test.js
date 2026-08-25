@@ -225,29 +225,15 @@ describe('PUT /api/ranking/categorias/:id', () => {
     const res = await request(app)
       .put('/api/ranking/categorias/1')
       .set('Authorization', `Bearer ${tokenFor()}`)
-      // tenta forçar padrao:false e principal:false, que o contrato diz que
-      // nunca mudam via API.
       .send({ nome: 'Receita Bruta Renomeada', padrao: false, principal: false });
 
     expect(res.status).toBe(200);
-    // updateCategoria só recebe nome/visivel — padrao/principal nunca chegam
-    // no model a partir desta rota.
     expect(rankingModel.updateCategoria).toHaveBeenCalledWith(1, { nome: 'Receita Bruta Renomeada', visivel: undefined });
     expect(res.body.padrao).toBe(true);
     expect(res.body.principal).toBe(true);
   });
 
   it('ACHADO DE QA: corpo vazio NÃO retorna 400 (diferente do documentado no plano de teste / do padrão usado em PUT redes e lojas) — vira um no-op 200', async () => {
-    // O contrato (CONTRATO-RANKING-API.md, seção 3) diz "nome / visivel — ao
-    // menos um", sugerindo que pelo menos um campo é obrigatório, no mesmo
-    // espírito de PUT /api/cadastros/redes/:id e PUT /api/cadastros/lojas/:id
-    // (que retornam 400 explícito "Informe ao menos um campo..." quando o
-    // corpo é vazio). O controller de Categorias NÃO tem essa checagem —
-    // corpo vazio passa direto, sem alterar nada (nome/visivel undefined ->
-    // COALESCE preserva os valores atuais), retornando 200 com a categoria
-    // inalterada. Reportado no veredito final como inconsistência de
-    // contrato/implementação, não corrigido aqui (fora do escopo de QA
-    // alterar comportamento de produto).
     rankingModel.findCategoriaById
       .mockResolvedValueOnce({ id: 4, nome: 'Categoria X', padrao: false, principal: false, visivel: true })
       .mockResolvedValueOnce({ id: 4, nome: 'Categoria X', padrao: false, principal: false, visivel: true, criado_em: '2026-07-20T00:00:00.000Z' });

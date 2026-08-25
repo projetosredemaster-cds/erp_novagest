@@ -137,22 +137,6 @@ async function excluir(req, res) {
   }
 }
 
-/**
- * GET /numeros-remetentes/:id/conexao/stream (SSE)
- *
- * Abre (ou reaproveita) a sessão Baileys daquele número remetente e
- * transmite os eventos de conexão em tempo real:
- *   - `event: qr`          `data: { "qr": "<string crua>" }`
- *   - `event: conectado`   `data: { "numero": "5598..." }`
- *   - `event: erro`        `data: { "mensagem": "..." }`
- *   - `event: ja_conectado` `data: { "numero": "5598..." }` — emitido (e o
- *     stream encerrado em seguida) quando o número já está `'conectado'` no
- *     banco; nesse caso nenhuma sessão/QR novo é aberta.
- *
- * Múltiplas requisições simultâneas para o mesmo `:id` (ex.: duas abas)
- * reaproveitam a mesma sessão Baileys em memória — cada uma vira um listener
- * separado que recebe os mesmos eventos (ver `baileysSession.service.js`).
- */
 async function conexaoStream(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {
@@ -208,9 +192,6 @@ async function conexaoStream(req, res) {
     },
   };
 
-  // Aba fechada / cliente desconectou antes do QR ser escaneado: remove só
-  // este listener, sem necessariamente encerrar a sessão Baileys em memória
-  // (outra aba pode continuar esperando o mesmo QR).
   req.on('close', finalizar);
 
   try {
@@ -222,13 +203,6 @@ async function conexaoStream(req, res) {
   }
 }
 
-/**
- * POST /numeros-remetentes/:id/conexao/desconectar
- *
- * Encerra a sessão Baileys daquele número (logout + remoção da pasta de
- * sessão em disco) e grava `numero = NULL` / `status_conexao =
- * 'aguardando_conexao'` no banco.
- */
 async function conexaoDesconectar(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {

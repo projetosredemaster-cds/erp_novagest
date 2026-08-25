@@ -1,10 +1,3 @@
-// Mesmo padrão de guarda usado no resto da suíte (ex.: disparos.service não
-// tem teste próprio guardado assim, mas o worker/controller tem) — todo
-// model é "guardado" por padrão, lançando se alguma função for chamada sem
-// mock explícito, para nunca tentar uma conexão real com o Azure SQL.
-// `baileysSessionService` não é model — só a função usada de fato
-// (`obterSocketConectado`) é espiada/mockada diretamente em cada teste.
-
 const mensagensModel = require('../models/mensagens.model');
 const baileysSessionService = require('../services/baileysSession.service');
 const conversasService = require('./conversas.service');
@@ -69,15 +62,6 @@ describe('conversas.service.listarNotificacoesPendentes', () => {
     expect(resultado).toEqual([]);
   });
 
-  /**
-   * A truncagem de `preview` para 80 caracteres (com "…" quando corta) é
-   * lógica interna de `mensagens.model.js: truncarTexto`, usada dentro de
-   * `listNotificacoesPendentes` antes do retorno — não tem teste próprio
-   * (convenção do repo: nenhum `.model.js` tem teste dedicado). Este teste
-   * cobre o contrato de formato daqui pra baixo: o service é um passthrough
-   * fino, então documenta/confirma que ele preserva exatamente o `preview`
-   * já truncado (ou não) que o model devolve, sem reprocessar.
-   */
   it('preserva o preview truncado (>80 chars) e o preview curto (<=80 chars) tal como o model devolve', async () => {
     const corpoLongo = 'a'.repeat(90);
     const previewTruncado = `${'a'.repeat(80)}…`;

@@ -10,13 +10,6 @@ vi.mock('./rankingApi', () => ({
   enviarRelatorioPorEmail: vi.fn(),
 }));
 
-// fetchDiretores/criarDiretor/atualizarDiretor/removerDiretor/criarRede/
-// atualizarRede/removerRede/fetchResponsaveis/criarResponsavel/
-// removerResponsavel vêm de ../../lib/cadastrosApi (módulo compartilhado,
-// ver CLAUDE.md) — RankingPage.jsx NÃO os importa de ./rankingApi. Mockar o
-// módulo errado faz esse teste chamar o fetch real e bater no backend de
-// verdade (violação da regra "nunca teste contra serviço real"); corrigido
-// aqui na revisão de QA do módulo Controle de Ligações.
 vi.mock('../../lib/cadastrosApi', () => ({
   fetchDiretores: vi.fn(),
   criarDiretor: vi.fn(),

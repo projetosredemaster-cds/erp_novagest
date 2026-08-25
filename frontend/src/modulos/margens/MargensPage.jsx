@@ -17,12 +17,10 @@ function parseValorBR(texto) {
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : 0;
 }
-// máscara monetária ao vivo (estilo app bancário): dígitos digitados são tratados da
-// direita pra esquerda como centavos — "173000" digitado vira "1.730,00" exibido.
+
 function extrairDigitos(texto) {
   return String(texto ?? '').replace(/\D/g, '');
 }
-// formata a base de dígitos (centavos) no padrão BR: "173000" -> "1.730,00"
 function formatarDigitosBR(digitos) {
   if (!digitos) return '';
   const n = parseInt(digitos, 10) || 0;
@@ -30,28 +28,21 @@ function formatarDigitosBR(digitos) {
   const inteiro = String(Math.floor(n / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   return `${inteiro},${centavos}`;
 }
-// base de dígitos -> valor float guardado no estado (nunca a string formatada); base
-// vazia representa campo vazio, não zero — preserva a distinção "nunca digitado" vs "digitou 0"
 function digitosParaValor(digitos) {
   if (!digitos) return '';
   return (parseInt(digitos, 10) || 0) / 100;
 }
-// caminho inverso: reconstrói a base de dígitos a partir do valor float guardado —
-// usado a cada render pra formatar o input e pelo backspace pra saber o que remover
 function valorParaDigitos(valor) {
   if (valor === '' || valor === undefined || valor === null) return '';
   const n = Math.round(Number(valor) * 100);
   return Number.isFinite(n) ? String(n) : '';
 }
-// força o cursor pro final do campo após a formatação reescrever o texto — mantém o
-// comportamento "digita da direita pra esquerda" de uma máscara de app bancário
 function moveCaretToEnd(el) {
   requestAnimationFrame(() => {
     const len = el.value.length;
     el.setSelectionRange(len, len);
   });
 }
-// campo vazio/indefinido vira 0 só na hora de calcular/montar o payload pro backend.
 function numOrZero(v) {
   return v === '' || v === undefined || v === null ? 0 : (Number(v) || 0);
 }
@@ -59,8 +50,6 @@ function numOrZero(v) {
 function hojeISO() {
   return new Date().toISOString().slice(0, 10);
 }
-// primeiro dia do mês da data informada (string, sem passar por Date/timezone) — usado só
-// como valor inicial do período do resumo geral, pra abrir a tela já com um período útil.
 function primeiroDiaDoMes(iso) {
   return iso.slice(0, 8) + '01';
 }
@@ -69,13 +58,11 @@ function formatDateFullPt(iso) {
   const [y, m, d] = iso.split('-');
   return `${d}/${m}/${y}`;
 }
-// "DD-MM", usado só no nome do arquivo do PDF (sem ano, conforme pedido)
 function diaMes(iso) {
   if (!iso) return '';
   const [, m, d] = iso.split('-');
   return `${d}-${m}`;
 }
-// string manual "48,07%" (vírgula decimal, sem depender de toLocaleString pro símbolo)
 function formatPercentualBR(n) {
   const num = Number(n) || 0;
   return num.toFixed(2).replace('.', ',') + '%';
@@ -86,16 +73,10 @@ function capitalizeCor(cor) {
   if (cor === 'vermelho') return 'Vermelho';
   return cor ? cor.charAt(0).toUpperCase() + cor.slice(1) : '-';
 }
-// mesma regra de corte do backend (ver CONTRATO-MARGENS-API.md, seção 3) — usada aqui só
-// pra colorir a margem calculada AO VIVO no formulário, antes de salvar (o backend é quem
-// calcula a cor "oficial" que volta no relatório).
 function calcularCorPercentual(percentual) {
   if (percentual === null || percentual === undefined || Number.isNaN(percentual)) return null;
   return percentual >= 41 ? 'verde' : percentual >= 40 ? 'amarelo' : 'vermelho';
 }
-// mesma fórmula do backend (CONTRATO-MARGENS-API.md, seção 1/3):
-// lucro = faturamento - custoProduto - totalTar; percentual = lucro / faturamento * 100
-// (null quando faturamento é 0/vazio — evita divisão por zero e sinaliza "sem margem calculável").
 function calcularMargem({ faturamento, custoProduto, totalTar }) {
   const fat = numOrZero(faturamento);
   if (!fat) return null;
@@ -103,31 +84,20 @@ function calcularMargem({ faturamento, custoProduto, totalTar }) {
   const tar = numOrZero(totalTar);
   return ((fat - custo - tar) / fat) * 100;
 }
-// inverso de calcularMargem: a loja informa direto a margem % que o ERP externo já
-// mostra, e o sistema deriva o Total Tar equivalente pra manter o mesmo payload de
-// salvarEntrada de sempre (ver CLAUDE.md/CONTRATO-MARGENS-API.md — contrato não muda).
 function calcularTotalTarDerivado({ faturamento, custoProduto, margemPercentual }) {
   const fat = numOrZero(faturamento);
   const custo = numOrZero(custoProduto);
   const margem = numOrZero(margemPercentual);
   return fat - custo - (margem / 100) * fat;
 }
-// modo de lançamento por loja: 'margem' (padrão — cola a margem % já pronta do ERP
-// externo) ou 'tar' (secundário, revelado sob demanda pra digitar o Total Tar direto) —
-// ausência de chave cai no padrão 'margem'.
 function getModoLoja(modoPorLoja, lojaId) {
   return modoPorLoja[lojaId] || 'margem';
 }
-// pega o lançamento mais recentemente atualizado do dia (usado só pra pré-preencher os
-// campos consolidados da franquia com o último snapshot usado nesse dia, se já existir).
 function pegarSnapshotMaisRecente(entradas) {
   if (!entradas || !entradas.length) return null;
   return [...entradas].sort((a, b) => new Date(b.atualizado_em) - new Date(a.atualizado_em))[0];
 }
 
-// agrupa o array flat de GET /api/cadastros/redes (cada rede já vem com diretor{id,nome}
-// e lojas[] aninhado) na hierarquia visual Diretor -> Rede -> Loja — o endpoint
-// compartilhado não devolve isso agrupado, então é o Margens quem monta a árvore.
 function agruparRedesPorDiretor(redes) {
   const map = new Map();
   redes.forEach(rede => {
@@ -138,9 +108,6 @@ function agruparRedesPorDiretor(redes) {
   return Array.from(map.values()).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
-// GET /api/margens/relatorio devolve uma lista de blocos (um por rede, com diretor
-// repetido quando o diretor tem mais de uma rede) — achata em linhas Diretor+Rede+Loja
-// pra poder filtrar em memória (Rede/Cor/busca) sem depender da forma aninhada.
 function flattenRelatorio(blocos) {
   const linhas = [];
   (blocos || []).forEach(bloco => {
@@ -165,8 +132,6 @@ function flattenRelatorio(blocos) {
   return linhas;
 }
 
-// reagrupa linhas (já filtradas) de volta em Diretor -> Rede -> Loja[] pra exibição,
-// em ordem alfabética em todos os níveis (mesma ordem exigida pro PDF).
 function agruparLinhasPorDiretorERede(linhas) {
   const diretores = new Map();
   linhas.forEach(l => {
@@ -200,16 +165,12 @@ const COR_BOLINHA = {
   amarelo: 'bg-amber-400',
   vermelho: 'bg-red-400',
 };
-// cores RGB usadas no PDF (jspdf-autotable didParseCell), separadas das classes
-// Tailwind acima porque o PDF é desenhado fora do DOM e não enxerga classes CSS.
 const COR_PDF = {
   verde: { fill: [22, 163, 74], text: [255, 255, 255] },
   amarelo: { fill: [234, 179, 8], text: [17, 24, 39] },
   vermelho: { fill: [220, 38, 38], text: [255, 255, 255] },
 };
 
-// classes reaproveitadas (mesma filosofia de RankingPage.jsx — ainda não há util
-// compartilhado, ver CLAUDE.md)
 const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 py-2.5 sm:py-1.5 min-h-11 sm:min-h-0 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed";
 const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-2.5 sm:py-1.5 min-h-11 sm:min-h-0 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed";
 const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-4 sm:px-5 pt-4 sm:pt-5 pb-4 sm:pb-[22px]";
@@ -220,8 +181,6 @@ export default function MargensPage() {
   const [flashMsg, setFlashMsg] = useState(null);
   const flashTimer = useRef(null);
 
-  // type 'success' (padrão) some rápido; type 'error' (mensagens do backend) fica
-  // visível por mais tempo — mesmo padrão de toast de RankingPage.jsx.
   function flash(msg, type = 'success') {
     setFlashMsg({ msg, type });
     clearTimeout(flashTimer.current);
@@ -268,7 +227,6 @@ export default function MargensPage() {
   );
 }
 
-// ---------- View: Lançamento (resumo do período + consolidado da franquia + formulário por loja) ----------
 function LancamentoView({ flash, onVerRelatorio }) {
   return (
     <div className="flex flex-col gap-[22px]">
@@ -281,7 +239,6 @@ function LancamentoView({ flash, onVerRelatorio }) {
   );
 }
 
-// ---------- Bloco (a): resumo geral do período no topo da view de Lançamento ----------
 function ResumoPeriodo() {
   const [dataInicio, setDataInicio] = useState(() => primeiroDiaDoMes(hojeISO()));
   const [dataFim, setDataFim] = useState(hojeISO);
@@ -290,9 +247,6 @@ function ResumoPeriodo() {
   const [error, setError] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
 
-  // `loading`/`error` só são resetados de forma síncrona nos handlers de evento que
-  // disparam este efeito (handleInicioChange/handleFimChange/handleRetry logo abaixo) —
-  // nunca dentro do próprio corpo do efeito, mesmo padrão de RankingPage.jsx.
   useEffect(() => {
     if (!dataInicio || !dataFim) return;
     let cancelled = false;
@@ -390,7 +344,6 @@ function ResumoPeriodo() {
   );
 }
 
-// ---------- Bloco (b)+(c): consolidado da franquia (dia único) + formulário por loja ----------
 function FormularioLancamento({ flash }) {
   const [dataLancamento, setDataLancamento] = useState(hojeISO);
 
@@ -404,39 +357,21 @@ function FormularioLancamento({ flash }) {
   const [errorEntradas, setErrorEntradas] = useState(null);
   const [reloadEntradasToken, setReloadEntradasToken] = useState(0);
 
-  // valores consolidados da franquia pro dia selecionado — valem pra TODAS as lojas
-  // (ver CONTRATO-MARGENS-API.md v4); pré-preenchidos com o snapshot mais recente do
-  // dia, se já houver algum lançamento confirmado.
   const [consolidado, setConsolidado] = useState({ faturamento: '', custoProduto: '' });
 
   const [redeSelecionadaId, setRedeSelecionadaId] = useState('');
-  // lojas explicitamente colocadas em edição via botão "Editar" (mesmo já tendo entrada
-  // salva no dia) — union com "nunca confirmada" decide se a linha está editável.
   const [editingSet, setEditingSet] = useState(() => new Set());
-  // rascunho do Total Tar em edição, por loja; ausência de chave cai pro valor já salvo.
   const [rascunhosTar, setRascunhosTar] = useState({});
   const [salvandoLojaId, setSalvandoLojaId] = useState(null);
 
-  // modo de lançamento por loja ('margem' padrão ou 'tar', revelado sob demanda) e o
-  // valor digitado que só existe no frontend enquanto não confirmado (ver funções
-  // auxiliares abaixo): margemDigitadaPorLoja guarda a margem % colada pelo usuário,
-  // usada tanto pra colorir a linha ao vivo quanto (quando o Total Tar está vazio) pra
-  // derivar o totalTar enviado no Confirmar (calcularTotalTarDerivado).
   const [modoPorLoja, setModoPorLoja] = useState({});
   const [margemDigitadaPorLoja, setMargemDigitadaPorLoja] = useState({});
 
-  // árvore Diretor -> Rede (com Lojas aninhadas) — carregada uma vez, não depende da data.
-  // `loadingArvore`/`errorArvore` só são resetados de forma síncrona no handler de retry
-  // (handleRetryArvore, abaixo) — nunca dentro do próprio corpo do efeito, mesmo padrão
-  // de RankingPage.jsx.
   useEffect(() => {
     let cancelled = false;
     fetchRedes()
       .then(redes => {
         if (cancelled) return;
-        // uma rede desativada não pode ser escolhida pra lançamento de margem (ver
-        // CLAUDE.md/CONTRATO-CADASTROS-API.md — `ativo` tem efeito no sistema todo,
-        // não só na tela de configuração, que continua mostrando todas).
         setDiretores(agruparRedesPorDiretor((redes || []).filter(r => r.ativo !== false)));
         setErrorArvore(null);
       })
@@ -453,9 +388,6 @@ function FormularioLancamento({ flash }) {
     setReloadArvoreToken(t => t + 1);
   }
 
-  // entradas já confirmadas na data escolhida — refeito sempre que a data mudar (ver
-  // handleDataLancamentoChange) ou o usuário clicar em "Tentar novamente". Também
-  // pré-preenche o consolidado da franquia com o snapshot mais recente do dia, se houver.
   useEffect(() => {
     let cancelled = false;
     fetchEntradas(dataLancamento)
@@ -516,8 +448,6 @@ function FormularioLancamento({ flash }) {
     [redeSelecionada],
   );
 
-  // Total Tar exibido: rascunho em andamento se existir, senão o que já está salvo pra
-  // essa loja/data — sem precisar de um estado derivado sincronizado via efeito.
   function valorTar(lojaId) {
     if (Object.prototype.hasOwnProperty.call(rascunhosTar, lojaId)) return rascunhosTar[lojaId];
     return entradasDoDia[lojaId] ? entradasDoDia[lojaId].totalTar : '';
@@ -530,9 +460,6 @@ function FormularioLancamento({ flash }) {
     setTar(lojaId, digitosParaValor(digitosAtuais.slice(0, -1)));
   }
 
-  // margem % colada/digitada pelo usuário (campo principal da linha) — usada tanto pra
-  // colorir a linha ao vivo quanto (quando o Total Tar está vazio) pra derivar o Total
-  // Tar enviado no Confirmar.
   function valorMargemDigitada(lojaId) {
     return margemDigitadaPorLoja[lojaId] ?? '';
   }
@@ -548,14 +475,6 @@ function FormularioLancamento({ flash }) {
     setModoPorLoja(prev => ({ ...prev, [lojaId]: getModoLoja(prev, lojaId) === 'tar' ? 'margem' : 'tar' }));
   }
 
-  // margem ao vivo de uma linha: se a loja está bloqueada (confirmada e não em edição),
-  // usa o snapshot já salvo daquela loja; senão, aplica a regra de precedência entre os
-  // dois campos: Total Tar preenchido (o usuário revelou o campo secundário e digitou
-  // algo) vence e a margem é calculada a partir dele, sobrepondo o que estiver digitado
-  // na margem; Total Tar vazio (caso comum, campo secundário nem revelado) faz a margem
-  // digitada mandar direto — é a própria margem, não precisa recalcular. Independe de
-  // `modoPorLoja`, que só controla a VISIBILIDADE do campo Total Tar, não qual fonte é
-  // autoritativa (ver handleConfirmarLoja abaixo, mesma regra usada no payload).
   function margemLinha(loja, bloqueado) {
     if (bloqueado) return calcularMargem(entradasDoDia[loja.id]);
     if (valorTar(loja.id) !== '') {
@@ -568,10 +487,6 @@ function FormularioLancamento({ flash }) {
   function handleConfirmarLoja(lojaId) {
     const faturamento = numOrZero(consolidado.faturamento);
     const custoProduto = numOrZero(consolidado.custoProduto);
-    // mesma regra de precedência de margemLinha: Total Tar preenchido é a fonte
-    // autoritativa (envia o valor digitado direto); vazio faz a margem digitada mandar
-    // (deriva o Total Tar equivalente e registra margemInformada pro backend gravar o
-    // histórico do que foi de fato digitado).
     const tarPreenchido = valorTar(lojaId) !== '';
     const totalTar = tarPreenchido
       ? numOrZero(valorTar(lojaId))
@@ -714,13 +629,7 @@ function FormularioLancamento({ flash }) {
               const cor = calcularCorPercentual(percentual);
               const salvando = salvandoLojaId === loja.id;
               const modoAtual = getModoLoja(modoPorLoja, loja.id);
-              // Total Tar é o campo secundário/opcional — só fica visível (pra edição)
-              // quando o usuário clica em "Calcular pelo Total Tar" pra revelá-lo.
               const tarRevelado = modoAtual === 'tar';
-
-              // "Confirmar" só habilita depois que o usuário digitou algo de verdade em
-              // pelo menos um dos dois campos (mesmo "0" conta, foi uma ação explícita) —
-              // evita confirmar margem calculada em cima de valor vazio/zero por acidente.
               const preenchido = valorMargemDigitada(loja.id) !== '' || valorTar(loja.id) !== '';
 
               return (
@@ -824,8 +733,6 @@ function RelatorioView() {
   const [dataInicio, setDataInicio] = useState(() => primeiroDiaDoMes(hojeISO()));
   const [dataFim, setDataFim] = useState(hojeISO);
   const [relatorio, setRelatorio] = useState(null); // null = ainda não gerado nesta sessão
-  // já nasce carregando: o efeito abaixo gera automaticamente o relatório do período
-  // padrão assim que a tela monta (ver comentário do efeito).
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -833,9 +740,6 @@ function RelatorioView() {
   const [corFiltro, setCorFiltro] = useState('');
   const [buscaLoja, setBuscaLoja] = useState('');
 
-  // só dispara o fetch em si; `loading`/`error` são resetados de forma síncrona pelos
-  // handlers de evento que disparam este efeito (handleGerar, chamado pelo clique no
-  // botão) — nunca dentro do próprio corpo do efeito, mesmo padrão de RankingPage.jsx.
   function runFetchRelatorio() {
     fetchRelatorio(dataInicio, dataFim)
       .then(dados => {
@@ -856,12 +760,8 @@ function RelatorioView() {
     runFetchRelatorio();
   }
 
-  // gera automaticamente na primeira renderização, com o período padrão (mês atual até
-  // hoje) — troca de período depois disso exige clicar em "Gerar relatório" de novo,
-  // igual ao "Resumo geral do período" da view de Lançamento.
   useEffect(() => {
     runFetchRelatorio();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const linhasFlat = useMemo(() => (relatorio ? flattenRelatorio(relatorio) : []), [relatorio]);
@@ -872,8 +772,6 @@ function RelatorioView() {
     return Array.from(map, ([id, nome]) => ({ id, nome })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   }, [linhasFlat]);
 
-  // filtros aplicados EM MEMÓRIA sobre o resultado já buscado — trocar Rede/Cor/busca
-  // nunca dispara uma nova chamada de API (só dataInicio/dataFim, via "Gerar relatório").
   const linhasFiltradas = useMemo(() => {
     const busca = buscaLoja.trim().toLowerCase();
     return linhasFlat.filter(l => (
@@ -885,8 +783,6 @@ function RelatorioView() {
 
   const gruposFiltrados = useMemo(() => agruparLinhasPorDiretorERede(linhasFiltradas), [linhasFiltradas]);
 
-  // monta o PDF inteiramente no navegador (sem rota nova no backend), respeitando os
-  // mesmos filtros aplicados na tela — exporta só o que está sendo mostrado.
   function handleBaixarPdf() {
     if (!linhasFiltradas.length) return;
 

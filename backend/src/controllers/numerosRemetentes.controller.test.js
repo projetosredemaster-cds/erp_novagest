@@ -25,9 +25,7 @@ beforeEach(() => {
       });
     }
   }
-  // baileysSessionService fala com a lib Baileys de verdade (sessões reais em
-  // memória/disco) — nos testes de controller isso é sempre mockado
-  // explicitamente, nunca deixado rodar de verdade.
+
   for (const key of Object.keys(baileysSessionService)) {
     if (typeof baileysSessionService[key] === 'function') {
       vi.spyOn(baileysSessionService, key).mockImplementation(() => {

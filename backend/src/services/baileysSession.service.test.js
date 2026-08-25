@@ -1,19 +1,3 @@
-// Este service fala com a lib Baileys de verdade e com o sistema de
-// arquivos. IMPORTANTE (deixe este comentário se for tocar neste arquivo):
-// `vi.mock('@whiskeysockets/baileys', ...)` NÃO funciona neste projeto —
-// confirmado manualmente antes de escrever este arquivo. `@whiskeysockets/
-// baileys` é um pacote ESM puro; o `require()`ado dentro do Vitest vira um
-// objeto de namespace ESM com propriedades não-configuráveis, então nem
-// `vi.mock` nem `vi.spyOn` conseguem substituir `makeWASocket`/
-// `useMultiFileAuthState` diretamente (erro do Vitest: "Module namespace is
-// not configurable in ESM"). Por isso `baileysSession.service.js` expõe
-// `_baileysLib` (objeto literal comum, com propriedades configuráveis) só
-// para este teste poder `vi.spyOn` nele — ver o comentário ao lado da
-// declaração de `baileysLib` no service. `fs` (módulo builtin real) já é
-// espiável normalmente com `vi.spyOn`, sem precisar de indireção nenhuma.
-// Mesmo princípio de guarda usado em `numerosRemetentes.service.test.js`:
-// nenhum destes testes deve tentar uma conexão real com o Azure SQL.
-
 const fs = require('fs');
 const numerosRemetentesModel = require('../models/numerosRemetentes.model');
 const mensagensModel = require('../models/mensagens.model');
@@ -22,19 +6,10 @@ const baileysSessionService = require('./baileysSession.service');
 
 const { _baileysLib: baileysLib, gerarVariantesTelefoneBr } = baileysSessionService;
 
-// Flush de macrotask — suficiente para deixar as promises internas do
-// service (ex.: `await baileysLib.useMultiFileAuthState(...)`) resolverem
-// antes de simularmos o próximo evento do socket falso.
 function flush() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-/**
- * Configura `baileysLib.makeWASocket` para devolver, a cada chamada, um
- * socket falso que guarda o handler de `connection.update` registrado, e
- * empurra cada socket criado em `socksCriados` (na ordem de criação) para o
- * teste poder simular eventos nele.
- */
 function configurarMakeWASocket(socksCriados) {
   vi.spyOn(baileysLib, 'makeWASocket').mockImplementation(() => {
     const handlers = {};
@@ -47,10 +22,6 @@ function configurarMakeWASocket(socksCriados) {
       end: vi.fn(),
       logout: vi.fn().mockResolvedValue(undefined),
       user: { id: '5598912345678:1@s.whatsapp.net' },
-      // Usado só pelos testes de resolução de LID (ver describe abaixo,
-      // "messages.upsert com remoteJid endereçado por LID") — por padrão
-      // não resolve nada (`null`), cada teste sobrescreve conforme o
-      // cenário via `mockResolvedValue`/`mockRejectedValue`.
       signalRepository: {
         lidMapping: {
           getPNForLID: vi.fn().mockResolvedValue(null),
@@ -89,11 +60,6 @@ beforeEach(() => {
     }
   }
 
-  // Default para os testes que não são especificamente sobre a lógica de
-  // "primeira resposta de cliente" (ver describe dedicado abaixo) — simula
-  // o caso mais comum (contato nunca teve mensagem de cliente antes), para
-  // não precisar mockar isso em todo teste de messages.upsert que já existia
-  // antes dessa checagem ser introduzida.
   mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
 
   vi.spyOn(fs, 'existsSync').mockReturnValue(true);
@@ -103,10 +69,6 @@ beforeEach(() => {
   vi.spyOn(baileysLib, 'useMultiFileAuthState').mockResolvedValue({ state: {}, saveCreds: vi.fn() });
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
-
-  // Espiado (call-through, não mockado) — este é o EventEmitter real
-  // compartilhado com `conversas.controller.js`, e nenhum teste aqui precisa
-  // de um listener de verdade registrado nele, só confirmar o `emit(...)`.
   vi.spyOn(mensagensEventsService, 'emit');
 });
 
@@ -133,8 +95,6 @@ describe('baileysSession.reconciliarSessoesNoBoot', () => {
 
     await promise;
 
-    // `persistirConectado` (parte da máquina de eventos já existente) grava
-    // numero+status='conectado' — a rotina de boot não precisa gravar de novo.
     expect(numerosRemetentesModel.updateConexao).toHaveBeenCalledWith(7, {
       numero: '5598912345678',
       statusConexao: 'conectado',
@@ -200,9 +160,6 @@ describe('baileysSession.reconciliarSessoesNoBoot', () => {
 
     await promise;
 
-    // a rotina de boot sempre finaliza uma falha como 'desconectado' (nunca
-    // 'aguardando_conexao', que é o valor que o tratamento de logout em
-    // runtime grava) — a última chamada de updateConexao vence.
     expect(numerosRemetentesModel.updateConexao).toHaveBeenLastCalledWith(13, {
       numero: null,
       statusConexao: 'desconectado',
@@ -216,8 +173,6 @@ describe('baileysSession.reconciliarSessoesNoBoot', () => {
     numerosRemetentesModel.listNumerosPorStatusConexao.mockResolvedValue([{ id: 17 }]);
     numerosRemetentesModel.updateConexao.mockResolvedValue(undefined);
 
-    // Nenhum evento de connection.update é emitido — a sessão nunca resolve
-    // sozinha, então precisa do timeout curto para desistir.
     await baileysSessionService.reconciliarSessoesNoBoot({ delayMs: 0, timeoutMs: 10 });
 
     expect(numerosRemetentesModel.updateConexao).toHaveBeenCalledWith(17, {
@@ -235,8 +190,6 @@ describe('baileysSession.reconciliarSessoesNoBoot', () => {
 
     const promise = baileysSessionService.reconciliarSessoesNoBoot({ delayMs: 0, timeoutMs: 5000 });
 
-    // Só o primeiro socket deve existir enquanto o primeiro número não foi
-    // resolvido — se fosse Promise.all, os dois já existiriam aqui.
     await flush();
     expect(socksCriados).toHaveLength(1);
 

@@ -13,14 +13,6 @@ vi.mock('../../../app/AuthContext.jsx', () => ({
   useAuth: vi.fn(),
 }));
 
-// `useOutletContext` real do react-router-dom depende só de um React Context
-// de módulo (não exige estar dentro de um <Router>/<Outlet> de verdade para
-// não quebrar) — mockado aqui para controlar, teste a teste, se o contexto
-// do sino (`refetchNotificacoes`) está presente ou ausente. `useLocation`/
-// `useNavigate` também mockados (a página agora os usa para a pré-seleção
-// de conversa via `location.state`, ver ControleLigacoesShell.jsx) — default
-// de `useLocation` simula acesso direto à rota, sem state (mesmo
-// comportamento de hoje).
 vi.mock('react-router-dom', () => ({
   useOutletContext: vi.fn(),
   useLocation: vi.fn(),
@@ -68,17 +60,9 @@ const navigateMock = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   useAuth.mockReturnValue({ token: 'token-teste' });
-  // Default: sem context de Outlet (simula os testes existentes, que montam
-  // `<ConversasPage/>` isolado, fora de qualquer <Outlet>) — cada teste que
-  // precisar do context do sino sobrescreve com `useOutletContext.mockReturnValue`.
   useOutletContext.mockReturnValue(undefined);
-  // Default: acesso direto à rota, sem state de pré-seleção (mesmo
-  // comportamento de antes desta funcionalidade existir).
   useLocation.mockReturnValue({ pathname: '/controle-ligacoes/conversas', state: null });
   useNavigate.mockReturnValue(navigateMock);
-  // Default: conexão SSE "aberta" (promise nunca resolvida/rejeitada) —
-  // simula um stream de longa duração em aberto, sem disparar reconexão
-  // nem rejeição não tratada nos testes que não mexem com tempo real.
   api.abrirStreamConversas.mockImplementation(() => new Promise(() => {}));
 });
 
@@ -189,7 +173,6 @@ describe('ConversasPage — painel de chat', () => {
     expect(await screen.findByText(
       'O número usado nesta conversa está desconectado. Reconecte-o em Configurações antes de responder.'
     )).toBeInTheDocument();
-    // texto digitado não é perdido em caso de erro
     expect(textarea).toHaveValue('Oi Maria!');
   });
 });
@@ -264,9 +247,6 @@ describe('ConversasPage — tempo real (SSE)', () => {
     await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledTimes(1));
 
     onEvent('nova-mensagem', { contatoId: 999, numeroRemetenteId: 3 });
-
-    // dá tempo pro microtask de fetchConversas rodar; fetchMensagens não
-    // deve ter sido chamado de novo
     await waitFor(() => expect(api.fetchConversas).toHaveBeenCalledTimes(2));
     expect(api.fetchMensagens).toHaveBeenCalledTimes(1);
   });

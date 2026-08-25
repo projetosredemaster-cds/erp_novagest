@@ -1,46 +1,18 @@
 const mensagensModel = require('../models/mensagens.model');
 const baileysSessionService = require('../services/baileysSession.service');
 
-/**
- * `listarConversas`/`listarMensagens` são passagens finas para o model —
- * a lógica de negócio de fato (existência de contato, sessão conectada,
- * verificação onWhatsApp, envio) fica em `responder`, que é a única rota
- * das três que grava algo além de "marcar como lida".
- */
 async function listarConversas({ busca, apenasNaoLidas } = {}) {
   return mensagensModel.listConversas({ busca, apenasNaoLidas });
 }
 
-/**
- * Wrapper fino sobre o model — quantidade de notificações não vistas
- * (mensagens que são "primeira resposta de cliente" e ainda estão
- * `lida = 0`) para o sino de notificações do frontend
- * (`GET /api/controle-ligacoes/notificacoes`).
- */
 async function contarNotificacoesNaoVistas() {
   return mensagensModel.contarNotificacoesNaoVistas();
 }
 
-/**
- * Wrapper fino sobre o model — lista as notificações pendentes mais
- * recentes (mesmo passthrough de `contarNotificacoesNaoVistas`) para o
- * dropdown do sino de notificações do frontend.
- */
 async function listarNotificacoesPendentes() {
   return mensagensModel.listNotificacoesPendentes();
 }
 
-/**
- * Retorna `null` quando o contato não existe (o controller decide o 404) —
- * distinção deliberada de "array vazio" (contato existe, nunca teve
- * mensagem). Quando o contato existe, retorna
- * `{ mensagens, numeroRemetenteInicial }` — `numeroRemetenteInicial` é o
- * número remetente da mensagem mais antiga daquele contato (`{id,apelido}`
- * ou `null` se nunca teve mensagem nenhuma). `numeroRemetenteAtual` não
- * entra aqui de propósito — o frontend já tem esse dado disponível na lista
- * de conversas carregada previamente (ver CONTRATO-CONTROLE-LIGACOES-API.md,
- * seção "Central de Mensagens (v7)").
- */
 async function listarMensagens(contatoId) {
   const existe = await mensagensModel.existeContato(contatoId);
   if (!existe) {
@@ -55,16 +27,6 @@ async function listarMensagens(contatoId) {
   return { mensagens, numeroRemetenteInicial };
 }
 
-/**
- * Envia uma resposta manual (remetente='colaboradora') para um contato via
- * o número remetente da última mensagem daquela conversa. Retorna:
- *   { status: 'contato_nao_encontrado' } |
- *   { status: 'sem_historico' } |
- *   { status: 'numero_desconectado' } |
- *   { status: 'sem_whatsapp', erro } |
- *   { status: 'falha_envio', erro } |
- *   { status: 'enviada', mensagem }
- */
 async function responder(contatoId, corpo) {
   const existe = await mensagensModel.existeContato(contatoId);
   if (!existe) {

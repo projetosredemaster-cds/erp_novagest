@@ -21,13 +21,6 @@ import * as api from './painelDisparoApi.js';
 import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
 import { useAuth } from '../../../app/AuthContext.jsx';
 
-// Item "cheio" (statusConexao + nomeColaboradora) de GET /numeros-remetentes,
-// cruzado por id com `numerosAtivos` de GET /painel-disparo para calcular
-// elegibilidade de disparo em cada card (PainelDisparoPage.jsx). Por padrão,
-// o número 3 (CDC Cohatrac, usado na maioria dos testes) é elegível —
-// conectado e com colaboradora configurada — para não quebrar os fluxos de
-// disparo já cobertos; os testes de elegibilidade abaixo sobrescrevem isso
-// caso a caso.
 function numeroRemetenteDetalhado({ id = 3, statusConexao = 'conectado', nomeColaboradora = 'Ana Souza' } = {}) {
   return { id, apelido: 'CDC Cohatrac', numero: '5598900000000', statusConexao, nomeColaboradora, ativo: true, estado: { id: 6, nome: 'Maranhão', uf: 'MA' } };
 }
@@ -172,9 +165,6 @@ describe('PainelDisparoPage — card de estado', () => {
 
     expect(api.fetchContatosDisponiveis).toHaveBeenCalledTimes(1);
 
-    // Aguarda mais tempo do que o debounce (400ms) sem nenhuma interação —
-    // se houvesse um efeito com dependência instável, novas chamadas
-    // apareceriam aqui sem nenhum gatilho do usuário.
     await new Promise((resolve) => setTimeout(resolve, 700));
     expect(api.fetchContatosDisponiveis).toHaveBeenCalledTimes(1);
   });
@@ -186,9 +176,6 @@ describe('PainelDisparoPage — card de estado', () => {
 
       render(<PainelDisparoPage />);
 
-      // Flush das promessas de fetchPainelDisparo/fetchContatosDisponiveis
-      // disparadas na montagem — nenhuma delas depende de timer, só de
-      // microtasks das Promises já resolvidas pelo mock.
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -198,13 +185,6 @@ describe('PainelDisparoPage — card de estado', () => {
       expect(screen.queryByText('Carregando contatos...')).not.toBeInTheDocument();
       expect(screen.getByText('Maria Silva')).toBeInTheDocument();
 
-      // Avança o timer do debounce (400ms) além do limite, sem nenhuma
-      // interação do usuário no campo de busca. No bug original, o efeito
-      // de debounce roda também na montagem (buscaInput já começa em ''),
-      // e o timer força setLoadingContatos(true) incondicionalmente; como
-      // `busca` não muda de valor de verdade, nenhum novo fetch é
-      // disparado e o card fica travado em "Carregando contatos..." para
-      // sempre.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(450);
       });
@@ -232,10 +212,8 @@ describe('PainelDisparoPage — card de estado', () => {
 
     await renderPage();
 
-    // Card de Maranhão carregou com sucesso.
     expect(screen.getByText('Maria Silva')).toBeInTheDocument();
 
-    // Card de Rondônia, em paralelo, mostra seu próprio erro sem afetar o de Maranhão.
     expect(await screen.findByText('Não foi possível carregar os contatos deste estado.'))
       .toBeInTheDocument();
     expect(screen.getByText('Maria Silva')).toBeInTheDocument();
@@ -421,7 +399,6 @@ describe('PainelDisparoPage — disparo', () => {
 
     expect(await screen.findByText('Disparo registrado.')).toBeInTheDocument();
     expect(screen.getByText('0/10 selecionados')).toBeInTheDocument();
-    // Não deve nunca abrir o modal de avisos nesse caminho.
     expect(screen.queryByText('Aviso antes de disparar')).not.toBeInTheDocument();
     await waitFor(() => expect(api.fetchContatosDisponiveis).toHaveBeenCalledTimes(1));
   });
@@ -447,7 +424,6 @@ describe('PainelDisparoPage — disparo', () => {
 
     await waitFor(() => expect(screen.queryByText('Aviso antes de disparar')).not.toBeInTheDocument());
     expect(api.criarDisparo).not.toHaveBeenCalled();
-    // Seleção permanece intacta — nada foi gravado.
     expect(screen.getByText('1/10 selecionados')).toBeInTheDocument();
     expect(checkboxes[1]).toBeChecked();
   });
@@ -509,7 +485,6 @@ describe('PainelDisparoPage — disparo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Disparar mesmo assim' }));
 
     expect(await screen.findByText('Erro ao registrar disparo.')).toBeInTheDocument();
-    // O modal continua aberto — usuário pode tentar de novo ou cancelar.
     expect(screen.getByText('Aviso antes de disparar')).toBeInTheDocument();
     expect(screen.getByText('1/10 selecionados')).toBeInTheDocument();
   });

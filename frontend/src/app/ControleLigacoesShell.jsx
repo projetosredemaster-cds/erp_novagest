@@ -5,9 +5,6 @@ import { useAuth } from './AuthContext.jsx';
 import UserFooterMenu from './UserFooterMenu.jsx';
 import { fetchNotificacoes, abrirStreamConversas } from '../modulos/controle-ligacoes/conversas/conversasApi.js';
 
-// Tempo de espera antes de tentar reabrir o stream SSE do sino depois de uma
-// queda de conexão real (não intencional) — mesmo valor/racional de
-// ConversasPage.jsx, que mantém sua própria conexão SSE independente desta.
 const RECONEXAO_SSE_MS = 5000;
 
 const navItemClass = ({ isActive }) =>
@@ -17,9 +14,6 @@ const navItemClass = ({ isActive }) =>
       : 'text-[var(--muted)] hover:bg-[var(--panel-alt)] hover:text-[var(--text)]'
   }`;
 
-// Itens do flyout de "Configurações" — painel próprio flutuando à direita
-// do botão (não mais um submenu embutido no fluxo vertical da sidebar), daí
-// não ter mais o `pl-8` de indentação que `subNavItemClass` usava antes.
 const flyoutItemClass = ({ isActive }) =>
   `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
     isActive
@@ -27,11 +21,6 @@ const flyoutItemClass = ({ isActive }) =>
       : 'text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--text)]'
   }`;
 
-// Horário relativo ("agora"/"Xmin"/"Xh"/"Xd") exibido em cada item do
-// dropdown de notificações — mesmo estilo/racional de `formatRelativo` em
-// ConversasPage.jsx (não é compartilhada entre as duas telas de propósito,
-// ver comentário sobre `parseSseEvent` em conversasApi.js: cada tela tem sua
-// própria função isolada mesmo que pareça duplicação).
 function formatRelativoNotificacao(iso) {
   if (!iso) return '';
   const data = new Date(iso);
@@ -52,15 +41,6 @@ export default function ControleLigacoesShell() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Destaca o botão "Configurações" quando a rota atual já é uma das
-  // subrotas (Usuários/Números Remetentes) — decisão: isso NÃO abre mais o
-  // flyout sozinho (diferente do antigo submenu vertical, que nascia
-  // expandido nesse caso). Num flyout hover/click, auto-abrir ao navegar
-  // ficaria estranho (o painel apareceria flutuando sem o usuário ter
-  // pedido); em vez disso, só o item ativo dentro do flyout já se destaca
-  // via `NavLink`/`aria-current` quando o usuário abrir o menu de novo, e o
-  // próprio botão "Configurações" ganha um destaque sutil (mesmo estilo de
-  // fundo do hover) enquanto uma dessas subrotas está ativa.
   const emSubrotaConfiguracoes =
     location.pathname.startsWith('/controle-ligacoes/usuarios') ||
     location.pathname.startsWith('/controle-ligacoes/configuracoes');
@@ -79,9 +59,6 @@ export default function ControleLigacoesShell() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [configuracoesFlyoutAberto]);
 
-  // Fecha o flyout quando o foco (via teclado) sai do container inteiro
-  // (botão + painel) — sem isso, tabular entre os itens do submenu fecharia
-  // o flyout a cada troca de foco, já que cada item é um elemento diferente.
   function handleConfiguracoesBlur(e) {
     if (!e.currentTarget.contains(e.relatedTarget)) {
       setConfiguracoesFlyoutAberto(false);
@@ -93,11 +70,7 @@ export default function ControleLigacoesShell() {
     setMobileOpen(false);
   }
 
-  // --- sino de notificações (handoff IA→humano ainda não visto) ---
   const [notificacoesNaoVistas, setNotificacoesNaoVistas] = useState(0);
-  // `null` = ainda não carregado (sentinela, distinto de "carregou e veio
-  // vazio") — array (mesmo vazio) só depois que `refetchNotificacoes`
-  // resolver com sucesso pelo menos uma vez. Ver estados no JSX do dropdown.
   const [notificacoesItens, setNotificacoesItens] = useState(null);
   const [notificacoesAberto, setNotificacoesAberto] = useState(false);
   const notificacoesRef = useRef(null);
@@ -109,8 +82,6 @@ export default function ControleLigacoesShell() {
         setNotificacoesItens(resposta?.itens || []);
       })
       .catch((err) => {
-        // Contagem do sino não é crítica o bastante para exibir erro na UI —
-        // só loga, mantém o valor atual.
         console.error('Erro ao buscar notificações do Controle de Ligações:', err);
       })
   ), [token]);
@@ -130,9 +101,6 @@ export default function ControleLigacoesShell() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [notificacoesAberto]);
 
-  // Conexão SSE própria do shell (independente da que ConversasPage.jsx já
-  // mantém) — precisa continuar contando mesmo fora da tela de Conversas.
-  // Mesmo padrão de useEffect+AbortController+reconexão de ConversasPage.jsx.
   useEffect(() => {
     if (!token) return undefined;
 
@@ -146,17 +114,9 @@ export default function ControleLigacoesShell() {
         signal: controller.signal,
         onEvent: (event, data) => {
           if (event !== 'nova-mensagem' || !data || data.primeiraResposta !== true) return;
-          // Refetch completo (contagem + itens) em vez de só incrementar o
-          // contador local — o backend é sempre a fonte de verdade (mesmo
-          // princípio já documentado em ConversasPage.jsx). Um incremento
-          // otimista aqui deixava o badge certo mas a lista do dropdown presa
-          // no estado da montagem inicial, nunca refletindo a notificação
-          // nova (bug de raiz corrigido).
           refetchNotificacoes();
         },
       }).catch((err) => {
-        // `AbortController.abort()` (cleanup deste efeito) rejeita com
-        // `AbortError` — não é uma queda real, não deve reconectar.
         if (err?.name === 'AbortError') return;
         if (!montado) return;
         reconnectTimer = setTimeout(() => {
@@ -178,18 +138,10 @@ export default function ControleLigacoesShell() {
     setNotificacoesAberto((aberto) => !aberto);
   }
 
-  // Clique num item do dropdown: fecha o painel e navega para Conversas já
-  // pré-selecionando aquele contato (via `location.state` — ConversasPage.jsx
-  // lê isso num efeito próprio, ver "Tarefa 2" do prompt). Não passamos pelo
-  // fluxo normal de seleção (que depende da lista `conversas` já carregada)
-  // porque o contato pode nem estar visível na lista ainda dependendo do
-  // filtro de busca ativo naquela tela.
   function selecionarNotificacao(item) {
     setNotificacoesAberto(false);
     setMobileOpen(false);
-    // `nome` dentro do `state` é um contrato interno com ConversasPage.jsx
-    // (que lê `location.state.nome`) — não precisa bater com o nome do campo
-    // vindo da API (`nomeContato`).
+
     navigate('/controle-ligacoes/conversas', {
       state: { contatoId: item.contatoId, nome: item.nomeContato, telefone: item.telefone },
     });
@@ -223,15 +175,7 @@ export default function ControleLigacoesShell() {
         />
       ) : null}
 
-      {/* `overflow-y-auto` fica só no <nav> abaixo, não mais no <aside>
-          inteiro: o CSS Overflow spec força overflow-x a virar 'auto' (e
-          portanto clipar) sempre que overflow-y não é 'visible', mesmo que
-          overflow-x seja explicitamente 'visible' — o que cortaria o flyout
-          de "Configurações" (posicionado com `left-full`, fora da largura
-          do <aside>) bem na borda direita da sidebar. Como o bloco de
-          "Configurações" mora fora de qualquer ancestral com overflow
-          diferente de 'visible' agora, o flyout escapa livremente para a
-          direita, sobre o conteúdo principal. */}
+      {}
       <aside
         className={`fixed left-0 top-0 z-40 flex h-screen w-72 flex-col border-r border-[var(--border)] bg-[var(--panel)] px-3 py-5 transition-transform duration-200 lg:w-56 lg:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
@@ -280,12 +224,6 @@ export default function ControleLigacoesShell() {
           >
             <button
               type="button"
-              // Abre (nunca fecha) no clique — não alterna: um clique de
-              // mouse "de verdade" já passa por `mouseenter` antes do
-              // `click` (o próprio userEvent.click dos testes simula isso),
-              // então um toggle aqui fecharia o flyout que o hover acabou
-              // de abrir um instante antes. Fechar continua sendo
-              // responsabilidade do `mouseleave`/clique fora/seleção de item.
               onClick={() => setConfiguracoesFlyoutAberto(true)}
               onFocus={() => setConfiguracoesFlyoutAberto(true)}
               aria-expanded={configuracoesFlyoutAberto}
@@ -324,14 +262,7 @@ export default function ControleLigacoesShell() {
         </div>
       </aside>
 
-      {/* Sino de notificações: posicionado `fixed` no canto superior direito
-          da VIEWPORT (não da sidebar) — como cada página do módulo renderiza
-          seu próprio cabeçalho, este é o jeito mais direto de deixá-lo
-          sempre visível no canto oposto ao menu principal, em qualquer tela
-          do Controle de Ligações, sem precisar tocar em cada página. Mesmo
-          princípio do botão hambúrguer mobile logo no topo deste arquivo
-          (`fixed left-3 top-3 z-50 ... lg:hidden`), mas visível em todos os
-          tamanhos de tela (não só mobile) e no canto oposto. */}
+      {}
       <div className="fixed right-4 top-4 z-50 sm:right-6 sm:top-5" ref={notificacoesRef}>
         <button
           type="button"

@@ -60,7 +60,7 @@ function calcularMargemLoja(linha) {
 }
 
 function agruparPorDiretorERede(lojasCalculadas) {
-  const blocosPorRede = new Map(); // redeId -> { diretor, rede, lojas: [] }
+  const blocosPorRede = new Map(); 
 
   for (const item of lojasCalculadas) {
     if (!blocosPorRede.has(item.rede.id)) {

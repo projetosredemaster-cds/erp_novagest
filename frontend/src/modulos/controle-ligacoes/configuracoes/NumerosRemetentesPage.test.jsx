@@ -2,14 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import NumerosRemetentesPage from './NumerosRemetentesPage.jsx';
 
-// A conexão via QR Code (Baileys/SSE) NÃO passa por `apiRequest` — é fetch
-// nativo + parsing manual do corpo de stream (ver comentário em
-// controleLigacoesConfigApi.js). Por isso `abrirStreamConexao` mantém a
-// implementação REAL aqui (via `importOriginal`), e os testes que exercitam
-// o modal de conexão simulam a resposta stubando `global.fetch` diretamente
-// — assim o parsing SSE de verdade é exercitado, não só a reação do
-// componente a um mock de alto nível. As demais funções (CRUD via
-// `apiRequest`) continuam 100% mockadas, como já era.
+
 vi.mock('./controleLigacoesConfigApi.js', async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -24,9 +17,6 @@ vi.mock('./controleLigacoesConfigApi.js', async (importOriginal) => {
   };
 });
 
-// Stub leve do componente de QR: evita depender da renderização SVG real da
-// lib pra testar troca de valor entre eventos — só expõe o `value` recebido
-// via texto num elemento com testid fixo.
 vi.mock('qrcode.react', () => ({
   QRCodeSVG: ({ value }) => <div data-testid="qr-value">{value}</div>,
 }));
@@ -59,16 +49,10 @@ function numero({
   };
 }
 
-// --- helpers de simulação do stream SSE (ver abrirStreamConexao) ---
 function sseChunk(event, data) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-// `chunks`: array de string (evento pronto) ou `{ text, delayMs }` (evento
-// que só "chega" depois de um atraso real — usado pra garantir que o
-// componente tenha a chance de renderizar o estado intermediário antes do
-// próximo evento chegar, evitando que dois `setState` síncronos sejam
-// batchados num único render).
 function makeStreamResponse(chunks, { ok = true, status = 200 } = {}) {
   const encoder = new TextEncoder();
   let index = 0;

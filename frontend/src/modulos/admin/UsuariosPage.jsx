@@ -35,9 +35,6 @@ export default function UsuariosPage() {
   const [operadorCobranca, setOperadorCobranca] = useState(false);
   const [formError, setFormError] = useState(null);
   const [creating, setCreating] = useState(false);
-
-  // type 'success' some rápido; type 'error' fica visível mais tempo (mesmo
-  // espírito do flash() de RankingPage.jsx)
   const [flashMsg, setFlashMsg] = useState(null);
   const flashTimer = useRef(null);
 
@@ -47,8 +44,6 @@ export default function UsuariosPage() {
     flashTimer.current = setTimeout(() => setFlashMsg(null), type === 'error' ? 4200 : 1600);
   }
 
-  // sem setState síncrono no corpo (só dentro dos callbacks da promise) para
-  // poder ser chamada diretamente pelo efeito de carga inicial.
   function runLoadUsuarios() {
     listarUsuarios(token)
       .then((lista) => setUsuarios(lista || []))
@@ -56,7 +51,6 @@ export default function UsuariosPage() {
       .finally(() => setLoading(false));
   }
 
-  // handler do botão "Tentar novamente" (evento de UI, não roda dentro de um efeito)
   function loadUsuarios() {
     setLoading(true);
     setLoadError(null);
@@ -64,9 +58,7 @@ export default function UsuariosPage() {
   }
 
   useEffect(() => {
-    // estados iniciais (loading=true, loadError=null) já cobrem a primeira carga
     runLoadUsuarios();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleCreate(e) {

@@ -111,7 +111,6 @@ describe('POST /api/controle-ligacoes/contatos/importar', () => {
   });
 
   it('201 — classifica corretamente duplicado (banco), duplicado (mesmo arquivo), sem estado e erro de linha, gravando LoteImportacaoErros', async () => {
-    // telefone já existente em Contatos (de uma importação anterior)
     importacaoModel.listTelefonesExistentes.mockResolvedValue([
       { id: 77, telefone: '5598900000001' },
     ]);
@@ -126,12 +125,12 @@ describe('POST /api/controle-ligacoes/contatos/importar', () => {
 
     const csv = [
       'NOME,CONTATO',
-      'Ja Existe no Banco,5598900000001', // total_duplicado (já em Contatos)
-      'Contato Valido,5598984761733', // válido, com estado
-      'Repetido no Arquivo,5598984761733', // total_duplicado (repetido no mesmo lote)
-      'Sem DDD Cadastrado,5511988887777', // total_sem_estado (DDD 11 não cadastrado)
-      ',5598911112222', // total_erro (nome vazio)
-      'Telefone Curto Demais,5598911', // total_erro (telefone sem DDD extraível)
+      'Ja Existe no Banco,5598900000001', 
+      'Contato Valido,5598984761733', 
+      'Repetido no Arquivo,5598984761733', 
+      'Sem DDD Cadastrado,5511988887777', 
+      ',5598911112222', 
+      'Telefone Curto Demais,5598911', 
     ].join('\n') + '\n';
 
     const res = await request(app)
@@ -146,7 +145,6 @@ describe('POST /api/controle-ligacoes/contatos/importar', () => {
     expect(res.body.totalErro).toBe(2);
     expect(res.body.totalImportados).toBe(1);
 
-    // nunca atribui numero_remetente_id na importação.
     const chamada = importacaoModel.criarLoteEContatos.mock.calls[0][0];
     const contatosEnviados = chamada.contatos;
     expect(contatosEnviados).toHaveLength(2); // 1 com estado + 1 sem estado
@@ -155,7 +153,6 @@ describe('POST /api/controle-ligacoes/contatos/importar', () => {
       expect(contato).not.toHaveProperty('numero_remetente_id');
     }
 
-    // 4 linhas rejeitadas: 2 duplicadas + 2 erro de formato.
     const erros = chamada.erros;
     expect(erros).toHaveLength(4);
 

@@ -17,11 +17,6 @@ vi.mock('../modulos/controle-ligacoes/conversas/conversasApi.js', () => ({
 import { useAuth } from './AuthContext.jsx';
 import * as conversasApi from '../modulos/controle-ligacoes/conversas/conversasApi.js';
 
-// Componente-sonda usado no lugar da rota real de Conversas: expõe
-// `location.state` na tela (via `data-testid`) para os testes de navegação
-// do dropdown de notificações confirmarem que o `contatoId`/`nome`/
-// `telefone` chegaram certos, sem precisar montar a `ConversasPage` real
-// (que tem sua própria suíte de testes, incl. o consumo desse state).
 function ConversasRouteProbe() {
   const location = useLocation();
   return (
@@ -65,9 +60,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   useAuth.mockReturnValue({ logout: vi.fn(), isAdmin: false, token: 'token-teste' });
   conversasApi.fetchNotificacoes.mockResolvedValue({ naoVistas: 0, itens: [] });
-  // Default: conexão SSE "aberta" (promise nunca resolvida/rejeitada) — mesmo
-  // raciocínio de ConversasPage.test.jsx, evita reconexão/rejeição não
-  // tratada nos testes que não mexem com tempo real.
   conversasApi.abrirStreamConversas.mockImplementation(() => new Promise(() => {}));
 });
 
@@ -153,9 +145,7 @@ describe('ControleLigacoesShell - flyout de Configurações', () => {
     renderShell(['/controle-ligacoes/usuarios']);
 
     const botaoConfiguracoes = screen.getByRole('button', { name: /configurações/i });
-    // Decisão documentada: diferente do antigo submenu vertical (que nascia
-    // expandido nessa rota), o flyout NÃO abre sozinho — só o botão ganha
-    // destaque visual (aria-expanded continua false até o usuário interagir).
+
     expect(botaoConfiguracoes).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('link', { name: /usuários/i })).not.toBeInTheDocument();
   });
@@ -213,12 +203,9 @@ describe('ControleLigacoesShell - sino de notificações', () => {
 
     onEvent('nova-mensagem', { contatoId: 42, numeroRemetenteId: 3, primeiraResposta: true });
 
-    // não é um incremento local: o evento dispara um novo fetch completo
     await waitFor(() => expect(conversasApi.fetchNotificacoes).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('2')).toBeInTheDocument();
 
-    // a lista do dropdown também reflete o item novo vindo do refetch, não
-    // fica presa no estado (vazio) da montagem inicial
     await userEvent.click(screen.getByRole('button', { name: /notificações/i }));
     expect(screen.getByText('Maria Silva')).toBeInTheDocument();
   });
@@ -238,8 +225,6 @@ describe('ControleLigacoesShell - sino de notificações', () => {
 
     onEvent('nova-mensagem', { contatoId: 42, numeroRemetenteId: 3, primeiraResposta: false });
 
-    // dá tempo pro possível update rodar; contador deve permanecer o mesmo
-    // e nenhum refetch extra deve acontecer
     await waitFor(() => expect(conversasApi.abrirStreamConversas).toHaveBeenCalledTimes(1));
     expect(conversasApi.fetchNotificacoes).toHaveBeenCalledTimes(1);
     expect(screen.getByText('1')).toBeInTheDocument();
@@ -249,14 +234,11 @@ describe('ControleLigacoesShell - sino de notificações', () => {
     renderShell();
 
     const botaoSino = await screen.findByRole('button', { name: /notificações/i });
-    // Posicionamento fixo relativo à viewport, ancorado à direita/topo —
-    // mesmo princípio do botão hambúrguer mobile (`fixed left-3 top-3`),
-    // só que no canto oposto e visível em qualquer tamanho de tela.
+
     expect(botaoSino.parentElement).toHaveClass('fixed', 'right-4', 'top-4');
 
     const titulo = screen.getByText('NovaGest');
-    // O sino não é mais renderizado dentro do bloco de título/sidebar — é um
-    // elemento irmão de <main>, fora do <aside>.
+
     expect(botaoSino.closest('aside')).toBeNull();
     expect(titulo.closest('aside')).not.toBeNull();
   });
@@ -272,7 +254,6 @@ describe('ControleLigacoesShell - sino de notificações', () => {
     const botaoSino = await screen.findByRole('button', { name: /notificações/i });
     await userEvent.click(botaoSino);
 
-    // continua na mesma rota (Início), não navegou
     expect(screen.getByText('Início (rota de teste)')).toBeInTheDocument();
     expect(screen.getByText('Maria Silva')).toBeInTheDocument();
     expect(screen.getByText('Oi, ainda estão com a promoção?')).toBeInTheDocument();
@@ -322,7 +303,6 @@ describe('ControleLigacoesShell - sino de notificações', () => {
 
     expect(await screen.findByText('Conversas (rota de teste)')).toBeInTheDocument();
     expect(await screen.findByTestId('state-recebido')).toHaveTextContent('42|Maria Silva|5598900000000');
-    // dropdown fecha junto
     expect(screen.queryByText('Oi, ainda estão com a promoção?')).not.toBeInTheDocument();
   });
 

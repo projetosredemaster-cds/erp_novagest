@@ -42,12 +42,6 @@ async function listNumeros() {
   return result.recordset.map(mapNumeroRow);
 }
 
-/**
- * Lista números remetentes filtrados por `status_conexao` (ex.: 'conectado').
- * Usado pela rotina de reconciliação no boot (`baileysSession.service.js:
- * reconciliarSessoesNoBoot`) para achar sessões que precisam ser
- * restauradas/rebaixadas após um restart do processo.
- */
 async function listNumerosPorStatusConexao(statusConexao) {
   const pool = await getPool();
   const result = await pool
@@ -98,15 +92,6 @@ async function insertNumero({ estadoId, apelido }) {
   return findNumeroById(result.recordset[0].id);
 }
 
-/**
- * Atualiza os campos editáveis via PUT (`apelido`/`estadoId`/`ativo`/
- * `nomeColaboradora`). `apelido`/`estadoId`/`ativo` seguem a semântica antiga
- * de "não enviado = não mudar" (via COALESCE). `nomeColaboradora` precisa de
- * uma semântica diferente — precisa poder ser explicitamente limpo para
- * `NULL` (remover o nome da colaboradora) — então segue o mesmo padrão de
- * `updateConexao`: só entra no SET se `!== undefined`, e o valor (inclusive
- * `null`) é gravado exatamente como recebido.
- */
 async function updateNumero(id, { apelido, estadoId, ativo, nomeColaboradora }) {
   const pool = await getPool();
   const request = pool
@@ -130,15 +115,6 @@ async function updateNumero(id, { apelido, estadoId, ativo, nomeColaboradora }) 
   `);
 }
 
-/**
- * Atualiza os campos de conexão Baileys (`numero`/`status_conexao`) de um
- * número remetente. Diferente de `updateNumero` (que usa COALESCE porque
- * "não enviado" deve significar "não mudar"), aqui cada campo enviado é
- * gravado exatamente como recebido — inclusive `numero: null` explícito,
- * que precisa *limpar* a coluna (cenário de desconexão), algo que COALESCE
- * não consegue expressar. Um campo com valor `undefined` não entra no SET
- * (não é tocado); passe `null` explicitamente para limpar `numero`.
- */
 async function updateConexao(id, { numero, statusConexao } = {}) {
   const pool = await getPool();
   const request = pool.request().input('id', sql.Int, id);
@@ -164,17 +140,6 @@ async function updateConexao(id, { numero, statusConexao } = {}) {
   `);
 }
 
-/**
- * Busca só `nome_colaboradora` de um número remetente — usada pelo worker de
- * envio (`workers/envioDisparos.worker.js`) para checar a pré-condição
- * "número tem colaboradora configurada" antes de tentar montar/enviar uma
- * mensagem (ver CONTRATO-CONTROLE-LIGACOES-API.md, seção "Envio de Disparos
- * (v6)"). `SELECT_NUMERO_COM_ESTADO`/`mapNumeroRow` também expõem
- * `nome_colaboradora` hoje (como `nomeColaboradora`, via `/numeros-remetentes`)
- * — esta função continua existindo como uma leitura mínima e isolada, sem o
- * JOIN em `Estados`, conveniente para o worker que só precisa desse único
- * campo. Retorna `null` se o número não existir.
- */
 async function findNomeColaboradoraById(id) {
   const pool = await getPool();
   const result = await pool
@@ -185,10 +150,6 @@ async function findNomeColaboradoraById(id) {
   return row ? (row.nome_colaboradora ?? null) : null;
 }
 
-/**
- * Exclui um número remetente se não houver Contatos nem LoteImportacaoEscolhas
- * vinculados a ele. Retorna 'not_found' | 'has_vinculos' | 'deleted'.
- */
 async function deleteNumeroIfNoVinculos(id) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);

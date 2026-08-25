@@ -34,12 +34,6 @@ async function existeEstado(id) {
   return result.recordset.length > 0;
 }
 
-/**
- * Cria um Estado novo junto com seus DDDs, validando dentro da mesma
- * transação: UF já cadastrada (409) e DDD já pertencente a outro Estado (409).
- * Retorna { status: 'uf_duplicada' } | { status: 'ddd_duplicado', ddd, estadoNome } |
- * { status: 'criado', estado }.
- */
 async function criarEstadoComDDDs({ nome, uf, ddds }) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);

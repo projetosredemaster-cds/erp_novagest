@@ -1,41 +1,9 @@
 const { sql, getPool } = require('../config/db');
 
-/**
- * Acesso a dados de `Mensagens` — tabela nova da Central de Mensagens (ver
- * CONTRATO-CONTROLE-LIGACOES-API.md, seção "Central de Mensagens (v7)").
- * Schema criado por `backend/src/scripts/MIGRATION-MENSAGENS.sql` (ainda não
- * executado — ver aviso no topo desse arquivo).
- *
- * Erros de driver `mssql` para violação de UNIQUE/PK: `err.number === 2627`
- * (violação de constraint, inclusive PK) ou `2601` (índice único
- * duplicado) — os dois códigos são tratados como equivalentes aqui.
- */
 function isViolacaoDeUnique(err) {
   return err && (err.number === 2627 || err.number === 2601);
 }
 
-/**
- * Insere uma mensagem recebida de um contato (remetente='cliente'), com o
- * `baileys_message_id` do evento `messages.upsert` que a originou — usada
- * pelo listener em `baileysSession.service.js: handleMessagesUpsert`.
- *
- * `ePrimeiraRespostaCliente` (boolean) grava a coluna
- * `e_primeira_resposta_cliente` — sinaliza que esta é a PRIMEIRA mensagem de
- * cliente já recebida daquele contato desde sempre (o momento de handoff
- * IA→humano), usada pelo sino de notificações do frontend
- * (`contarNotificacoesNaoVistas` abaixo). Quem chama esta função é
- * responsável por checar isso ANTES do insert (ver
- * `existeMensagemClienteAnterior` abaixo) — a ordem importa, checar depois
- * do insert sempre encontraria a própria linha recém-gravada.
- *
- * Se o mesmo evento já tiver sido gravado antes para este número (violação
- * do índice único filtrado `UQ_Mensagens_baileysId`, que ignora linhas com
- * `baileys_message_id IS NULL` — ver nota de design no contrato sobre por
- * que isso não é uma UNIQUE CONSTRAINT simples), o erro é capturado e
- * ignorado em silêncio — é dedup esperado de um evento duplicado do
- * Baileys, não uma falha. Retorna a mensagem inserida, ou `null` quando
- * ignorada por dedup.
- */
 async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, baileysMessageId, ePrimeiraRespostaCliente }) {
   const pool = await getPool();
 
@@ -65,15 +33,6 @@ async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, ba
   }
 }
 
-/**
- * Checa se um contato já teve alguma mensagem de cliente (`remetente =
- * 'cliente'`) gravada ANTES de agora — usada por
- * `baileysSession.service.js: handleMessagesUpsert` para decidir se a
- * mensagem que está prestes a ser inserida é a primeira resposta daquele
- * contato (handoff IA→humano). Precisa ser chamada antes do `INSERT` de
- * `inserirMensagemRecebida`, nunca depois (senão encontraria a própria
- * linha recém-gravada). Retorna boolean.
- */
 async function existeMensagemClienteAnterior(contatoId) {
   const pool = await getPool();
   const result = await pool
@@ -87,12 +46,6 @@ async function existeMensagemClienteAnterior(contatoId) {
   return result.recordset.length > 0;
 }
 
-/**
- * Conta quantas mensagens são "primeira resposta de cliente" (handoff
- * IA→humano) e ainda não foram vistas (`lida = 0`) — usada pelo sino de
- * notificações do frontend, `GET /api/controle-ligacoes/notificacoes`.
- * Retorna o número total.
- */
 async function contarNotificacoesNaoVistas() {
   const pool = await getPool();
   const result = await pool
@@ -105,12 +58,6 @@ async function contarNotificacoesNaoVistas() {
   return result.recordset[0]?.total ?? 0;
 }
 
-/**
- * Trunca `texto` para no máximo `tamanho` caracteres, acrescentando "…" no
- * final quando de fato corta algo — usada para montar o `preview` de
- * `listNotificacoesPendentes` abaixo. Textos com `tamanho` caracteres ou
- * menos voltam inalterados (sem reticências).
- */
 function truncarTexto(texto, tamanho) {
   if (typeof texto !== 'string' || texto.length <= tamanho) {
     return texto;
@@ -118,18 +65,6 @@ function truncarTexto(texto, tamanho) {
   return `${texto.slice(0, tamanho)}…`;
 }
 
-/**
- * Lista as `limite` notificações pendentes mais recentes (mesmo filtro de
- * `contarNotificacoesNaoVistas`: `e_primeira_resposta_cliente = 1 AND lida =
- * 0`), ordenadas por `criado_em DESC` — usada por
- * `GET /api/controle-ligacoes/notificacoes` para alimentar o dropdown do
- * sino no frontend (nome do contato + preview da mensagem + horário). A
- * contagem total continua vindo de `contarNotificacoesNaoVistas`, que pode
- * ser maior que o tamanho desta lista quando houver mais de `limite`
- * pendentes — o dropdown mostra só as mais recentes, de propósito. Default
- * de `limite` é 10 (sem paginação nesta fase); `preview` é truncado para no
- * máximo 80 caracteres, com "…" no final quando corta.
- */
 async function listNotificacoesPendentes(limite = 10) {
   const pool = await getPool();
   const result = await pool
@@ -157,13 +92,6 @@ async function listNotificacoesPendentes(limite = 10) {
   }));
 }
 
-/**
- * Insere uma mensagem enviada por nós (`remetente` = 'ia' | 'colaboradora'),
- * sem `baileys_message_id` (`NULL` — não conflita com a constraint UNIQUE,
- * ver nota de design no topo da migration). Usada pelo worker de envio
- * (`workers/envioDisparos.worker.js`, remetente='ia') e pela rota de
- * resposta manual (`conversas.service.js`, remetente='colaboradora').
- */
 async function inserirMensagemEnviada({ contatoId, numeroRemetenteId, remetente, corpo }) {
   const pool = await getPool();
   const result = await pool
@@ -180,20 +108,6 @@ async function inserirMensagemEnviada({ contatoId, numeroRemetenteId, remetente,
   return result.recordset[0];
 }
 
-/**
- * Busca o id de um Contato entre uma lista de telefones candidatos (só
- * dígitos, formato `55DDDNNNNNNNNN`, mesmo formato de `Contatos.telefone`) —
- * usada por `baileysSession.service.js: handleMessagesUpsert` para tentar o
- * telefone recebido do WhatsApp E a variante com/sem o 9º dígito (ver
- * `gerarVariantesTelefoneBr`), numa única query, já que o servidor do
- * WhatsApp às vezes representa a conta sem o 9º dígito do celular
- * brasileiro mesmo quando o número real tem o 9. Cada candidato é bindado
- * por posição como `sql.VarChar(20)` (nunca concatenado em string) e a
- * query usa `IN (...)`; como `Contatos.telefone` é `UNIQUE` globalmente, no
- * máximo uma linha pode bater com qualquer candidato da lista. Retorna
- * `null` se nenhum candidato encontrar um Contato, ou se `telefones` vier
- * vazio.
- */
 async function findContatoIdPorTelefoneComVariantes(telefones) {
   const candidatos = Array.isArray(telefones) ? telefones.filter(Boolean) : [];
   if (candidatos.length === 0) {
@@ -214,11 +128,6 @@ async function findContatoIdPorTelefoneComVariantes(telefones) {
   return result.recordset[0]?.id ?? null;
 }
 
-/**
- * Checa só a existência de um Contato pelo id — usada pelas rotas de
- * conversas para devolver 404 explícito (`GET`/`POST .../:contatoId/...`)
- * quando o contato não existe, em vez de confiar em "veio vazio = 404".
- */
 async function existeContato(contatoId) {
   const pool = await getPool();
   const result = await pool
@@ -228,12 +137,6 @@ async function existeContato(contatoId) {
   return result.recordset.length > 0;
 }
 
-/**
- * Telefone normalizado de um Contato pelo id — usado por
- * `conversas.service.js: responder` para chamar `sock.onWhatsApp(telefone)`
- * antes de enviar a resposta manual. Retorna `null` se o contato não
- * existir.
- */
 async function findTelefoneContato(contatoId) {
   const pool = await getPool();
   const result = await pool
@@ -243,18 +146,7 @@ async function findTelefoneContato(contatoId) {
   return result.recordset[0]?.telefone ?? null;
 }
 
-/**
- * Lista as conversas (contatos com pelo menos 1 mensagem em `Mensagens`),
- * ordenadas pela mensagem mais recente DESC — usada por
- * `GET /api/controle-ligacoes/conversas`. `busca` (opcional) filtra por
- * nome OU telefone do contato (LIKE); `apenasNaoLidas` (opcional) filtra só
- * contatos com pelo menos 1 mensagem `remetente='cliente' AND lida=0`.
- *
- * Para cada contato, devolve também o `numero_remetente_id` da mensagem
- * mais recente (para resolver `numeroRemetenteAtual`), o da mensagem mais
- * antiga (para resolver `numeroRemetenteInicial` — pode ser um número
- * diferente do atual) e a contagem de mensagens não lidas.
- */
+
 async function listConversas({ busca, apenasNaoLidas } = {}) {
   const pool = await getPool();
   const request = pool.request();
@@ -293,10 +185,6 @@ async function listConversas({ busca, apenasNaoLidas } = {}) {
     return [];
   }
 
-  // Busca, numa segunda query, a última mensagem de fato (corpo/remetente/
-  // numero_remetente_id) de cada contato encontrado — evita depender de
-  // agregações como MAX(corpo) (que não são deterministas em T-SQL) para
-  // saber qual foi a última mensagem de verdade.
   const contatoIds = conversas.map((row) => row.contato_id);
   const idsRequest = pool.request();
   const placeholders = contatoIds.map((id, index) => {
@@ -318,13 +206,6 @@ async function listConversas({ busca, apenasNaoLidas } = {}) {
   `);
 
   const ultimaPorContato = new Map(ultimasResult.recordset.map((row) => [row.contato_id, row]));
-
-  // Espelha a query de "ultimas" acima, só que com MIN(id) em vez de MAX(id)
-  // — busca a PRIMEIRA mensagem de cada contato (a que iniciou a conversa),
-  // para resolver `numeroRemetenteInicial`. Um contato pode ter sido
-  // iniciado por um número remetente e respondido mais recentemente por
-  // outro — os dois campos podem divergir de propósito (ver
-  // CONTRATO-CONTROLE-LIGACOES-API.md, seção "Central de Mensagens (v7)").
   const primeirasRequest = pool.request();
   const placeholdersPrimeiras = contatoIds.map((id, index) => {
     const paramName = `pid${index}`;
@@ -361,13 +242,6 @@ async function listConversas({ busca, apenasNaoLidas } = {}) {
   });
 }
 
-/**
- * Todas as mensagens de um contato, ordenadas por `criado_em ASC` — usada
- * por `GET /api/controle-ligacoes/conversas/:contatoId/mensagens`. Na mesma
- * chamada, marca como lida toda mensagem `remetente='cliente' AND lida=0`
- * daquele contato (efeito colateral esperado: "abrir a conversa = marcar
- * como lida").
- */
 async function listMensagensEMarcarLidas(contatoId) {
   const pool = await getPool();
 
@@ -393,12 +267,6 @@ async function listMensagensEMarcarLidas(contatoId) {
   return result.recordset;
 }
 
-/**
- * `numero_remetente_id` da mensagem mais recente de um contato (desempate
- * por `id DESC`) — usada por `POST /conversas/:contatoId/mensagens` para
- * decidir por qual número remetente a resposta deve ser enviada. Retorna
- * `null` se o contato nunca teve nenhuma mensagem.
- */
 async function findUltimoNumeroRemetenteDaConversa(contatoId) {
   const pool = await getPool();
   const result = await pool
@@ -413,17 +281,6 @@ async function findUltimoNumeroRemetenteDaConversa(contatoId) {
   return result.recordset[0]?.numero_remetente_id ?? null;
 }
 
-/**
- * `{ id, apelido }` do número remetente da mensagem MAIS ANTIGA (a que
- * iniciou a conversa) de um contato — usada por
- * `GET /conversas/:contatoId/mensagens` para expor `numeroRemetenteInicial`
- * na resposta. Diferente de `findUltimoNumeroRemetenteDaConversa` (mesma
- * ordenação invertida, `ASC` em vez de `DESC`), já junta `NumerosRemetentes`
- * pra devolver o objeto pronto para exibição — este propósito é de
- * exibição, não de decidir por qual socket enviar uma resposta (esse
- * continua sendo o "último", não o "primeiro"). Retorna `null` se o contato
- * nunca teve nenhuma mensagem.
- */
 async function findPrimeiroNumeroRemetenteDaConversa(contatoId) {
   const pool = await getPool();
   const result = await pool

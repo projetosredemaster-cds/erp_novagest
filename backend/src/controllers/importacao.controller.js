@@ -40,12 +40,6 @@ async function importar(req, res) {
   }
 }
 
-/**
- * Descontinuada em v3 — a escolha de número por Estado passou a acontecer
- * no Painel de Disparo, no momento do disparo (ver disparos.controller.js).
- * A rota continua montada (não removida do router) só para responder um 410
- * claro em vez de um 404 genérico para quem ainda chamar o fluxo antigo.
- */
 async function confirmar(req, res) {
   return res.status(410).json({
     error: 'Rota descontinuada. A escolha de número acontece no Painel de Disparo.',
