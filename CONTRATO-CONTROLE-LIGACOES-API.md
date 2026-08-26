@@ -1720,9 +1720,44 @@ Para cada evento com `type === 'notify'`, e para cada `msg` em
    máximo uma linha pode bater. Se nenhum candidato encontrar, ignora a
    mensagem (log informativo, mostrando o telefone original recebido, não
    as variantes tentadas).
-4. Extrai o texto (`msg.message.conversation` ou
-   `msg.message.extendedTextMessage.text`; sem nenhum dos dois, usa o
-   placeholder de mídia — ver "Contexto e decisões de design" acima).
+4. **Desembrulha envelopes conhecidos antes de extrair o texto**
+   (`desembrulharMensagem`, em `baileysSession.service.js`) — **terceiro bug
+   corrigido** (causa raiz confirmada de "mensagens de TEXTO PURO somem por
+   completo da Central de Mensagens", sem sequer virar placeholder de mídia
+   nem deixar log nenhum): o WhatsApp aninha o conteúdo real de uma mensagem
+   dentro de um ou mais envelopes quando a conversa tem **mensagens
+   temporárias/efêmeras** ativadas (`message.ephemeralMessage.message`) ou
+   quando a mensagem é "ver uma vez" (`message.viewOnceMessage.message` /
+   `message.viewOnceMessageV2.message`, duas versões de payload que o
+   Baileys usa dependendo da versão do app do remetente). Sem desembrulhar
+   isso primeiro, `msg.message.conversation`/`msg.message.extendedTextMessage.text`
+   nunca batiam — a mensagem de texto virava, na melhor das hipóteses, um
+   placeholder de mídia incorreto. `desembrulharMensagem` percorre esses 3
+   envelopes recursivamente (limite de 5 níveis), então uma combinação como
+   ephemeral contendo viewOnce também é resolvida. Só depois desse
+   desembrulhamento é que o código tenta `conversation`/
+   `extendedTextMessage.text`; sem nenhum dos dois, cai no placeholder de
+   mídia (mesmo comportamento de antes, preservado para mídia real).
+   - **`protocolMessage` (edição de mensagem existente) — decisão
+     explícita**: depois de desembrulhar, se o resultado tiver a chave
+     `protocolMessage` (o WhatsApp usa esse tipo para vários eventos
+     internos: edição de mensagem, revogação, mudança de configuração de
+     mensagem temporária, sincronização de histórico...), a mensagem é
+     **ignorada deliberadamente, sem gravar nenhuma linha em `Mensagens`**,
+     com um log explícito (`"mensagem de edição (protocolMessage), ignorada
+     nesta versão"`, incluindo `numeroRemetenteId`/`contatoId`/
+     `baileysMessageId`/`protocolType`). Escolhida em vez de gravar o texto
+     editado como uma nova linha porque reconstruir/representar uma edição
+     de mensagem já existente está fora do escopo desta correção — o ponto
+     crítico é que esse `continue` **sempre** vem acompanhado de log, nunca
+     é um caminho silencioso equivalente ao bug original.
+   - **Log de debug para tipo não reconhecido**: se, depois de desembrulhar
+     e de descartar `protocolMessage`, o objeto de mensagem não bater com
+     `conversation` nem `extendedTextMessage` (ex.: um tipo de mídia real,
+     ou algum tipo futuro ainda não tratado), `extrairTextoDaMensagem` loga
+     (`console.log`) as chaves de nível superior desse objeto
+     (`Object.keys(...)`) antes de cair no placeholder — facilita achar
+     rapidamente o próximo tipo não coberto sem precisar investigar do zero.
 5. **Antes de inserir**, checa `mensagensModel.existeMensagemClienteAnterior
    (contatoId)` — se o contato nunca teve nenhuma mensagem `remetente='cliente'`
    até agora, esta é a primeira resposta dele (handoff IA→humano), e
@@ -1740,6 +1775,20 @@ Para cada evento com `type === 'notify'`, e para cada `msg` em
 
 Nenhum erro inesperado (falha de banco, etc.) derruba o processo — capturado
 e só logado, mesmo princípio do resto da integração Baileys deste projeto.
+**Garantia por mensagem, não só por batch**: o `.catch(...)` no
+`sock.ev.on('messages.upsert', ...)` mostrado acima só cobre uma exceção não
+tratada no nível do `upsert` inteiro — antes desta correção, uma exceção
+lançada ao processar UMA mensagem do array `upsert.messages` (ex.: erro no
+insert, erro inesperado na resolução de telefone) abortava o `for...of` com
+`await` de `handleMessagesUpsert` ali mesmo, e todas as mensagens seguintes
+do mesmo batch — inclusive várias mensagens de texto em sequência, exatamente
+o padrão relatado no bug de mensagens temporárias — nunca chegavam a ser
+processadas, com só um log genérico de batch (sem indicar qual mensagem
+falhou nem por quê) como rastro. `handleMessagesUpsert` agora envolve o corpo
+de processamento de cada `msg` num `try/catch` individual dentro do laço: uma
+falha em uma mensagem é logada com contexto (`numeroRemetenteId`, `contatoId`
+se já resolvido, `baileysMessageId`) e o laço segue normalmente para a
+próxima mensagem do batch — nunca aborta o resto.
 
 ### Sino de notificações
 

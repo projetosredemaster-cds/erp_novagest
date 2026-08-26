@@ -235,6 +235,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       corpo: 'Oi, tudo bem?',
       baileysMessageId: 'ABC123',
       ePrimeiraRespostaCliente: true,
+      remetente: 'cliente',
     });
     expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-recebida', {
       contatoId: 42,
@@ -270,6 +271,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       corpo: 'De novo, oi',
       baileysMessageId: 'ABC124',
       ePrimeiraRespostaCliente: false,
+      remetente: 'cliente',
     });
     expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-recebida', {
       contatoId: 44,
@@ -319,9 +321,12 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
     expect(mensagensModel.inserirMensagemRecebida).not.toHaveBeenCalled();
   });
 
-  it('ignora mensagens com key.fromMe=true (eco do que nós mesmos enviamos)', async () => {
+  it('grava mensagens com key.fromMe=true como remetente "atendente" (envio manual pelo celular do atendente, não eco de disparo automático)', async () => {
     const socksCriados = [];
     configurarMakeWASocket(socksCriados);
+
+    mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(90);
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 40, e_primeira_resposta_cliente: false });
 
     await baileysSessionService.abrirConexao(102, {});
 
@@ -333,8 +338,20 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
     });
     await flush();
 
-    expect(mensagensModel.findContatoIdPorTelefoneComVariantes).not.toHaveBeenCalled();
-    expect(mensagensModel.inserirMensagemRecebida).not.toHaveBeenCalled();
+    expect(mensagensModel.existeMensagemClienteAnterior).not.toHaveBeenCalled();
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith({
+      contatoId: 90,
+      numeroRemetenteId: 102,
+      corpo: 'oi',
+      baileysMessageId: 'X1',
+      ePrimeiraRespostaCliente: false,
+      remetente: 'atendente',
+    });
+    expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-recebida', {
+      contatoId: 90,
+      numeroRemetenteId: 102,
+      primeiraResposta: false,
+    });
   });
 
   it('ignora mensagem cujo telefone não corresponde a nenhum Contato conhecido (ex.: grupo)', async () => {
@@ -378,6 +395,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       corpo: '[Mensagem de mídia não suportada nesta versão]',
       baileysMessageId: 'M1',
       ePrimeiraRespostaCliente: true,
+      remetente: 'cliente',
     });
   });
 
@@ -406,6 +424,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       corpo: 'Mensagem com link',
       baileysMessageId: 'M2',
       ePrimeiraRespostaCliente: true,
+      remetente: 'cliente',
     });
   });
 
@@ -480,6 +499,7 @@ describe('baileysSession messages.upsert — bug do 9º dígito do celular brasi
       corpo: 'oi, sem o 9',
       baileysMessageId: 'NOVE1',
       ePrimeiraRespostaCliente: true,
+      remetente: 'cliente',
     });
   });
 
@@ -509,6 +529,7 @@ describe('baileysSession messages.upsert — bug do 9º dígito do celular brasi
       corpo: 'oi, com o 9',
       baileysMessageId: 'NOVE2',
       ePrimeiraRespostaCliente: true,
+      remetente: 'cliente',
     });
   });
 
@@ -538,6 +559,7 @@ describe('baileysSession messages.upsert — bug do 9º dígito do celular brasi
       corpo: 'match exato',
       baileysMessageId: 'EXATO1',
       ePrimeiraRespostaCliente: true,
+      remetente: 'cliente',
     });
   });
 
@@ -597,6 +619,7 @@ describe('baileysSession messages.upsert com remoteJid endereçado por LID (@lid
       corpo: 'Oi, cheguei via LID',
       baileysMessageId: 'LID1',
       ePrimeiraRespostaCliente: true,
+      remetente: 'cliente',
     });
   });
 
@@ -628,6 +651,7 @@ describe('baileysSession messages.upsert com remoteJid endereçado por LID (@lid
       corpo: 'Oi de novo',
       baileysMessageId: 'LID2',
       ePrimeiraRespostaCliente: true,
+      remetente: 'cliente',
     });
   });
 
@@ -700,5 +724,285 @@ describe('baileysSession messages.upsert com remoteJid endereçado por LID (@lid
     expect(mensagensModel.findContatoIdPorTelefoneComVariantes).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('LID não resolvido'));
+  });
+});
+
+describe('baileysSession.desembrulharMensagem', () => {
+  it('desembrulha extendedTextMessage dentro de ephemeralMessage', () => {
+    const message = {
+      ephemeralMessage: {
+        message: {
+          extendedTextMessage: { text: 'Mensagem temporária com link' },
+        },
+      },
+    };
+
+    const desembrulhada = baileysSessionService.desembrulharMensagem(message);
+
+    expect(desembrulhada).toEqual({ extendedTextMessage: { text: 'Mensagem temporária com link' } });
+    expect(baileysSessionService.extrairTextoDaMensagem(desembrulhada, 999)).toBe('Mensagem temporária com link');
+  });
+
+  it('desembrulha conversation dentro de ephemeralMessage', () => {
+    const message = { ephemeralMessage: { message: { conversation: 'Oi temporário' } } };
+
+    const desembrulhada = baileysSessionService.desembrulharMensagem(message);
+
+    expect(desembrulhada).toEqual({ conversation: 'Oi temporário' });
+    expect(baileysSessionService.extrairTextoDaMensagem(desembrulhada, 999)).toBe('Oi temporário');
+  });
+
+  it('desembrulha texto dentro de viewOnceMessage', () => {
+    const message = { viewOnceMessage: { message: { conversation: 'Ver uma vez' } } };
+
+    const desembrulhada = baileysSessionService.desembrulharMensagem(message);
+
+    expect(desembrulhada).toEqual({ conversation: 'Ver uma vez' });
+    expect(baileysSessionService.extrairTextoDaMensagem(desembrulhada, 999)).toBe('Ver uma vez');
+  });
+
+  it('desembrulha texto dentro de viewOnceMessageV2', () => {
+    const message = { viewOnceMessageV2: { message: { extendedTextMessage: { text: 'Ver uma vez v2' } } } };
+
+    const desembrulhada = baileysSessionService.desembrulharMensagem(message);
+
+    expect(desembrulhada).toEqual({ extendedTextMessage: { text: 'Ver uma vez v2' } });
+    expect(baileysSessionService.extrairTextoDaMensagem(desembrulhada, 999)).toBe('Ver uma vez v2');
+  });
+
+  it('desembrulha envelopes aninhados (ephemeralMessage contendo viewOnceMessage contendo o texto real)', () => {
+    const message = {
+      ephemeralMessage: {
+        message: {
+          viewOnceMessage: {
+            message: { conversation: 'Aninhado duplo' },
+          },
+        },
+      },
+    };
+
+    const desembrulhada = baileysSessionService.desembrulharMensagem(message);
+
+    expect(desembrulhada).toEqual({ conversation: 'Aninhado duplo' });
+    expect(baileysSessionService.extrairTextoDaMensagem(desembrulhada, 999)).toBe('Aninhado duplo');
+  });
+
+  it('devolve a própria mensagem quando não há envelope conhecido (mídia direta, sem envelope)', () => {
+    const message = { audioMessage: {} };
+
+    expect(baileysSessionService.desembrulharMensagem(message)).toBe(message);
+  });
+
+  it('não quebra com mensagem nula/indefinida', () => {
+    expect(baileysSessionService.desembrulharMensagem(null)).toBeNull();
+    expect(baileysSessionService.desembrulharMensagem(undefined)).toBeNull();
+  });
+});
+
+describe('baileysSession.extrairTextoDaMensagem', () => {
+  it('retorna o placeholder de mídia para um tipo totalmente desconhecido, sem lançar exceção, e loga as chaves', () => {
+    const desembrulhada = { algumTipoNuncaVistoAntes: { dados: 'xyz' } };
+
+    const resultado = baileysSessionService.extrairTextoDaMensagem(desembrulhada, 555);
+
+    expect(resultado).toBe('[Mensagem de mídia não suportada nesta versão]');
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('tipo de mensagem não reconhecido'),
+      ['algumTipoNuncaVistoAntes']
+    );
+  });
+});
+
+describe('baileysSession messages.upsert — mensagens envelopadas (ephemeral/viewOnce) não somem mais', () => {
+  it('grava a mensagem de texto que veio dentro de ephemeralMessage (regressão do bug relatado)', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(60);
+    mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 30, e_primeira_resposta_cliente: true });
+
+    await baileysSessionService.abrirConexao(500, {});
+
+    socksCriados[0].emit('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '5598933333333@s.whatsapp.net', fromMe: false, id: 'EPH1' },
+          message: { ephemeralMessage: { message: { conversation: 'mensagem temporária' } } },
+        },
+      ],
+    });
+    await flush();
+
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith(
+      expect.objectContaining({ corpo: 'mensagem temporária', baileysMessageId: 'EPH1', contatoId: 60 })
+    );
+  });
+
+  it('grava a mensagem de texto que veio dentro de viewOnceMessage', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(63);
+    mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 33, e_primeira_resposta_cliente: true });
+
+    await baileysSessionService.abrirConexao(503, {});
+
+    socksCriados[0].emit('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '5598966666666@s.whatsapp.net', fromMe: false, id: 'VO1' },
+          message: { viewOnceMessage: { message: { conversation: 'ver uma vez' } } },
+        },
+      ],
+    });
+    await flush();
+
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith(
+      expect.objectContaining({ corpo: 'ver uma vez', baileysMessageId: 'VO1', contatoId: 63 })
+    );
+  });
+
+  it('grava a mensagem de texto que veio dentro de ephemeralMessage > viewOnceMessage (envelopes aninhados)', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(61);
+    mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 31, e_primeira_resposta_cliente: true });
+
+    await baileysSessionService.abrirConexao(501, {});
+
+    socksCriados[0].emit('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '5598944444444@s.whatsapp.net', fromMe: false, id: 'NEST1' },
+          message: {
+            ephemeralMessage: {
+              message: {
+                viewOnceMessage: {
+                  message: { extendedTextMessage: { text: 'texto aninhado duplo' } },
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+    await flush();
+
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith(
+      expect.objectContaining({ corpo: 'texto aninhado duplo', baileysMessageId: 'NEST1', contatoId: 61 })
+    );
+  });
+
+  it('mensagem de tipo totalmente desconhecido ainda é inserida com o placeholder, nunca descartada silenciosamente', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(62);
+    mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 32, e_primeira_resposta_cliente: true });
+
+    await baileysSessionService.abrirConexao(502, {});
+
+    socksCriados[0].emit('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '5598955555555@s.whatsapp.net', fromMe: false, id: 'UNK1' },
+          message: { algumTipoFuturoAindaNaoSuportado: { blah: true } },
+        },
+      ],
+    });
+    await flush();
+
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith(
+      expect.objectContaining({
+        corpo: '[Mensagem de mídia não suportada nesta versão]',
+        baileysMessageId: 'UNK1',
+        contatoId: 62,
+      })
+    );
+  });
+});
+
+describe('baileysSession messages.upsert — protocolMessage (edição) e resiliência do batch', () => {
+  it('ignora protocolMessage sem chamar inserirMensagemRecebida, mas processa as outras mensagens do mesmo batch (2 inserções, não 0 e não 1)', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(90);
+    mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 1, e_primeira_resposta_cliente: true });
+
+    await baileysSessionService.abrirConexao(400, {});
+
+    socksCriados[0].emit('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '5598911111111@s.whatsapp.net', fromMe: false, id: 'TXT1' },
+          message: { conversation: 'primeira mensagem normal' },
+        },
+        {
+          key: { remoteJid: '5598911111111@s.whatsapp.net', fromMe: false, id: 'EDIT1' },
+          message: { protocolMessage: { type: 14, key: { id: 'TXT1' } } },
+        },
+        {
+          key: { remoteJid: '5598911111111@s.whatsapp.net', fromMe: false, id: 'TXT2' },
+          message: { conversation: 'segunda mensagem normal' },
+        },
+      ],
+    });
+    await flush();
+
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledTimes(2);
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith(
+      expect.objectContaining({ corpo: 'primeira mensagem normal', baileysMessageId: 'TXT1' })
+    );
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith(
+      expect.objectContaining({ corpo: 'segunda mensagem normal', baileysMessageId: 'TXT2' })
+    );
+
+    const idsChamados = mensagensModel.inserirMensagemRecebida.mock.calls.map((call) => call[0].baileysMessageId);
+    expect(idsChamados).not.toContain('EDIT1');
+  });
+
+  it('resiliência do batch: exceção ao processar UMA mensagem não impede o processamento das mensagens seguintes (try/catch por mensagem)', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(91);
+    mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
+    mensagensModel.inserirMensagemRecebida
+      .mockRejectedValueOnce(new Error('falha simulada ao inserir a primeira mensagem'))
+      .mockResolvedValueOnce({ id: 2, e_primeira_resposta_cliente: true });
+
+    await baileysSessionService.abrirConexao(401, {});
+
+    socksCriados[0].emit('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '5598922222222@s.whatsapp.net', fromMe: false, id: 'FAIL1' },
+          message: { conversation: 'essa vai falhar ao inserir' },
+        },
+        {
+          key: { remoteJid: '5598922222222@s.whatsapp.net', fromMe: false, id: 'OK1' },
+          message: { conversation: 'essa deve ser processada mesmo assim' },
+        },
+      ],
+    });
+    await flush();
+
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledTimes(2);
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ corpo: 'essa deve ser processada mesmo assim', baileysMessageId: 'OK1' })
+    );
+    expect(console.error).toHaveBeenCalled();
+    expect(mensagensEventsService.emit).toHaveBeenCalledWith(
+      'mensagem-recebida',
+      expect.objectContaining({ contatoId: 91, numeroRemetenteId: 401 })
+    );
   });
 });

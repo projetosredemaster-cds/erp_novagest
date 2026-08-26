@@ -277,9 +277,49 @@ async function resolverTelefoneDoRemetente(sock, msgKey) {
   return { telefone: null, lidNaoResolvido: true };
 }
 
-function extrairTextoDaMensagem(msg) {
-  const texto = msg?.message?.conversation ?? msg?.message?.extendedTextMessage?.text;
-  return texto ?? MENSAGEM_MIDIA_PLACEHOLDER;
+// Envelopes que o WhatsApp aninha em volta do conteúdo real da mensagem — mensagens temporárias
+// (ephemeral), "ver uma vez" (viewOnce, em duas versões de payload) e combinações entre eles
+// (ex.: ephemeral contendo viewOnce). Sem desembrulhar isso primeiro, `conversation`/
+// `extendedTextMessage` nunca é encontrado e a mensagem cai (incorretamente) no placeholder de
+// mídia — ou, antes desta correção, disparava uma exceção mais adiante que abortava o resto do
+// batch (ver comentário no catch por mensagem, em handleMessagesUpsert).
+const ENVELOPES_CONHECIDOS = ['ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2'];
+const MAX_PROFUNDIDADE_ENVELOPE = 5;
+
+function desembrulharMensagem(message, profundidade = 0) {
+  if (!message || profundidade >= MAX_PROFUNDIDADE_ENVELOPE) {
+    return message ?? null;
+  }
+
+  for (const chave of ENVELOPES_CONHECIDOS) {
+    const interno = message[chave]?.message;
+    if (interno) {
+      return desembrulharMensagem(interno, profundidade + 1);
+    }
+  }
+
+  return message;
+}
+
+function extrairTextoDaMensagem(mensagemDesembrulhada, numeroRemetenteId) {
+  const texto = mensagemDesembrulhada?.conversation ?? mensagemDesembrulhada?.extendedTextMessage?.text;
+  if (texto != null) {
+    return texto;
+  }
+
+  // Ainda não é um tipo de texto conhecido depois de desembrulhar os envelopes — pode ser mídia
+  // real (comportamento já correto: cai no placeholder) ou um tipo novo/desconhecido. Logamos as
+  // chaves de nível superior pra facilitar identificar rapidamente o próximo tipo não coberto,
+  // sem precisar investigar do zero a partir de um "sumiço" na tabela.
+  if (mensagemDesembrulhada && typeof mensagemDesembrulhada === 'object') {
+    console.log(
+      `[baileysSession] tipo de mensagem não reconhecido após desembrulhar envelopes ` +
+      `(numeroRemetenteId=${numeroRemetenteId}); chaves de nível superior:`,
+      Object.keys(mensagemDesembrulhada)
+    );
+  }
+
+  return MENSAGEM_MIDIA_PLACEHOLDER;
 }
 
 async function handleMessagesUpsert(numeroRemetenteId, sock, upsert) {
@@ -290,53 +330,92 @@ async function handleMessagesUpsert(numeroRemetenteId, sock, upsert) {
   const mensagens = Array.isArray(upsert.messages) ? upsert.messages : [];
 
   for (const msg of mensagens) {
-    if (msg?.key?.fromMe === true) {
-      continue;
-    }
+    const ehDoAtendente = msg?.key?.fromMe === true;
 
-    const { telefone, lidNaoResolvido } = await resolverTelefoneDoRemetente(sock, msg?.key);
+    // Try/catch POR MENSAGEM (não só o catch de nível de batch em sock.ev.on): antes desta
+    // correção, uma exceção lançada ao processar UMA mensagem do array abortava o `for...of`
+    // inteiro, e todas as mensagens seguintes do mesmo batch (ex.: várias mensagens de texto em
+    // sequência) nunca chegavam a ser processadas — o único rastro era um log genérico de batch,
+    // sem indicar qual mensagem falhou nem por quê. Isso era a causa raiz confirmada do "sumiço
+    // silencioso" relatado.
+    let contatoId = null;
+    try {
+      const { telefone, lidNaoResolvido } = await resolverTelefoneDoRemetente(sock, msg?.key);
 
-    if (lidNaoResolvido) {
-      console.log(
-        `[baileysSession] messages.upsert de LID não resolvido, mensagem ignorada ` +
-        `(numeroRemetenteId=${numeroRemetenteId}, lid=${msg?.key?.remoteJid}).`
-      );
-      continue;
-    }
+      if (lidNaoResolvido) {
+        console.log(
+          `[baileysSession] messages.upsert de LID não resolvido, mensagem ignorada ` +
+          `(numeroRemetenteId=${numeroRemetenteId}, lid=${msg?.key?.remoteJid}).`
+        );
+        continue;
+      }
 
-    if (!telefone) {
-      console.log(`[baileysSession] messages.upsert sem remoteJid utilizável (numeroRemetenteId=${numeroRemetenteId}); ignorando.`);
-      continue;
-    }
+      if (!telefone) {
+        console.log(`[baileysSession] messages.upsert sem remoteJid utilizável (numeroRemetenteId=${numeroRemetenteId}); ignorando.`);
+        continue;
+      }
 
-    const contatoId = await mensagensModel.findContatoIdPorTelefoneComVariantes(gerarVariantesTelefoneBr(telefone));
-    if (!contatoId) {
-      console.log(
-        `[baileysSession] messages.upsert de telefone sem Contato correspondente ` +
-        `(numeroRemetenteId=${numeroRemetenteId}, telefone=${telefone}); ignorando.`
-      );
-      continue;
-    }
+      contatoId = await mensagensModel.findContatoIdPorTelefoneComVariantes(gerarVariantesTelefoneBr(telefone));
+      if (!contatoId) {
+        console.log(
+          `[baileysSession] messages.upsert de telefone sem Contato correspondente ` +
+          `(numeroRemetenteId=${numeroRemetenteId}, telefone=${telefone}); ignorando.`
+        );
+        continue;
+      }
 
-    const corpo = extrairTextoDaMensagem(msg);
+      const mensagemDesembrulhada = desembrulharMensagem(msg?.message);
 
-    const jaTinhaMensagemDeCliente = await mensagensModel.existeMensagemClienteAnterior(contatoId);
-    const ePrimeiraRespostaCliente = !jaTinhaMensagemDeCliente;
+      // protocolMessage cobre vários tipos internos do WhatsApp (edição de mensagem, revogação,
+      // troca de config de mensagem temporária, sincronização de histórico...). Decisão: ignorar
+      // deliberadamente com log explícito, sem gravar linha nenhuma em Mensagens — diferente do
+      // caso de mídia/tipo desconhecido (que sempre grava um placeholder), porque um
+      // protocolMessage não é uma nova mensagem de conversa em si (é um evento sobre uma mensagem
+      // já existente), e reconstruir/editar a linha original está fora do escopo desta correção.
+      // O ponto crítico é que o `continue` aqui é sempre acompanhado de log — nunca um caminho
+      // silencioso.
+      if (mensagemDesembrulhada?.protocolMessage) {
+        console.log(
+          `[baileysSession] mensagem de edição (protocolMessage), ignorada nesta versão ` +
+          `(numeroRemetenteId=${numeroRemetenteId}, contatoId=${contatoId}, baileysMessageId=${msg?.key?.id ?? 'null'}, ` +
+          `protocolType=${mensagemDesembrulhada.protocolMessage.type ?? 'desconhecido'}).`
+        );
+        continue;
+      }
 
-    const mensagemInserida = await mensagensModel.inserirMensagemRecebida({
-      contatoId,
-      numeroRemetenteId,
-      corpo,
-      baileysMessageId: msg?.key?.id ?? null,
-      ePrimeiraRespostaCliente,
-    });
+      const corpo = extrairTextoDaMensagem(mensagemDesembrulhada, numeroRemetenteId);
 
-    if (mensagemInserida) {
-      mensagensEventsService.emit('mensagem-recebida', {
+      let ePrimeiraRespostaCliente;
+      if (ehDoAtendente) {
+        ePrimeiraRespostaCliente = false;
+      } else {
+        const jaTinhaMensagemDeCliente = await mensagensModel.existeMensagemClienteAnterior(contatoId);
+        ePrimeiraRespostaCliente = !jaTinhaMensagemDeCliente;
+      }
+
+      const mensagemInserida = await mensagensModel.inserirMensagemRecebida({
         contatoId,
         numeroRemetenteId,
-        primeiraResposta: Boolean(mensagemInserida.e_primeira_resposta_cliente),
+        corpo,
+        baileysMessageId: msg?.key?.id ?? null,
+        ePrimeiraRespostaCliente,
+        remetente: ehDoAtendente ? 'atendente' : 'cliente',
       });
+
+      if (mensagemInserida) {
+        mensagensEventsService.emit('mensagem-recebida', {
+          contatoId,
+          numeroRemetenteId,
+          primeiraResposta: Boolean(mensagemInserida.e_primeira_resposta_cliente),
+        });
+      }
+    } catch (err) {
+      console.error(
+        `[baileysSession] erro ao processar mensagem individual do messages.upsert ` +
+        `(numeroRemetenteId=${numeroRemetenteId}, contatoId=${contatoId ?? 'não resolvido'}, ` +
+        `baileysMessageId=${msg?.key?.id ?? 'null'}):`,
+        err
+      );
     }
   }
 }
@@ -548,5 +627,7 @@ module.exports = {
   obterSocketConectado,
   reconciliarSessoesNoBoot,
   gerarVariantesTelefoneBr,
+  desembrulharMensagem,
+  extrairTextoDaMensagem,
   _baileysLib: baileysLib,
 };

@@ -101,7 +101,7 @@ function ChatBubble({ mensagem }) {
       : mensagem.remetente === 'ia'
         ? 'bg-[var(--violet)]/20 text-[var(--text)]'
         : 'bg-[var(--violet)] text-[#0b1010]';
-  const horaColor = mensagem.remetente === 'colaboradora' ? 'text-[#0b1010]/70' : 'text-[var(--muted)]';
+  const horaColor = mensagem.remetente === 'atendente' ? 'text-[#0b1010]/70' : 'text-[var(--muted)]';
 
   return (
     <div className={`flex ${alinhamento}`}>

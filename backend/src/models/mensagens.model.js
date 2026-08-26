@@ -4,7 +4,7 @@ function isViolacaoDeUnique(err) {
   return err && (err.number === 2627 || err.number === 2601);
 }
 
-async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, baileysMessageId, ePrimeiraRespostaCliente }) {
+async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, baileysMessageId, ePrimeiraRespostaCliente, remetente = 'cliente' }) {
   const pool = await getPool();
 
   try {
@@ -15,10 +15,11 @@ async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, ba
       .input('corpo', sql.NVarChar(sql.MAX), corpo)
       .input('baileysMessageId', sql.VarChar(100), baileysMessageId ?? null)
       .input('ePrimeiraRespostaCliente', sql.Bit, Boolean(ePrimeiraRespostaCliente))
+      .input('remetente', sql.VarChar(20), remetente)
       .query(`
         INSERT INTO Mensagens (contato_id, numero_remetente_id, remetente, corpo, baileys_message_id, lida, e_primeira_resposta_cliente, criado_em)
         OUTPUT inserted.id, inserted.remetente, inserted.corpo, inserted.criado_em, inserted.e_primeira_resposta_cliente
-        VALUES (@contatoId, @numeroRemetenteId, 'cliente', @corpo, @baileysMessageId, 0, @ePrimeiraRespostaCliente, SYSUTCDATETIME())
+        VALUES (@contatoId, @numeroRemetenteId, @remetente, @corpo, @baileysMessageId, 0, @ePrimeiraRespostaCliente, SYSUTCDATETIME())
       `);
     return result.recordset[0];
   } catch (err) {
