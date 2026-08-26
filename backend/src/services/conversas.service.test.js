@@ -205,9 +205,11 @@ describe('conversas.service.responder', () => {
       remetente: 'colaboradora',
       corpo: 'oi',
       criado_em: '2026-08-25T12:00:00.000Z',
+      baileys_message_id: 'ALGUM_ID',
+      status_entrega: 'pendente',
     });
 
-    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const sendMessage = vi.fn().mockResolvedValue({ key: { id: 'ALGUM_ID' } });
     const onWhatsApp = vi.fn().mockResolvedValue([{ jid: '5598900000000@s.whatsapp.net', exists: true }]);
     baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
 
@@ -219,10 +221,48 @@ describe('conversas.service.responder', () => {
       numeroRemetenteId: NUMERO_REMETENTE_ID,
       remetente: 'colaboradora',
       corpo: 'oi',
+      baileysMessageId: 'ALGUM_ID',
+      statusEntrega: 'pendente',
     });
     expect(resultado).toEqual({
       status: 'enviada',
-      mensagem: { id: 10, remetente: 'colaboradora', corpo: 'oi', criado_em: '2026-08-25T12:00:00.000Z' },
+      mensagem: {
+        id: 10,
+        remetente: 'colaboradora',
+        corpo: 'oi',
+        criado_em: '2026-08-25T12:00:00.000Z',
+        baileys_message_id: 'ALGUM_ID',
+        status_entrega: 'pendente',
+      },
+    });
+  });
+
+  it('status=enviada grava baileysMessageId=null quando sock.sendMessage não devolve key.id', async () => {
+    mensagensModel.existeContato.mockResolvedValue(true);
+    mensagensModel.existeMensagemNaThread.mockResolvedValue(true);
+    mensagensModel.findTelefoneContato.mockResolvedValue('5598900000000');
+    mensagensModel.inserirMensagemEnviada.mockResolvedValue({
+      id: 11,
+      remetente: 'colaboradora',
+      corpo: 'oi',
+      criado_em: '2026-08-25T12:00:00.000Z',
+      baileys_message_id: null,
+      status_entrega: 'pendente',
+    });
+
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const onWhatsApp = vi.fn().mockResolvedValue([{ jid: '5598900000000@s.whatsapp.net', exists: true }]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    await conversasService.responder(CONTATO_ID, NUMERO_REMETENTE_ID, 'oi');
+
+    expect(mensagensModel.inserirMensagemEnviada).toHaveBeenCalledWith({
+      contatoId: CONTATO_ID,
+      numeroRemetenteId: NUMERO_REMETENTE_ID,
+      remetente: 'colaboradora',
+      corpo: 'oi',
+      baileysMessageId: null,
+      statusEntrega: 'pendente',
     });
   });
 });

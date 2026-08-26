@@ -236,6 +236,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       baileysMessageId: 'ABC123',
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
+      statusEntrega: null,
     });
     expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-recebida', {
       contatoId: 42,
@@ -272,6 +273,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       baileysMessageId: 'ABC124',
       ePrimeiraRespostaCliente: false,
       remetente: 'cliente',
+      statusEntrega: null,
     });
     expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-recebida', {
       contatoId: 44,
@@ -346,6 +348,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       baileysMessageId: 'X1',
       ePrimeiraRespostaCliente: false,
       remetente: 'atendente',
+      statusEntrega: 'enviado',
     });
     expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-recebida', {
       contatoId: 90,
@@ -396,6 +399,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       baileysMessageId: 'M1',
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
+      statusEntrega: null,
     });
   });
 
@@ -425,6 +429,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       baileysMessageId: 'M2',
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
+      statusEntrega: null,
     });
   });
 
@@ -500,6 +505,7 @@ describe('baileysSession messages.upsert — bug do 9º dígito do celular brasi
       baileysMessageId: 'NOVE1',
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
+      statusEntrega: null,
     });
   });
 
@@ -530,6 +536,7 @@ describe('baileysSession messages.upsert — bug do 9º dígito do celular brasi
       baileysMessageId: 'NOVE2',
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
+      statusEntrega: null,
     });
   });
 
@@ -560,6 +567,7 @@ describe('baileysSession messages.upsert — bug do 9º dígito do celular brasi
       baileysMessageId: 'EXATO1',
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
+      statusEntrega: null,
     });
   });
 
@@ -620,6 +628,7 @@ describe('baileysSession messages.upsert com remoteJid endereçado por LID (@lid
       baileysMessageId: 'LID1',
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
+      statusEntrega: null,
     });
   });
 
@@ -652,6 +661,7 @@ describe('baileysSession messages.upsert com remoteJid endereçado por LID (@lid
       baileysMessageId: 'LID2',
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
+      statusEntrega: null,
     });
   });
 
@@ -1004,5 +1014,91 @@ describe('baileysSession messages.upsert — protocolMessage (edição) e resili
       'mensagem-recebida',
       expect.objectContaining({ contatoId: 91, numeroRemetenteId: 401 })
     );
+  });
+});
+
+describe('baileysSession messages.update listener (status de entrega)', () => {
+  it('status avançando (ex.: enviado → entregue) chama atualizarStatusEntrega e emite "mensagem-status-atualizada"', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.atualizarStatusEntrega.mockResolvedValue({
+      contato_id: 42,
+      numero_remetente_id: 600,
+      status_entrega: 'entregue',
+    });
+
+    await baileysSessionService.abrirConexao(600, {});
+
+    socksCriados[0].emit('messages.update', [
+      { key: { id: 'MSG1' }, update: { status: 3 } },
+    ]);
+    await flush();
+
+    expect(mensagensModel.atualizarStatusEntrega).toHaveBeenCalledWith('MSG1', 'entregue');
+    expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-status-atualizada', {
+      contatoId: 42,
+      numeroRemetenteId: 600,
+      baileysMessageId: 'MSG1',
+      status: 'entregue',
+    });
+  });
+
+  it('não emite nada quando o baileysMessageId não corresponde a nenhuma mensagem conhecida (atualizarStatusEntrega retorna null)', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.atualizarStatusEntrega.mockResolvedValue(null);
+
+    await baileysSessionService.abrirConexao(601, {});
+
+    socksCriados[0].emit('messages.update', [
+      { key: { id: 'DESCONHECIDO' }, update: { status: 4 } },
+    ]);
+    await flush();
+
+    expect(mensagensModel.atualizarStatusEntrega).toHaveBeenCalledWith('DESCONHECIDO', 'lido');
+    expect(mensagensEventsService.emit).not.toHaveBeenCalledWith('mensagem-status-atualizada', expect.anything());
+  });
+
+  it('código de status desconhecido (ex.: PENDING=1) é ignorado sem chamar o model nem lançar erro', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+
+    await baileysSessionService.abrirConexao(602, {});
+
+    expect(() => {
+      socksCriados[0].emit('messages.update', [
+        { key: { id: 'MSG2' }, update: { status: 1 } },
+        { key: { id: 'MSG3' }, update: { status: 999 } },
+      ]);
+    }).not.toThrow();
+    await flush();
+
+    expect(mensagensModel.atualizarStatusEntrega).not.toHaveBeenCalled();
+    expect(mensagensEventsService.emit).not.toHaveBeenCalledWith('mensagem-status-atualizada', expect.anything());
+  });
+
+  it('erro inesperado ao atualizar uma mensagem não impede o processamento das seguintes do mesmo lote', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.atualizarStatusEntrega
+      .mockRejectedValueOnce(new Error('falha de banco'))
+      .mockResolvedValueOnce({ contato_id: 1, numero_remetente_id: 603, status_entrega: 'enviado' });
+
+    await baileysSessionService.abrirConexao(603, {});
+
+    socksCriados[0].emit('messages.update', [
+      { key: { id: 'FAIL1' }, update: { status: 2 } },
+      { key: { id: 'OK1' }, update: { status: 2 } },
+    ]);
+    await flush();
+
+    expect(mensagensModel.atualizarStatusEntrega).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalled();
+    expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-status-atualizada', {
+      contatoId: 1,
+      numeroRemetenteId: 603,
+      baileysMessageId: 'OK1',
+      status: 'enviado',
+    });
   });
 });

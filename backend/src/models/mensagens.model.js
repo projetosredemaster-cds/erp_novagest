@@ -4,7 +4,7 @@ function isViolacaoDeUnique(err) {
   return err && (err.number === 2627 || err.number === 2601);
 }
 
-async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, baileysMessageId, ePrimeiraRespostaCliente, remetente = 'cliente' }) {
+async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, baileysMessageId, ePrimeiraRespostaCliente, remetente = 'cliente', statusEntrega = null }) {
   const pool = await getPool();
 
   try {
@@ -16,10 +16,11 @@ async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, ba
       .input('baileysMessageId', sql.VarChar(100), baileysMessageId ?? null)
       .input('ePrimeiraRespostaCliente', sql.Bit, Boolean(ePrimeiraRespostaCliente))
       .input('remetente', sql.VarChar(20), remetente)
+      .input('statusEntrega', sql.VarChar(20), statusEntrega)
       .query(`
-        INSERT INTO Mensagens (contato_id, numero_remetente_id, remetente, corpo, baileys_message_id, lida, e_primeira_resposta_cliente, criado_em)
+        INSERT INTO Mensagens (contato_id, numero_remetente_id, remetente, corpo, baileys_message_id, status_entrega, lida, e_primeira_resposta_cliente, criado_em)
         OUTPUT inserted.id, inserted.remetente, inserted.corpo, inserted.criado_em, inserted.e_primeira_resposta_cliente
-        VALUES (@contatoId, @numeroRemetenteId, @remetente, @corpo, @baileysMessageId, 0, @ePrimeiraRespostaCliente, SYSUTCDATETIME())
+        VALUES (@contatoId, @numeroRemetenteId, @remetente, @corpo, @baileysMessageId, @statusEntrega, 0, @ePrimeiraRespostaCliente, SYSUTCDATETIME())
       `);
     return result.recordset[0];
   } catch (err) {
@@ -110,7 +111,7 @@ async function listNotificacoesPendentes(limite = 10) {
   }));
 }
 
-async function inserirMensagemEnviada({ contatoId, numeroRemetenteId, remetente, corpo }) {
+async function inserirMensagemEnviada({ contatoId, numeroRemetenteId, remetente, corpo, baileysMessageId = null, statusEntrega = null }) {
   const pool = await getPool();
   const result = await pool
     .request()
@@ -118,10 +119,12 @@ async function inserirMensagemEnviada({ contatoId, numeroRemetenteId, remetente,
     .input('numeroRemetenteId', sql.Int, numeroRemetenteId)
     .input('remetente', sql.VarChar(20), remetente)
     .input('corpo', sql.NVarChar(sql.MAX), corpo)
+    .input('baileysMessageId', sql.VarChar(100), baileysMessageId)
+    .input('statusEntrega', sql.VarChar(20), statusEntrega)
     .query(`
-      INSERT INTO Mensagens (contato_id, numero_remetente_id, remetente, corpo, baileys_message_id, criado_em)
-      OUTPUT inserted.id, inserted.remetente, inserted.corpo, inserted.criado_em
-      VALUES (@contatoId, @numeroRemetenteId, @remetente, @corpo, NULL, SYSUTCDATETIME())
+      INSERT INTO Mensagens (contato_id, numero_remetente_id, remetente, corpo, baileys_message_id, status_entrega, criado_em)
+      OUTPUT inserted.id, inserted.remetente, inserted.corpo, inserted.baileys_message_id, inserted.status_entrega, inserted.criado_em
+      VALUES (@contatoId, @numeroRemetenteId, @remetente, @corpo, @baileysMessageId, @statusEntrega, SYSUTCDATETIME())
     `);
   return result.recordset[0];
 }
@@ -200,7 +203,7 @@ async function listConversas({ busca, apenasNaoLidas } = {}) {
       GROUP BY c.id, c.nome, c.telefone, m.numero_remetente_id, n.apelido
       ${havingNaoLidas}
     )
-    SELECT tb.*, ultima.corpo AS ultima_corpo, ultima.remetente AS ultima_remetente
+    SELECT tb.*, ultima.corpo AS ultima_corpo, ultima.remetente AS ultima_remetente, cs.status
     FROM ThreadsBase tb
     CROSS APPLY (
       SELECT TOP (1) corpo, remetente
@@ -208,6 +211,7 @@ async function listConversas({ busca, apenasNaoLidas } = {}) {
       WHERE m2.contato_id = tb.contato_id AND m2.numero_remetente_id = tb.numero_remetente_id
       ORDER BY m2.id DESC
     ) ultima
+    LEFT JOIN ConversasStatus cs ON cs.contato_id = tb.contato_id AND cs.numero_remetente_id = tb.numero_remetente_id
     ORDER BY tb.ultima_mensagem_em DESC
   `);
 
@@ -217,6 +221,7 @@ async function listConversas({ busca, apenasNaoLidas } = {}) {
     numeroRemetenteInicial: { id: row.numero_remetente_id, apelido: row.numero_remetente_apelido },
     ultimaMensagem: { corpo: row.ultima_corpo, remetente: row.ultima_remetente, criado_em: row.ultima_mensagem_em },
     naoLidas: row.nao_lidas || 0,
+    status: row.status ?? null,
   }));
 }
 
@@ -228,7 +233,7 @@ async function listMensagensEMarcarLidas(contatoId, numeroRemetenteId) {
     .input('contatoId', sql.Int, contatoId)
     .input('numeroRemetenteId', sql.Int, numeroRemetenteId)
     .query(`
-      SELECT id, remetente, corpo, criado_em
+      SELECT id, remetente, corpo, criado_em, baileys_message_id, status_entrega
       FROM Mensagens
       WHERE contato_id = @contatoId AND numero_remetente_id = @numeroRemetenteId
       ORDER BY criado_em ASC
@@ -247,6 +252,30 @@ async function listMensagensEMarcarLidas(contatoId, numeroRemetenteId) {
   return result.recordset;
 }
 
+async function atualizarStatusEntrega(baileysMessageId, novoStatus) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('baileysMessageId', sql.VarChar(100), baileysMessageId)
+    .input('novoStatus', sql.VarChar(20), novoStatus)
+    .query(`
+      UPDATE Mensagens
+      SET status_entrega = @novoStatus
+      OUTPUT inserted.contato_id, inserted.numero_remetente_id, inserted.status_entrega
+      WHERE baileys_message_id = @baileysMessageId
+        AND (
+          CASE status_entrega
+            WHEN 'pendente' THEN 0 WHEN 'enviado' THEN 1 WHEN 'entregue' THEN 2 WHEN 'lido' THEN 3 WHEN 'erro' THEN 4 ELSE -1
+          END
+        ) < (
+          CASE @novoStatus
+            WHEN 'pendente' THEN 0 WHEN 'enviado' THEN 1 WHEN 'entregue' THEN 2 WHEN 'lido' THEN 3 WHEN 'erro' THEN 4 ELSE -1
+          END
+        )
+    `);
+  return result.recordset[0] ?? null;
+}
+
 async function findUltimoNumeroRemetenteDaConversa(contatoId) {
   const pool = await getPool();
   const result = await pool
@@ -259,6 +288,34 @@ async function findUltimoNumeroRemetenteDaConversa(contatoId) {
       ORDER BY criado_em DESC, id DESC
     `);
   return result.recordset[0]?.numero_remetente_id ?? null;
+}
+
+async function upsertStatusConversa(contatoId, numeroRemetenteId, status) {
+  const pool = await getPool();
+  await pool.request()
+    .input('contatoId', sql.Int, contatoId)
+    .input('numeroRemetenteId', sql.Int, numeroRemetenteId)
+    .input('status', sql.VarChar(20), status)
+    .query(`
+      MERGE ConversasStatus AS alvo
+      USING (SELECT @contatoId AS contato_id, @numeroRemetenteId AS numero_remetente_id) AS origem
+      ON alvo.contato_id = origem.contato_id AND alvo.numero_remetente_id = origem.numero_remetente_id
+      WHEN MATCHED THEN UPDATE SET status = @status, atualizado_em = SYSUTCDATETIME()
+      WHEN NOT MATCHED THEN INSERT (contato_id, numero_remetente_id, status, atualizado_em)
+        VALUES (@contatoId, @numeroRemetenteId, @status, SYSUTCDATETIME());
+    `);
+}
+
+async function marcarAtendeuSeVazio(contatoId, numeroRemetenteId) {
+  const pool = await getPool();
+  await pool.request()
+    .input('contatoId', sql.Int, contatoId)
+    .input('numeroRemetenteId', sql.Int, numeroRemetenteId)
+    .query(`
+      IF NOT EXISTS (SELECT 1 FROM ConversasStatus WHERE contato_id = @contatoId AND numero_remetente_id = @numeroRemetenteId)
+      INSERT INTO ConversasStatus (contato_id, numero_remetente_id, status, atualizado_em)
+      VALUES (@contatoId, @numeroRemetenteId, 'atendeu', SYSUTCDATETIME());
+    `);
 }
 
 async function findPrimeiroNumeroRemetenteDaConversa(contatoId) {
@@ -290,6 +347,9 @@ module.exports = {
   findTelefoneContato,
   listConversas,
   listMensagensEMarcarLidas,
+  atualizarStatusEntrega,
   findUltimoNumeroRemetenteDaConversa,
   findPrimeiroNumeroRemetenteDaConversa,
+  upsertStatusConversa,
+  marcarAtendeuSeVazio,
 };

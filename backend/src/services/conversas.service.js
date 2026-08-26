@@ -61,8 +61,9 @@ async function responder(contatoId, numeroRemetenteId, corpo) {
     };
   }
 
+  let mensagemEnviadaBaileys;
   try {
-    await sock.sendMessage(entradaEncontrada.jid, { text: corpo });
+    mensagemEnviadaBaileys = await sock.sendMessage(entradaEncontrada.jid, { text: corpo });
   } catch (err) {
     return { status: 'falha_envio', erro: err?.message || 'Falha ao enviar mensagem.' };
   }
@@ -72,9 +73,15 @@ async function responder(contatoId, numeroRemetenteId, corpo) {
     numeroRemetenteId,
     remetente: 'colaboradora',
     corpo,
+    baileysMessageId: mensagemEnviadaBaileys?.key?.id ?? null,
+    statusEntrega: 'pendente',
   });
 
   return { status: 'enviada', mensagem };
+}
+
+async function atualizarStatus(contatoId, numeroRemetenteId, status) {
+  return mensagensModel.upsertStatusConversa(contatoId, numeroRemetenteId, status);
 }
 
 module.exports = {
@@ -83,4 +90,5 @@ module.exports = {
   listarNotificacoesPendentes,
   listarMensagens,
   responder,
+  atualizarStatus,
 };

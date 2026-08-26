@@ -96,6 +96,8 @@ async function responder(req, res) {
           remetente: resultado.mensagem.remetente,
           corpo: resultado.mensagem.corpo,
           criado_em: resultado.mensagem.criado_em,
+          status_entrega: resultado.mensagem.status_entrega,
+          baileys_message_id: resultado.mensagem.baileys_message_id,
         });
       default:
         return res.status(500).json({ error: 'Erro interno ao responder contato.' });
@@ -103,6 +105,31 @@ async function responder(req, res) {
   } catch (err) {
     console.error('[conversas.controller] Erro ao responder contato:', err);
     return res.status(500).json({ error: 'Erro interno ao responder contato.' });
+  }
+}
+
+const STATUS_VALIDOS = ['atendeu', 'agendou', 'nao_atendeu', 'venda', 'perdido'];
+
+async function atualizarStatus(req, res) {
+  const contatoIdNum = Number(req.params.contatoId);
+  const numeroRemetenteIdNum = Number(req.params.numeroRemetenteId);
+  if (!isPositiveInteger(contatoIdNum) || !isPositiveInteger(numeroRemetenteIdNum)) {
+    return res
+      .status(400)
+      .json({ error: 'Parâmetros "contatoId" e "numeroRemetenteId" devem ser números inteiros positivos.' });
+  }
+
+  const status = req.body?.status;
+  if (typeof status !== 'string' || !STATUS_VALIDOS.includes(status)) {
+    return res.status(400).json({ error: 'Campo "status" inválido ou ausente.' });
+  }
+
+  try {
+    await conversasService.atualizarStatus(contatoIdNum, numeroRemetenteIdNum, status);
+    return res.status(200).json({ contatoId: contatoIdNum, numeroRemetenteId: numeroRemetenteIdNum, status });
+  } catch (err) {
+    console.error('[conversas.controller] Erro ao atualizar status da conversa:', err);
+    return res.status(500).json({ error: 'Erro interno ao atualizar status da conversa.' });
   }
 }
 
@@ -119,10 +146,17 @@ function stream(req, res) {
     res.write(`data: ${JSON.stringify({ contatoId, numeroRemetenteId, primeiraResposta })}\n\n`);
   };
 
+  const onStatusAtualizado = ({ contatoId, numeroRemetenteId, baileysMessageId, status } = {}) => {
+    res.write('event: status-atualizado\n');
+    res.write(`data: ${JSON.stringify({ contatoId, numeroRemetenteId, baileysMessageId, status })}\n\n`);
+  };
+
   mensagensEventsService.on('mensagem-recebida', onNovaMensagem);
+  mensagensEventsService.on('mensagem-status-atualizada', onStatusAtualizado);
 
   req.on('close', () => {
     mensagensEventsService.off('mensagem-recebida', onNovaMensagem);
+    mensagensEventsService.off('mensagem-status-atualizada', onStatusAtualizado);
     res.end();
   });
 }
@@ -132,5 +166,6 @@ module.exports = {
   notificacoes,
   mensagens,
   responder,
+  atualizarStatus,
   stream,
 };

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../../app/AuthContext.jsx';
-import { fetchConversas, fetchMensagens, enviarMensagem, abrirStreamConversas } from './conversasApi.js';
+import { fetchConversas, fetchMensagens, enviarMensagem, atualizarStatusConversa, abrirStreamConversas } from './conversasApi.js';
 
 
 const RECONEXAO_SSE_MS = 5000;
@@ -10,6 +10,31 @@ const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)
 const inputCls = "w-full rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 sm:py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--violet)]";
 
 const DEBOUNCE_BUSCA_MS = 400;
+
+const STATUS_LABELS = {
+  atendeu: 'Atendeu',
+  agendou: 'Agendou',
+  nao_atendeu: 'Não atendeu',
+  venda: 'Venda',
+  perdido: 'Perdido',
+};
+
+const STATUS_CONVERSA_OPCOES = [
+  { value: '', label: 'Sem status' },
+  ...Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label })),
+];
+
+const STATUS_CORES = {
+  atendeu: { text: 'text-[var(--teal)]', bg: 'bg-[var(--teal)]/10', border: 'border-[var(--teal)]/40' },
+  agendou: { text: 'text-[var(--violet)]', bg: 'bg-[var(--violet)]/10', border: 'border-[var(--violet)]/40' },
+  nao_atendeu: { text: 'text-[var(--warning)]', bg: 'bg-[var(--warning-bg)]', border: 'border-[var(--warning)]/40' },
+  venda: { text: 'text-[var(--success)]', bg: 'bg-[var(--success-bg)]', border: 'border-[var(--success)]/40' },
+  perdido: { text: 'text-[var(--danger)]', bg: 'bg-[var(--danger-bg)]', border: 'border-[var(--danger)]/40' },
+};
+
+function corStatus(status) {
+  return STATUS_CORES[status] ?? { text: 'text-[var(--muted)]', bg: 'bg-transparent', border: 'border-[var(--border)]' };
+}
 
 function formatRelativo(iso) {
   if (!iso) return '';
@@ -80,15 +105,76 @@ function ConversaItem({ conversa, selecionada, onSelecionar }) {
         {ultimaMensagem?.corpo || '—'}
       </div>
       {}
-      {numeroRemetenteInicial ? (
-        <div className="mt-1">
-          <span className="inline-block truncate rounded border border-[var(--border)] px-1.5 py-0.5 text-[10.5px] text-[var(--muted)]">
-            via {numeroRemetenteInicial.apelido}
-          </span>
+      {numeroRemetenteInicial || conversa.status ? (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {numeroRemetenteInicial ? (
+            <span className="inline-block truncate rounded-full bg-[var(--violet)]/20 px-2 py-0.5 text-[10.5px] font-semibold text-[var(--violet)]">
+              {numeroRemetenteInicial.apelido}
+            </span>
+          ) : null}
+          {conversa.status ? (
+            <span className={`inline-block truncate rounded border px-1.5 py-0.5 text-[10.5px] font-medium ${corStatus(conversa.status).border} ${corStatus(conversa.status).bg} ${corStatus(conversa.status).text}`}>
+              {STATUS_LABELS[conversa.status] ?? conversa.status}
+            </span>
+          ) : null}
         </div>
       ) : null}
     </button>
   );
+}
+
+function IconClock({ size, className }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
+function IconCheck({ size, className }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function IconCheckCheck({ size, className }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <polyline points="18 6 7 17 2 12" />
+      <polyline points="22 6 11 17 10.5 16.5" />
+    </svg>
+  );
+}
+
+function IconAlertCircle({ size, className }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="8" x2="12" y2="12" />
+      <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+  );
+}
+
+function StatusEntregaIcone({ status }) {
+  const tamanho = 13;
+  switch (status) {
+    case 'pendente':
+      return <IconClock size={tamanho} className="text-[var(--muted)]" />;
+    case 'enviado':
+      return <IconCheck size={tamanho} className="text-[var(--muted)]" />;
+    case 'entregue':
+      return <IconCheckCheck size={tamanho} className="text-[var(--muted)]" />;
+    case 'lido':
+      return <IconCheckCheck size={tamanho} className="text-blue-400" />;
+    case 'erro':
+      return <IconAlertCircle size={tamanho} className="text-[var(--danger)]" />;
+    default:
+      return null;
+  }
 }
 
 function ChatBubble({ mensagem }) {
@@ -105,7 +191,10 @@ function ChatBubble({ mensagem }) {
     <div className={`flex ${alinhamento}`}>
       <div className={`max-w-[75%] rounded-2xl px-3.5 py-2 text-[13.5px] ${bubbleColor}`}>
         <div className="whitespace-pre-wrap break-words">{mensagem.corpo}</div>
-        <div className={`mt-1 text-right text-[10.5px] ${horaColor}`}>{formatHoraMensagem(mensagem.criado_em)}</div>
+        <div className={`mt-1 flex items-center justify-end gap-1 text-[10.5px] ${horaColor}`}>
+          <span>{formatHoraMensagem(mensagem.criado_em)}</span>
+          {mensagem.remetente !== 'cliente' ? <StatusEntregaIcone status={mensagem.status_entrega} /> : null}
+        </div>
       </div>
     </div>
   );
@@ -173,6 +262,7 @@ export default function ConversasPage() {
   const [textoEnvio, setTextoEnvio] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [envioError, setEnvioError] = useState(null);
+  const [statusError, setStatusError] = useState(null);
   const contatoSelecionadoRef = useRef(contatoSelecionado);
   useEffect(() => {
     contatoSelecionadoRef.current = contatoSelecionado;
@@ -201,6 +291,7 @@ export default function ConversasPage() {
     setMensagens([]);
     setMensagensError(null);
     setEnvioError(null);
+    setStatusError(null);
     setTextoEnvio('');
     carregarMensagens(contato.id, contato.numeroRemetenteId);
   }
@@ -235,13 +326,31 @@ export default function ConversasPage() {
       abrirStreamConversas(token, {
         signal: controller.signal,
         onEvent: (event, data) => {
-          if (event !== 'nova-mensagem' || !data) return;
-          carregarConversasRef.current();
-          if (
-            contatoSelecionadoRef.current?.id === data.contatoId &&
-            contatoSelecionadoRef.current?.numeroRemetenteId === data.numeroRemetenteId
-          ) {
-            carregarMensagens(data.contatoId, data.numeroRemetenteId);
+          if (!data) return;
+
+          if (event === 'nova-mensagem') {
+            carregarConversasRef.current();
+            if (
+              contatoSelecionadoRef.current?.id === data.contatoId &&
+              contatoSelecionadoRef.current?.numeroRemetenteId === data.numeroRemetenteId
+            ) {
+              carregarMensagens(data.contatoId, data.numeroRemetenteId);
+            }
+            return;
+          }
+
+          if (event === 'status-atualizado') {
+            if (
+              contatoSelecionadoRef.current?.id !== data.contatoId ||
+              contatoSelecionadoRef.current?.numeroRemetenteId !== data.numeroRemetenteId
+            ) {
+              return;
+            }
+            setMensagens((atual) => atual.map((m) => (
+              m.baileys_message_id === data.baileysMessageId
+                ? { ...m, status_entrega: data.status }
+                : m
+            )));
           }
         },
       }).catch((err) => {
@@ -283,6 +392,24 @@ export default function ConversasPage() {
         );
       })
       .finally(() => setEnviando(false));
+  }
+
+  function handleAlterarStatus(novoStatus) {
+    if (!contatoSelecionado) return;
+    const { id: contatoId, numeroRemetenteId } = contatoSelecionado;
+    setStatusError(null);
+    atualizarStatusConversa(token, contatoId, numeroRemetenteId, novoStatus)
+      .then(() => {
+        setConversas((prev) => prev.map((c) => (
+          c.contato.id === contatoId && c.numeroRemetenteAtual?.id === numeroRemetenteId
+            ? { ...c, status: novoStatus }
+            : c
+        )));
+      })
+      .catch((err) => {
+        console.error('Erro ao atualizar status da conversa:', err);
+        setStatusError(err.message || 'Erro ao atualizar status.');
+      });
   }
 
   const conversaAberta = conversas.find((c) => (
@@ -355,10 +482,32 @@ export default function ConversasPage() {
           ) : (
             <>
               <div className="border-b border-[var(--border)] px-4 py-3">
-                <div className="text-[14.5px] font-semibold text-[var(--text)]">{contatoSelecionado.nome}</div>
-                <div className="text-[12px] text-[var(--muted)]">{contatoSelecionado.telefone}</div>
-                {origemAtendimento ? (
-                  <div className="mt-0.5 text-[11.5px] text-[var(--muted)]">{origemAtendimento}</div>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="text-[14.5px] font-semibold text-[var(--text)]">{contatoSelecionado.nome}</div>
+                    <div className="text-[12px] text-[var(--muted)]">{contatoSelecionado.telefone}</div>
+                    {origemAtendimento ? (
+                      <div className="mt-0.5 text-[11.5px] text-[var(--muted)]">{origemAtendimento}</div>
+                    ) : null}
+                  </div>
+                  <label className="flex flex-col items-end gap-1 text-[11px] text-[var(--muted)]">
+                    <span>Status da conversa</span>
+                    <select
+                      className={`w-auto rounded-lg border px-3 py-1.5 text-[12.5px] font-medium focus:outline-none focus:border-[var(--violet)] ${corStatus(conversaAberta?.status).border} ${corStatus(conversaAberta?.status).bg} ${corStatus(conversaAberta?.status).text}`}
+                      aria-label="Status da conversa"
+                      value={conversaAberta?.status ?? ''}
+                      onChange={(e) => handleAlterarStatus(e.target.value)}
+                    >
+                      {STATUS_CONVERSA_OPCOES.map((opcao) => (
+                        <option key={opcao.value} value={opcao.value}>{opcao.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {statusError ? (
+                  <div className="mt-2 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3 py-1.5 text-[12px] text-[var(--danger)] break-words">
+                    {statusError}
+                  </div>
                 ) : null}
               </div>
 

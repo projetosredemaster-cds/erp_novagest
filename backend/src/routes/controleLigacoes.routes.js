@@ -6,6 +6,7 @@ const numerosRemetentesController = require('../controllers/numerosRemetentes.co
 const importacaoController = require('../controllers/importacao.controller');
 const disparosController = require('../controllers/disparos.controller');
 const conversasController = require('../controllers/conversas.controller');
+const dashboardController = require('../controllers/dashboard.controller');
 
 const router = express.Router();
 
@@ -36,6 +37,8 @@ router.post('/contatos/importar', upload.single('arquivo'), importacaoController
 router.post('/contatos/importar/:loteId/confirmar', importacaoController.confirmar);
 router.get('/contatos/importar/:loteId', importacaoController.detalhe);
 
+router.get('/dashboard', dashboardController.getDashboard);
+
 router.get('/painel-disparo', disparosController.painelDisparo);
 router.get('/estados/:estadoId/contatos-disponiveis', disparosController.contatosDisponiveis);
 router.post('/disparos/verificar', disparosController.verificar);
@@ -46,6 +49,7 @@ router.get('/conversas', conversasController.listar);
 router.get('/conversas/stream', conversasController.stream);
 router.get('/conversas/:contatoId/:numeroRemetenteId/mensagens', conversasController.mensagens);
 router.post('/conversas/:contatoId/:numeroRemetenteId/mensagens', conversasController.responder);
+router.put('/conversas/:contatoId/:numeroRemetenteId/status', conversasController.atualizarStatus);
 router.get('/notificacoes', conversasController.notificacoes);
 
 module.exports = router;

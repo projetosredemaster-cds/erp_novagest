@@ -334,7 +334,7 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
     ]);
     mensagensTemplatesModel.getUltimoTemplateUsadoId.mockResolvedValue(null);
 
-    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const sendMessage = vi.fn().mockResolvedValue({ key: { id: 'ALGUM_ID' } });
     const onWhatsApp = vi.fn().mockResolvedValue([{ jid: '5511988887777@s.whatsapp.net', exists: true }]);
     baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
 
@@ -345,6 +345,8 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
       numeroRemetenteId: item.numeroRemetenteId,
       remetente: 'ia',
       corpo: 'Oi Ana',
+      baileysMessageId: 'ALGUM_ID',
+      statusEntrega: 'pendente',
     });
   });
 

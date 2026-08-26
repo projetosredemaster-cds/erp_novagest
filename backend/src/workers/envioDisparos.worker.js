@@ -101,8 +101,9 @@ async function processarItem(item) {
 
   const jid = entradaEncontrada.jid;
 
+  let mensagemEnviadaBaileys;
   try {
-    await sock.sendMessage(jid, { text: mensagem });
+    mensagemEnviadaBaileys = await sock.sendMessage(jid, { text: mensagem });
   } catch (err) {
     const erro = err?.message || 'Falha ao enviar mensagem via WhatsApp.';
     console.error(`${logPrefix}: falha ao enviar — ${erro}`, err);
@@ -122,6 +123,8 @@ async function processarItem(item) {
       numeroRemetenteId,
       remetente: 'ia',
       corpo: mensagem,
+      baileysMessageId: mensagemEnviadaBaileys?.key?.id ?? null,
+      statusEntrega: 'pendente',
     });
   } catch (err) {
     console.error(`${logPrefix}: falha ao registrar mensagem enviada em Mensagens (envio em si já teve sucesso):`, err);

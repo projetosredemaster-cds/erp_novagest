@@ -30,6 +30,14 @@ export function enviarMensagem(token, contatoId, numeroRemetenteId, corpo) {
   });
 }
 
+export function atualizarStatusConversa(token, contatoId, numeroRemetenteId, status) {
+  return apiRequest(`/api/controle-ligacoes/conversas/${contatoId}/${numeroRemetenteId}/status`, {
+    method: 'PUT',
+    body: JSON.stringify({ status }),
+    token,
+  });
+}
+
 
 export async function abrirStreamConversas(token, { onEvent, signal } = {}) {
   const baseUrl = import.meta.env.VITE_API_URL;

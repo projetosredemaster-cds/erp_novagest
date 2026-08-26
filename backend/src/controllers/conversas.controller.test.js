@@ -378,10 +378,17 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/:numeroRemetenteId/me
     expect(res.body).toEqual({ error: 'timeout de rede' });
   });
 
-  it('201 — envia com sucesso e devolve a mensagem gravada', async () => {
+  it('201 — envia com sucesso e devolve a mensagem gravada, incluindo status_entrega/baileys_message_id', async () => {
     conversasService.responder.mockResolvedValue({
       status: 'enviada',
-      mensagem: { id: 10, remetente: 'colaboradora', corpo: 'oi', criado_em: '2026-08-25T12:00:00.000Z' },
+      mensagem: {
+        id: 10,
+        remetente: 'colaboradora',
+        corpo: 'oi',
+        criado_em: '2026-08-25T12:00:00.000Z',
+        status_entrega: 'pendente',
+        baileys_message_id: 'ALGUM_ID',
+      },
     });
 
     const res = await request(app)
@@ -395,6 +402,8 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/:numeroRemetenteId/me
       remetente: 'colaboradora',
       corpo: 'oi',
       criado_em: '2026-08-25T12:00:00.000Z',
+      status_entrega: 'pendente',
+      baileys_message_id: 'ALGUM_ID',
     });
     expect(conversasService.responder).toHaveBeenCalledWith(42, 7, 'oi');
   });
@@ -415,6 +424,7 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/:numeroRemetenteId/me
 describe('GET /api/controle-ligacoes/conversas/stream', () => {
   afterEach(() => {
     mensagensEventsService.removeAllListeners('mensagem-recebida');
+    mensagensEventsService.removeAllListeners('mensagem-status-atualizada');
   });
 
   function conectarStream({ aoConectar, deveEncerrar } = {}) {
@@ -522,5 +532,55 @@ describe('GET /api/controle-ligacoes/conversas/stream', () => {
     });
 
     expect(resultado.body).toBe('event: nova-mensagem\ndata: {"contatoId":1,"numeroRemetenteId":2}\n\n');
+  });
+
+  it(
+    'registra o listener em "mensagem-status-atualizada", repassa como "event: status-atualizado" ' +
+      'e remove o listener ao fechar',
+    async () => {
+      expect(mensagensEventsService.listenerCount('mensagem-status-atualizada')).toBe(0);
+      const onSpy = vi.spyOn(mensagensEventsService, 'on');
+      const offSpy = vi.spyOn(mensagensEventsService, 'off');
+
+      const resultado = await conectarStream({
+        aoConectar: () => {
+          expect(mensagensEventsService.listenerCount('mensagem-status-atualizada')).toBe(1);
+          expect(onSpy).toHaveBeenCalledWith('mensagem-status-atualizada', expect.any(Function));
+          mensagensEventsService.emit('mensagem-status-atualizada', {
+            contatoId: 42,
+            numeroRemetenteId: 17,
+            baileysMessageId: 'ABC123',
+            status: 'entregue',
+          });
+        },
+        deveEncerrar: (body) => body.includes('\n\n'),
+      });
+
+      expect(resultado.body).toBe(
+        'event: status-atualizado\ndata: {"contatoId":42,"numeroRemetenteId":17,"baileysMessageId":"ABC123","status":"entregue"}\n\n'
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(offSpy).toHaveBeenCalledWith('mensagem-status-atualizada', expect.any(Function));
+      expect(mensagensEventsService.listenerCount('mensagem-status-atualizada')).toBe(0);
+    }
+  );
+
+  it('não emite nada em "mensagem-recebida" quando só "mensagem-status-atualizada" acontece', async () => {
+    const resultado = await conectarStream({
+      aoConectar: () => {
+        mensagensEventsService.emit('mensagem-status-atualizada', {
+          contatoId: 1,
+          numeroRemetenteId: 2,
+          baileysMessageId: 'X',
+          status: 'lido',
+        });
+      },
+      deveEncerrar: (body) => body.includes('\n\n'),
+    });
+
+    expect(resultado.body).toBe(
+      'event: status-atualizado\ndata: {"contatoId":1,"numeroRemetenteId":2,"baileysMessageId":"X","status":"lido"}\n\n'
+    );
   });
 });

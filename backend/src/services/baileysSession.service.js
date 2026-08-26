@@ -131,6 +131,12 @@ async function iniciarSocket(numeroRemetenteId, sessao) {
     });
   });
 
+  sock.ev.on('messages.update', (updates) => {
+    handleMessagesUpdate(numeroRemetenteId, updates).catch((err) => {
+      console.error(`[baileysSession] erro inesperado tratando messages.update (numeroRemetenteId=${numeroRemetenteId}):`, err);
+    });
+  });
+
   limparTimeoutQr(sessao);
   sessao.qrTimeoutHandle = setTimeout(() => {
     const atual = sessoes.get(numeroRemetenteId);
@@ -322,6 +328,48 @@ function extrairTextoDaMensagem(mensagemDesembrulhada, numeroRemetenteId) {
   return MENSAGEM_MIDIA_PLACEHOLDER;
 }
 
+function mapearStatusBaileys(codigo) {
+  switch (codigo) {
+    case 0: return 'erro';
+    case 2: return 'enviado';
+    case 3: return 'entregue';
+    case 4: return 'lido';
+    case 5: return 'lido';
+    default: return null;
+  }
+}
+
+async function handleMessagesUpdate(numeroRemetenteId, updates) {
+  const lista = Array.isArray(updates) ? updates : [];
+
+  for (const item of lista) {
+    try {
+      const baileysMessageId = item?.key?.id;
+      const statusBaileys = item?.update?.status;
+      if (!baileysMessageId || statusBaileys == null) continue;
+
+      const statusMapeado = mapearStatusBaileys(statusBaileys);
+      if (!statusMapeado) continue;
+
+      const atualizado = await mensagensModel.atualizarStatusEntrega(baileysMessageId, statusMapeado);
+      if (atualizado) {
+        mensagensEventsService.emit('mensagem-status-atualizada', {
+          contatoId: atualizado.contato_id,
+          numeroRemetenteId: atualizado.numero_remetente_id,
+          baileysMessageId,
+          status: atualizado.status_entrega,
+        });
+      }
+    } catch (err) {
+      console.error(
+        `[baileysSession] erro ao processar mensagem individual do messages.update ` +
+        `(numeroRemetenteId=${numeroRemetenteId}, baileysMessageId=${item?.key?.id ?? 'null'}):`,
+        err
+      );
+    }
+  }
+}
+
 async function handleMessagesUpsert(numeroRemetenteId, sock, upsert) {
   if (!upsert || upsert.type !== 'notify') {
     return;
@@ -400,9 +448,14 @@ async function handleMessagesUpsert(numeroRemetenteId, sock, upsert) {
         baileysMessageId: msg?.key?.id ?? null,
         ePrimeiraRespostaCliente,
         remetente: ehDoAtendente ? 'atendente' : 'cliente',
+        statusEntrega: ehDoAtendente ? 'enviado' : null,
       });
 
       if (mensagemInserida) {
+        if (!ehDoAtendente) {
+          await mensagensModel.marcarAtendeuSeVazio(contatoId, numeroRemetenteId);
+        }
+
         mensagensEventsService.emit('mensagem-recebida', {
           contatoId,
           numeroRemetenteId,

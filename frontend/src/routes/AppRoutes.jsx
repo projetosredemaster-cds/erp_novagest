@@ -7,7 +7,7 @@ import RequireOperadorCobranca from './RequireOperadorCobranca.jsx';
 import LoginPage from '../modulos/auth/LoginPage.jsx';
 import EsqueciSenhaPage from '../modulos/auth/EsqueciSenhaPage.jsx';
 import RedefinirSenhaPage from '../modulos/auth/RedefinirSenhaPage.jsx';
-import ControleLigacoesHomePage from '../modulos/controle-ligacoes/ControleLigacoesHomePage.jsx';
+import InicioPage from '../modulos/controle-ligacoes/inicio/InicioPage.jsx';
 import NumerosRemetentesPage from '../modulos/controle-ligacoes/configuracoes/NumerosRemetentesPage.jsx';
 import ImportacaoPage from '../modulos/controle-ligacoes/importacao/ImportacaoPage.jsx';
 import PainelDisparoPage from '../modulos/controle-ligacoes/painel-disparo/PainelDisparoPage.jsx';
@@ -55,7 +55,7 @@ export default function AppRoutes() {
 
       <Route element={<RequireOperadorCobranca />}>
         <Route path="controle-ligacoes" element={<ControleLigacoesShell />}>
-          <Route index element={<ControleLigacoesHomePage />} />
+          <Route index element={<InicioPage />} />
           <Route path="configuracoes/numeros-remetentes" element={<NumerosRemetentesPage />} />
           <Route path="importacao" element={<ImportacaoPage />} />
           <Route path="conversas" element={<ConversasPage />} />
