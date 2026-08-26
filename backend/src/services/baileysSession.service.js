@@ -389,7 +389,7 @@ async function handleMessagesUpsert(numeroRemetenteId, sock, upsert) {
       if (ehDoAtendente) {
         ePrimeiraRespostaCliente = false;
       } else {
-        const jaTinhaMensagemDeCliente = await mensagensModel.existeMensagemClienteAnterior(contatoId);
+        const jaTinhaMensagemDeCliente = await mensagensModel.existeMensagemClienteAnterior(contatoId, numeroRemetenteId);
         ePrimeiraRespostaCliente = !jaTinhaMensagemDeCliente;
       }
 

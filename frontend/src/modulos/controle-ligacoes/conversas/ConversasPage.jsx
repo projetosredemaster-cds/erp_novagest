@@ -31,11 +31,9 @@ function formatHoraMensagem(iso) {
   return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
-function formatOrigemAtendimento(inicial, atual) {
-  if (!inicial) return null;
-  if (!atual) return `Iniciado por: ${inicial.apelido}`;
-  if (inicial.id === atual.id) return `Atendido por: ${inicial.apelido}`;
-  return `Iniciado por: ${inicial.apelido} • Respondendo por: ${atual.apelido}`;
+function formatOrigemAtendimento(atual) {
+  if (!atual) return null;
+  return `Atendido por: ${atual.apelido}`;
 }
 
 function agruparPorData(mensagens) {
@@ -101,7 +99,7 @@ function ChatBubble({ mensagem }) {
       : mensagem.remetente === 'ia'
         ? 'bg-[var(--violet)]/20 text-[var(--text)]'
         : 'bg-[var(--violet)] text-[#0b1010]';
-  const horaColor = mensagem.remetente === 'atendente' ? 'text-[#0b1010]/70' : 'text-[var(--muted)]';
+  const horaColor = ['atendente', 'colaboradora'].includes(mensagem.remetente) ? 'text-[#0b1010]/70' : 'text-[var(--muted)]';
 
   return (
     <div className={`flex ${alinhamento}`}>
@@ -172,7 +170,6 @@ export default function ConversasPage() {
   const [mensagens, setMensagens] = useState([]);
   const [loadingMensagens, setLoadingMensagens] = useState(false);
   const [mensagensError, setMensagensError] = useState(null);
-  const [numeroRemetenteInicialConversa, setNumeroRemetenteInicialConversa] = useState(null);
   const [textoEnvio, setTextoEnvio] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [envioError, setEnvioError] = useState(null);
@@ -181,16 +178,17 @@ export default function ConversasPage() {
     contatoSelecionadoRef.current = contatoSelecionado;
   }, [contatoSelecionado]);
 
-  function carregarMensagens(contatoId) {
+  function carregarMensagens(contatoId, numeroRemetenteId) {
     setLoadingMensagens(true);
     setMensagensError(null);
-    return fetchMensagens(token, contatoId)
+    return fetchMensagens(token, contatoId, numeroRemetenteId)
       .then((resposta) => {
         setMensagens(resposta?.mensagens || []);
-        setNumeroRemetenteInicialConversa(resposta?.numeroRemetenteInicial ?? null);
         setMensagensError(null);
         setConversas((prev) => prev.map((c) => (
-          c.contato.id === contatoId ? { ...c, naoLidas: 0 } : c
+          c.contato.id === contatoId && c.numeroRemetenteAtual?.id === numeroRemetenteId
+            ? { ...c, naoLidas: 0 }
+            : c
         )));
         refetchNotificacoes?.();
       })
@@ -201,27 +199,26 @@ export default function ConversasPage() {
   function selecionarConversaContato(contato) {
     setContatoSelecionado(contato);
     setMensagens([]);
-    setNumeroRemetenteInicialConversa(null);
     setMensagensError(null);
     setEnvioError(null);
     setTextoEnvio('');
-    carregarMensagens(contato.id);
+    carregarMensagens(contato.id, contato.numeroRemetenteId);
   }
 
   function selecionarConversa(conversa) {
-    selecionarConversaContato(conversa.contato);
+    selecionarConversaContato({ ...conversa.contato, numeroRemetenteId: conversa.numeroRemetenteAtual.id });
   }
 
   function retryMensagens() {
     if (!contatoSelecionado) return;
-    carregarMensagens(contatoSelecionado.id);
+    carregarMensagens(contatoSelecionado.id, contatoSelecionado.numeroRemetenteId);
   }
 
   useEffect(() => {
     if (!location.state?.contatoId) return undefined;
-    const { contatoId, nome, telefone } = location.state;
+    const { contatoId, numeroRemetenteId, nome, telefone } = location.state;
     const timer = setTimeout(() => {
-      selecionarConversaContato({ id: contatoId, nome, telefone });
+      selecionarConversaContato({ id: contatoId, numeroRemetenteId, nome, telefone });
       navigate(location.pathname, { replace: true, state: null });
     }, 0);
     return () => clearTimeout(timer);
@@ -240,8 +237,11 @@ export default function ConversasPage() {
         onEvent: (event, data) => {
           if (event !== 'nova-mensagem' || !data) return;
           carregarConversasRef.current();
-          if (contatoSelecionadoRef.current?.id === data.contatoId) {
-            carregarMensagens(data.contatoId);
+          if (
+            contatoSelecionadoRef.current?.id === data.contatoId &&
+            contatoSelecionadoRef.current?.numeroRemetenteId === data.numeroRemetenteId
+          ) {
+            carregarMensagens(data.contatoId, data.numeroRemetenteId);
           }
         },
       }).catch((err) => {
@@ -269,7 +269,7 @@ export default function ConversasPage() {
 
     setEnviando(true);
     setEnvioError(null);
-    enviarMensagem(token, contatoSelecionado.id, corpo)
+    enviarMensagem(token, contatoSelecionado.id, contatoSelecionado.numeroRemetenteId, corpo)
       .then((mensagemSalva) => {
         setMensagens((prev) => [...prev, mensagemSalva]);
         setTextoEnvio('');
@@ -285,9 +285,11 @@ export default function ConversasPage() {
       .finally(() => setEnviando(false));
   }
 
-  const conversaAberta = conversas.find((c) => c.contato.id === contatoSelecionado?.id);
+  const conversaAberta = conversas.find((c) => (
+    c.contato.id === contatoSelecionado?.id && c.numeroRemetenteAtual?.id === contatoSelecionado?.numeroRemetenteId
+  ));
   const numeroRemetenteAtualConversa = conversaAberta?.numeroRemetenteAtual ?? null;
-  const origemAtendimento = formatOrigemAtendimento(numeroRemetenteInicialConversa, numeroRemetenteAtualConversa);
+  const origemAtendimento = formatOrigemAtendimento(numeroRemetenteAtualConversa);
 
   const grupos = agruparPorData(mensagens);
 
@@ -328,10 +330,13 @@ export default function ConversasPage() {
             ) : (
               <ul>
                 {conversas.map((c) => (
-                  <li key={c.contato.id}>
+                  <li key={`${c.contato.id}-${c.numeroRemetenteAtual?.id}`}>
                     <ConversaItem
                       conversa={c}
-                      selecionada={contatoSelecionado?.id === c.contato.id}
+                      selecionada={
+                        contatoSelecionado?.id === c.contato.id &&
+                        contatoSelecionado?.numeroRemetenteId === c.numeroRemetenteAtual?.id
+                      }
                       onSelecionar={() => selecionarConversa(c)}
                     />
                   </li>

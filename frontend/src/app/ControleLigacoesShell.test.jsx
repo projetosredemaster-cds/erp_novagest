@@ -24,7 +24,7 @@ function ConversasRouteProbe() {
       Conversas (rota de teste)
       {location.state?.contatoId ? (
         <div data-testid="state-recebido">
-          {location.state.contatoId}|{location.state.nome}|{location.state.telefone}
+          {location.state.contatoId}|{location.state.numeroRemetenteId}|{location.state.nome}|{location.state.telefone}
         </div>
       ) : null}
     </div>
@@ -48,6 +48,7 @@ function renderShell(initialEntries = ['/controle-ligacoes']) {
 function notificacaoItem(overrides = {}) {
   return {
     contatoId: 42,
+    numeroRemetenteId: 7,
     nomeContato: 'Maria Silva',
     telefone: '5598900000000',
     preview: 'Oi, ainda estão com a promoção?',
@@ -302,7 +303,7 @@ describe('ControleLigacoesShell - sino de notificações', () => {
     await userEvent.click(screen.getByText('Maria Silva'));
 
     expect(await screen.findByText('Conversas (rota de teste)')).toBeInTheDocument();
-    expect(await screen.findByTestId('state-recebido')).toHaveTextContent('42|Maria Silva|5598900000000');
+    expect(await screen.findByTestId('state-recebido')).toHaveTextContent('42|7|Maria Silva|5598900000000');
     expect(screen.queryByText('Oi, ainda estão com a promoção?')).not.toBeInTheDocument();
   });
 

@@ -107,7 +107,14 @@ describe('GET /api/controle-ligacoes/notificacoes', () => {
   it('200 — devolve a contagem de notificações não vistas e os itens', async () => {
     conversasService.contarNotificacoesNaoVistas.mockResolvedValue(3);
     conversasService.listarNotificacoesPendentes.mockResolvedValue([
-      { contatoId: 42, nomeContato: 'Maria', telefone: '5598900000000', preview: 'oi', criado_em: '2026-08-25T12:00:00.000Z' },
+      {
+        contatoId: 42,
+        numeroRemetenteId: 7,
+        nomeContato: 'Maria',
+        telefone: '5598900000000',
+        preview: 'oi',
+        criado_em: '2026-08-25T12:00:00.000Z',
+      },
     ]);
 
     const res = await request(app)
@@ -118,7 +125,14 @@ describe('GET /api/controle-ligacoes/notificacoes', () => {
     expect(res.body).toEqual({
       naoVistas: 3,
       itens: [
-        { contatoId: 42, nomeContato: 'Maria', telefone: '5598900000000', preview: 'oi', criado_em: '2026-08-25T12:00:00.000Z' },
+        {
+          contatoId: 42,
+          numeroRemetenteId: 7,
+          nomeContato: 'Maria',
+          telefone: '5598900000000',
+          preview: 'oi',
+          criado_em: '2026-08-25T12:00:00.000Z',
+        },
       ],
     });
   });
@@ -148,15 +162,15 @@ describe('GET /api/controle-ligacoes/notificacoes', () => {
   });
 });
 
-describe('GET /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
+describe('GET /api/controle-ligacoes/conversas/:contatoId/:numeroRemetenteId/mensagens', () => {
   it('401 sem token', async () => {
-    const res = await request(app).get('/api/controle-ligacoes/conversas/42/mensagens');
+    const res = await request(app).get('/api/controle-ligacoes/conversas/42/7/mensagens');
     expect(res.status).toBe(401);
   });
 
   it('403 quando o usuário não é operador_cobranca', async () => {
     const res = await request(app)
-      .get('/api/controle-ligacoes/conversas/42/mensagens')
+      .get('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor({ role: 'usuario' })}`);
 
     expect(res.status).toBe(403);
@@ -164,11 +178,25 @@ describe('GET /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
 
   it('400 quando ":contatoId" não é um inteiro positivo', async () => {
     const res = await request(app)
-      .get('/api/controle-ligacoes/conversas/abc/mensagens')
+      .get('/api/controle-ligacoes/conversas/abc/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`);
 
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Parâmetro "contatoId" deve ser um número inteiro positivo.' });
+    expect(res.body).toEqual({
+      error: 'Parâmetros "contatoId" e "numeroRemetenteId" devem ser números inteiros positivos.',
+    });
+    expect(conversasService.listarMensagens).not.toHaveBeenCalled();
+  });
+
+  it('400 quando ":numeroRemetenteId" não é um inteiro positivo', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/conversas/42/abc/mensagens')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Parâmetros "contatoId" e "numeroRemetenteId" devem ser números inteiros positivos.',
+    });
     expect(conversasService.listarMensagens).not.toHaveBeenCalled();
   });
 
@@ -176,48 +204,46 @@ describe('GET /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
     conversasService.listarMensagens.mockResolvedValue(null);
 
     const res = await request(app)
-      .get('/api/controle-ligacoes/conversas/999/mensagens')
+      .get('/api/controle-ligacoes/conversas/999/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`);
 
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: 'Contato não encontrado.' });
   });
 
-  it('200 — mensagens vazio e numeroRemetenteInicial null quando o contato existe mas nunca teve mensagem', async () => {
-    conversasService.listarMensagens.mockResolvedValue({ mensagens: [], numeroRemetenteInicial: null });
+  it('200 — mensagens vazio quando a thread existe mas nunca teve mensagem', async () => {
+    conversasService.listarMensagens.mockResolvedValue({ mensagens: [] });
 
     const res = await request(app)
-      .get('/api/controle-ligacoes/conversas/42/mensagens')
+      .get('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ mensagens: [], numeroRemetenteInicial: null });
+    expect(res.body).toEqual({ mensagens: [] });
   });
 
-  it('200 — lista mensagens ordenadas e numeroRemetenteInicial', async () => {
+  it('200 — lista mensagens da thread (contatoId, numeroRemetenteId)', async () => {
     conversasService.listarMensagens.mockResolvedValue({
       mensagens: [
         { id: 1, remetente: 'cliente', corpo: 'oi', criado_em: '2026-08-25T11:00:00.000Z' },
         { id: 2, remetente: 'ia', corpo: 'olá!', criado_em: '2026-08-25T11:01:00.000Z' },
       ],
-      numeroRemetenteInicial: { id: 3, apelido: 'Teste Junior' },
     });
 
     const res = await request(app)
-      .get('/api/controle-ligacoes/conversas/42/mensagens')
+      .get('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`);
 
     expect(res.status).toBe(200);
     expect(res.body.mensagens).toHaveLength(2);
-    expect(res.body.numeroRemetenteInicial).toEqual({ id: 3, apelido: 'Teste Junior' });
-    expect(conversasService.listarMensagens).toHaveBeenCalledWith(42);
+    expect(conversasService.listarMensagens).toHaveBeenCalledWith(42, 7);
   });
 
   it('500 quando o service lança erro', async () => {
     conversasService.listarMensagens.mockRejectedValue(new Error('boom'));
 
     const res = await request(app)
-      .get('/api/controle-ligacoes/conversas/42/mensagens')
+      .get('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`);
 
     expect(res.status).toBe(500);
@@ -225,17 +251,17 @@ describe('GET /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
   });
 });
 
-describe('POST /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
+describe('POST /api/controle-ligacoes/conversas/:contatoId/:numeroRemetenteId/mensagens', () => {
   it('401 sem token', async () => {
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/42/mensagens')
+      .post('/api/controle-ligacoes/conversas/42/7/mensagens')
       .send({ corpo: 'oi' });
     expect(res.status).toBe(401);
   });
 
   it('403 quando o usuário não é operador_cobranca', async () => {
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/42/mensagens')
+      .post('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor({ role: 'admin' })}`)
       .send({ corpo: 'oi' });
 
@@ -244,18 +270,33 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
 
   it('400 quando ":contatoId" não é um inteiro positivo', async () => {
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/abc/mensagens')
+      .post('/api/controle-ligacoes/conversas/abc/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`)
       .send({ corpo: 'oi' });
 
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Parâmetro "contatoId" deve ser um número inteiro positivo.' });
+    expect(res.body).toEqual({
+      error: 'Parâmetros "contatoId" e "numeroRemetenteId" devem ser números inteiros positivos.',
+    });
+    expect(conversasService.responder).not.toHaveBeenCalled();
+  });
+
+  it('400 quando ":numeroRemetenteId" não é um inteiro positivo', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/conversas/42/abc/mensagens')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ corpo: 'oi' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Parâmetros "contatoId" e "numeroRemetenteId" devem ser números inteiros positivos.',
+    });
     expect(conversasService.responder).not.toHaveBeenCalled();
   });
 
   it('400 quando "corpo" está ausente', async () => {
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/42/mensagens')
+      .post('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`)
       .send({});
 
@@ -266,7 +307,7 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
 
   it('400 quando "corpo" é só espaços', async () => {
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/42/mensagens')
+      .post('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`)
       .send({ corpo: '   ' });
 
@@ -278,7 +319,7 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
     conversasService.responder.mockResolvedValue({ status: 'contato_nao_encontrado' });
 
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/999/mensagens')
+      .post('/api/controle-ligacoes/conversas/999/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`)
       .send({ corpo: 'oi' });
 
@@ -286,11 +327,11 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
     expect(res.body).toEqual({ error: 'Contato não encontrado.' });
   });
 
-  it('400 quando o contato não tem histórico de conversa', async () => {
+  it('400 quando a thread (contato + número) não tem histórico de conversa', async () => {
     conversasService.responder.mockResolvedValue({ status: 'sem_historico' });
 
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/42/mensagens')
+      .post('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`)
       .send({ corpo: 'oi' });
 
@@ -302,7 +343,7 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
     conversasService.responder.mockResolvedValue({ status: 'numero_desconectado' });
 
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/42/mensagens')
+      .post('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`)
       .send({ corpo: 'oi' });
 
@@ -317,7 +358,7 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
     });
 
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/42/mensagens')
+      .post('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`)
       .send({ corpo: 'oi' });
 
@@ -329,7 +370,7 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
     conversasService.responder.mockResolvedValue({ status: 'falha_envio', erro: 'timeout de rede' });
 
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/42/mensagens')
+      .post('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`)
       .send({ corpo: 'oi' });
 
@@ -344,7 +385,7 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
     });
 
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/42/mensagens')
+      .post('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`)
       .send({ corpo: 'oi' });
 
@@ -355,14 +396,14 @@ describe('POST /api/controle-ligacoes/conversas/:contatoId/mensagens', () => {
       corpo: 'oi',
       criado_em: '2026-08-25T12:00:00.000Z',
     });
-    expect(conversasService.responder).toHaveBeenCalledWith(42, 'oi');
+    expect(conversasService.responder).toHaveBeenCalledWith(42, 7, 'oi');
   });
 
   it('500 quando o service lança erro', async () => {
     conversasService.responder.mockRejectedValue(new Error('boom'));
 
     const res = await request(app)
-      .post('/api/controle-ligacoes/conversas/42/mensagens')
+      .post('/api/controle-ligacoes/conversas/42/7/mensagens')
       .set('Authorization', `Bearer ${tokenFor()}`)
       .send({ corpo: 'oi' });
 

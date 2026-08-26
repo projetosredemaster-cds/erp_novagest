@@ -143,7 +143,12 @@ export default function ControleLigacoesShell() {
     setMobileOpen(false);
 
     navigate('/controle-ligacoes/conversas', {
-      state: { contatoId: item.contatoId, nome: item.nomeContato, telefone: item.telefone },
+      state: {
+        contatoId: item.contatoId,
+        numeroRemetenteId: item.numeroRemetenteId,
+        nome: item.nomeContato,
+        telefone: item.telefone,
+      },
     });
   }
 

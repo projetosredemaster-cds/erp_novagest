@@ -13,28 +13,24 @@ async function listarNotificacoesPendentes() {
   return mensagensModel.listNotificacoesPendentes();
 }
 
-async function listarMensagens(contatoId) {
+async function listarMensagens(contatoId, numeroRemetenteId) {
   const existe = await mensagensModel.existeContato(contatoId);
   if (!existe) {
     return null;
   }
 
-  const [mensagens, numeroRemetenteInicial] = await Promise.all([
-    mensagensModel.listMensagensEMarcarLidas(contatoId),
-    mensagensModel.findPrimeiroNumeroRemetenteDaConversa(contatoId),
-  ]);
-
-  return { mensagens, numeroRemetenteInicial };
+  const mensagens = await mensagensModel.listMensagensEMarcarLidas(contatoId, numeroRemetenteId);
+  return { mensagens };
 }
 
-async function responder(contatoId, corpo) {
+async function responder(contatoId, numeroRemetenteId, corpo) {
   const existe = await mensagensModel.existeContato(contatoId);
   if (!existe) {
     return { status: 'contato_nao_encontrado' };
   }
 
-  const numeroRemetenteId = await mensagensModel.findUltimoNumeroRemetenteDaConversa(contatoId);
-  if (!numeroRemetenteId) {
+  const jaTemHistorico = await mensagensModel.existeMensagemNaThread(contatoId, numeroRemetenteId);
+  if (!jaTemHistorico) {
     return { status: 'sem_historico' };
   }
 

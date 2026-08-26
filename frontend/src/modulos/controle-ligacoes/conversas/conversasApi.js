@@ -15,15 +15,15 @@ export function fetchNotificacoes(token) {
   return apiRequest('/api/controle-ligacoes/notificacoes', { token, cache: 'no-store' });
 }
 
-export function fetchMensagens(token, contatoId) {
+export function fetchMensagens(token, contatoId, numeroRemetenteId) {
   return apiRequest(
-    `/api/controle-ligacoes/conversas/${contatoId}/mensagens`,
+    `/api/controle-ligacoes/conversas/${contatoId}/${numeroRemetenteId}/mensagens`,
     { token, cache: 'no-store' }
   );
 }
 
-export function enviarMensagem(token, contatoId, corpo) {
-  return apiRequest(`/api/controle-ligacoes/conversas/${contatoId}/mensagens`, {
+export function enviarMensagem(token, contatoId, numeroRemetenteId, corpo) {
+  return apiRequest(`/api/controle-ligacoes/conversas/${contatoId}/${numeroRemetenteId}/mensagens`, {
     method: 'POST',
     body: JSON.stringify({ corpo }),
     token,

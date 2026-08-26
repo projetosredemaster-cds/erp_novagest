@@ -34,15 +34,30 @@ async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, ba
   }
 }
 
-async function existeMensagemClienteAnterior(contatoId) {
+async function existeMensagemClienteAnterior(contatoId, numeroRemetenteId) {
   const pool = await getPool();
   const result = await pool
     .request()
     .input('contatoId', sql.Int, contatoId)
+    .input('numeroRemetenteId', sql.Int, numeroRemetenteId)
     .query(`
       SELECT TOP (1) 1 AS ok
       FROM Mensagens
-      WHERE contato_id = @contatoId AND remetente = 'cliente'
+      WHERE contato_id = @contatoId AND numero_remetente_id = @numeroRemetenteId AND remetente = 'cliente'
+    `);
+  return result.recordset.length > 0;
+}
+
+async function existeMensagemNaThread(contatoId, numeroRemetenteId) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('contatoId', sql.Int, contatoId)
+    .input('numeroRemetenteId', sql.Int, numeroRemetenteId)
+    .query(`
+      SELECT TOP (1) 1 AS ok
+      FROM Mensagens
+      WHERE contato_id = @contatoId AND numero_remetente_id = @numeroRemetenteId
     `);
   return result.recordset.length > 0;
 }
@@ -74,6 +89,7 @@ async function listNotificacoesPendentes(limite = 10) {
     .query(`
       SELECT TOP (@limite)
         m.contato_id,
+        m.numero_remetente_id,
         c.nome,
         c.telefone,
         m.corpo,
@@ -86,6 +102,7 @@ async function listNotificacoesPendentes(limite = 10) {
 
   return result.recordset.map((row) => ({
     contatoId: row.contato_id,
+    numeroRemetenteId: row.numero_remetente_id,
     nomeContato: row.nome,
     telefone: row.telefone,
     preview: truncarTexto(row.corpo, 80),
@@ -166,103 +183,65 @@ async function listConversas({ busca, apenasNaoLidas } = {}) {
   }
 
   const result = await request.query(`
-    SELECT
-      c.id AS contato_id,
-      c.nome AS contato_nome,
-      c.telefone AS contato_telefone,
-      MAX(m.criado_em) AS ultima_mensagem_em,
-      SUM(CASE WHEN m.remetente = 'cliente' AND m.lida = 0 THEN 1 ELSE 0 END) AS nao_lidas
-    FROM Mensagens m
-    JOIN Contatos c ON c.id = m.contato_id
-    WHERE 1 = 1
-    ${whereBusca}
-    GROUP BY c.id, c.nome, c.telefone
-    ${havingNaoLidas}
-    ORDER BY MAX(m.criado_em) DESC
+    ;WITH ThreadsBase AS (
+      SELECT
+        c.id AS contato_id,
+        c.nome AS contato_nome,
+        c.telefone AS contato_telefone,
+        m.numero_remetente_id,
+        n.apelido AS numero_remetente_apelido,
+        MAX(m.criado_em) AS ultima_mensagem_em,
+        SUM(CASE WHEN m.remetente = 'cliente' AND m.lida = 0 THEN 1 ELSE 0 END) AS nao_lidas
+      FROM Mensagens m
+      JOIN Contatos c ON c.id = m.contato_id
+      JOIN NumerosRemetentes n ON n.id = m.numero_remetente_id
+      WHERE 1 = 1
+      ${whereBusca}
+      GROUP BY c.id, c.nome, c.telefone, m.numero_remetente_id, n.apelido
+      ${havingNaoLidas}
+    )
+    SELECT tb.*, ultima.corpo AS ultima_corpo, ultima.remetente AS ultima_remetente
+    FROM ThreadsBase tb
+    CROSS APPLY (
+      SELECT TOP (1) corpo, remetente
+      FROM Mensagens m2
+      WHERE m2.contato_id = tb.contato_id AND m2.numero_remetente_id = tb.numero_remetente_id
+      ORDER BY m2.id DESC
+    ) ultima
+    ORDER BY tb.ultima_mensagem_em DESC
   `);
 
-  const conversas = result.recordset;
-  if (conversas.length === 0) {
-    return [];
-  }
-
-  const contatoIds = conversas.map((row) => row.contato_id);
-  const idsRequest = pool.request();
-  const placeholders = contatoIds.map((id, index) => {
-    const paramName = `id${index}`;
-    idsRequest.input(paramName, sql.Int, id);
-    return `@${paramName}`;
-  });
-
-  const ultimasResult = await idsRequest.query(`
-    SELECT m.contato_id, m.remetente, m.corpo, m.criado_em, m.numero_remetente_id, n.apelido
-    FROM Mensagens m
-    INNER JOIN (
-      SELECT contato_id, MAX(id) AS ultimo_id
-      FROM Mensagens
-      WHERE contato_id IN (${placeholders.join(', ')})
-      GROUP BY contato_id
-    ) ultimas ON ultimas.ultimo_id = m.id
-    JOIN NumerosRemetentes n ON n.id = m.numero_remetente_id
-  `);
-
-  const ultimaPorContato = new Map(ultimasResult.recordset.map((row) => [row.contato_id, row]));
-  const primeirasRequest = pool.request();
-  const placeholdersPrimeiras = contatoIds.map((id, index) => {
-    const paramName = `pid${index}`;
-    primeirasRequest.input(paramName, sql.Int, id);
-    return `@${paramName}`;
-  });
-
-  const primeirasResult = await primeirasRequest.query(`
-    SELECT m.contato_id, m.numero_remetente_id, n.apelido
-    FROM Mensagens m
-    INNER JOIN (
-      SELECT contato_id, MIN(id) AS primeiro_id
-      FROM Mensagens
-      WHERE contato_id IN (${placeholdersPrimeiras.join(', ')})
-      GROUP BY contato_id
-    ) primeiras ON primeiras.primeiro_id = m.id
-    JOIN NumerosRemetentes n ON n.id = m.numero_remetente_id
-  `);
-
-  const primeiraPorContato = new Map(primeirasResult.recordset.map((row) => [row.contato_id, row]));
-
-  return conversas.map((row) => {
-    const ultima = ultimaPorContato.get(row.contato_id);
-    const primeira = primeiraPorContato.get(row.contato_id);
-    return {
-      contato: { id: row.contato_id, nome: row.contato_nome, telefone: row.contato_telefone },
-      numeroRemetenteAtual: ultima ? { id: ultima.numero_remetente_id, apelido: ultima.apelido } : null,
-      numeroRemetenteInicial: primeira ? { id: primeira.numero_remetente_id, apelido: primeira.apelido } : null,
-      ultimaMensagem: ultima
-        ? { corpo: ultima.corpo, remetente: ultima.remetente, criado_em: ultima.criado_em }
-        : null,
-      naoLidas: row.nao_lidas || 0,
-    };
-  });
+  return result.recordset.map((row) => ({
+    contato: { id: row.contato_id, nome: row.contato_nome, telefone: row.contato_telefone },
+    numeroRemetenteAtual: { id: row.numero_remetente_id, apelido: row.numero_remetente_apelido },
+    numeroRemetenteInicial: { id: row.numero_remetente_id, apelido: row.numero_remetente_apelido },
+    ultimaMensagem: { corpo: row.ultima_corpo, remetente: row.ultima_remetente, criado_em: row.ultima_mensagem_em },
+    naoLidas: row.nao_lidas || 0,
+  }));
 }
 
-async function listMensagensEMarcarLidas(contatoId) {
+async function listMensagensEMarcarLidas(contatoId, numeroRemetenteId) {
   const pool = await getPool();
 
   const result = await pool
     .request()
     .input('contatoId', sql.Int, contatoId)
+    .input('numeroRemetenteId', sql.Int, numeroRemetenteId)
     .query(`
       SELECT id, remetente, corpo, criado_em
       FROM Mensagens
-      WHERE contato_id = @contatoId
+      WHERE contato_id = @contatoId AND numero_remetente_id = @numeroRemetenteId
       ORDER BY criado_em ASC
     `);
 
   await pool
     .request()
     .input('contatoId', sql.Int, contatoId)
+    .input('numeroRemetenteId', sql.Int, numeroRemetenteId)
     .query(`
       UPDATE Mensagens
       SET lida = 1
-      WHERE contato_id = @contatoId AND remetente = 'cliente' AND lida = 0
+      WHERE contato_id = @contatoId AND numero_remetente_id = @numeroRemetenteId AND remetente = 'cliente' AND lida = 0
     `);
 
   return result.recordset;
@@ -302,6 +281,7 @@ async function findPrimeiroNumeroRemetenteDaConversa(contatoId) {
 module.exports = {
   inserirMensagemRecebida,
   existeMensagemClienteAnterior,
+  existeMensagemNaThread,
   contarNotificacoesNaoVistas,
   listNotificacoesPendentes,
   inserirMensagemEnviada,

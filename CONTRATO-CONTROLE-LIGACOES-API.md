@@ -1552,11 +1552,26 @@ contatos daquele disparo com o status individual de envio de cada um
   que o processo reinicia — qualquer `type` diferente de `'notify'` é
   ignorado silenciosamente (comportamento esperado, não uma falha, não
   logado como erro).
-- **Mensagens com `key.fromMe === true` são ignoradas** — é o eco de uma
-  mensagem que o próprio número enviou (seja pelo worker de envio, seja
-  pela rota de resposta manual abaixo); essas já são gravadas
-  explicitamente por quem as enviou, gravar de novo a partir do listener
-  duplicaria a linha.
+- **Mensagens com `key.fromMe === true` NÃO são mais ignoradas** (mudança
+  posterior à v7 original). A hipótese inicial era que `fromMe===true`
+  seria sempre o eco de uma mensagem que o próprio número enviou (worker de
+  envio ou rota de resposta manual), o que duplicaria a linha se gravado de
+  novo — **confirmado por teste real que essa hipótese estava errada**: o
+  Baileys nunca emite `messages.upsert`/`type:'notify'` pro que o próprio
+  socket do backend acabou de enviar via `sock.sendMessage`; todo
+  `fromMe===true` que chega neste listener é sempre uma mensagem que o
+  atendente mandou manualmente pelo próprio celular (fora do fluxo
+  automático), e estava sumindo silenciosamente antes desta correção.
+  `handleMessagesUpsert` agora captura `const ehDoAtendente =
+  msg?.key?.fromMe === true` e deixa a mensagem seguir o fluxo normal
+  (resolver telefone, achar contato, desembrulhar envelope, extrair texto),
+  gravando com `remetente: ehDoAtendente ? 'atendente' : 'cliente'`. Quando
+  `ehDoAtendente`, `ePrimeiraRespostaCliente` é forçado `false` sem chamar
+  `existeMensagemClienteAnterior` (não faz sentido essa checagem pra
+  mensagem que não é do cliente) — ver "Sino de notificações" abaixo. O
+  valor `'atendente'` em `Mensagens.remetente` (coluna `VARCHAR(20)`, sem
+  `CHECK` de enum no schema) se soma a `'cliente'`/`'ia'`/`'colaboradora'`
+  já existentes.
 - **Dedup via índice único FILTRADO, não checagem prévia**: em vez de fazer
   um `SELECT` antes de cada `INSERT` para checar se aquele
   `baileys_message_id` já foi processado, a tabela tem
@@ -1580,24 +1595,28 @@ contatos daquele disparo com o status individual de envio de cada um
   unicidade, então mensagens nossas nunca colidem entre si nem com nada; a
   proteção original (não duplicar o mesmo evento `messages.upsert` recebido
   duas vezes) continua intacta.
-- **Mensagem de mídia (áudio, imagem, documento, etc.) vira um texto
-  placeholder fixo** (`'[Mensagem de mídia não suportada nesta versão]'`) —
-  o listener só extrai texto de `msg.message.conversation` ou
-  `msg.message.extendedTextMessage.text`; qualquer outro formato de
-  conteúdo, incluindo mídia, cai nesse placeholder. Tratamento de mídia de
-  verdade (download/armazenamento do arquivo) é trabalho futuro.
+- **Mensagem de mídia (áudio, imagem, documento, etc.) — ou qualquer tipo
+  não reconhecido depois de desembrulhar os envelopes conhecidos (ver passo
+  4 abaixo) — vira um texto placeholder fixo**
+  (`'[Mensagem de mídia não suportada nesta versão]'`); o listener só
+  extrai texto real de `conversation`/`extendedTextMessage.text` na
+  mensagem JÁ desembrulhada. Tratamento de mídia de verdade (download/
+  armazenamento do arquivo) é trabalho futuro.
 - **Telefone não encontrado em `Contatos` (ex.: mensagem de um grupo, ou de
   um número fora da base) é ignorado silenciosamente** (log informativo) —
   a Central de Mensagens só existe para contatos já importados; não cria
   `Contatos` novos a partir de mensagens recebidas.
-- **`POST /conversas/:contatoId/mensagens` responde sempre pelo mesmo
-  número remetente da última mensagem daquela conversa** (`numero_remetente_id`
-  da linha mais recente em `Mensagens`, independente de ser uma mensagem
-  recebida ou enviada por nós) — não existe seleção manual de número na
-  resposta, ao contrário do Painel de Disparo. Consequência: só é possível
-  responder um contato que já tem histórico (pelo menos 1 mensagem,
-  recebida ou enviada) — sem isso, não há como saber por qual número
-  remetente enviar (`400`, ver rota 3 abaixo).
+- **`POST /conversas/:contatoId/:numeroRemetenteId/mensagens` responde
+  sempre pelo `numeroRemetenteId` informado na própria rota** — mudança
+  posterior à v7 original; antes a rota (sem esse segmento) inferia o
+  número olhando a mensagem mais recente da conversa
+  (`findUltimoNumeroRemetenteDaConversa`, função que ficou sem uso, ainda
+  existe no model mas não é mais chamada por nenhuma rota), o que ficou sem
+  sentido depois que cada [contato, número] virou uma thread própria — não
+  existe seleção manual de número na resposta, ao contrário do Painel de
+  Disparo. Consequência: só é possível responder uma thread que já tem
+  histórico (`existeMensagemNaThread`, ver "Mudança de modelo: threads por
+  [contato, número]" abaixo) — sem isso, `400` (ver rota 3 abaixo).
 - **A mesma checagem `sock.onWhatsApp(telefone)` do worker de envio é
   reaplicada aqui** antes de `sock.sendMessage`, pelo mesmo motivo
   documentado na seção "Envio de Disparos (v6)": `sendMessage` pode
@@ -1614,9 +1633,9 @@ CREATE TABLE Mensagens (
     id                     INT IDENTITY(1,1) PRIMARY KEY,
     contato_id             INT NOT NULL FOREIGN KEY REFERENCES Contatos(id),
     numero_remetente_id    INT NOT NULL FOREIGN KEY REFERENCES NumerosRemetentes(id),
-    remetente              VARCHAR(20) NOT NULL,   -- 'cliente' | 'ia' | 'colaboradora'
+    remetente              VARCHAR(20) NOT NULL,   -- 'cliente' | 'ia' | 'colaboradora' | 'atendente'
     corpo                  NVARCHAR(MAX) NOT NULL,
-    baileys_message_id     VARCHAR(100) NULL,      -- só preenchido em mensagens recebidas ('cliente')
+    baileys_message_id     VARCHAR(100) NULL,      -- preenchido em mensagens que chegam via listener ('cliente' ou 'atendente')
     lida                   BIT NOT NULL DEFAULT 0,
     e_primeira_resposta_cliente BIT NOT NULL DEFAULT 0, -- ver "Sino de notificações" abaixo
     criado_em              DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -1668,7 +1687,11 @@ sock.ev.on('messages.upsert', (upsert) => {
 Para cada evento com `type === 'notify'`, e para cada `msg` em
 `upsert.messages`:
 
-1. Ignora se `msg.key.fromMe === true`.
+1. Captura `const ehDoAtendente = msg.key.fromMe === true` — **NÃO ignora
+   mais** essas mensagens (mudança posterior à v7 original, ver bloco
+   acima sobre o bug corrigido); a mensagem segue o fluxo normal dos
+   passos 2–6 abaixo, com `ehDoAtendente` usado nos passos 5 e 6 pra
+   decidir `remetente`/`ePrimeiraRespostaCliente`.
 2. Resolve o telefone real do remetente a partir de `msg.key`
    (`resolverTelefoneDoRemetente`, em `baileysSession.service.js`):
    - Se `msg.key.remoteJid` terminar em `@s.whatsapp.net` (ou `@g.us`/outro
@@ -1758,20 +1781,28 @@ Para cada evento com `type === 'notify'`, e para cada `msg` em
      (`console.log`) as chaves de nível superior desse objeto
      (`Object.keys(...)`) antes de cair no placeholder — facilita achar
      rapidamente o próximo tipo não coberto sem precisar investigar do zero.
-5. **Antes de inserir**, checa `mensagensModel.existeMensagemClienteAnterior
-   (contatoId)` — se o contato nunca teve nenhuma mensagem `remetente='cliente'`
-   até agora, esta é a primeira resposta dele (handoff IA→humano), e
-   `ePrimeiraRespostaCliente=true` é repassado para o insert (ver "Sino de
-   notificações" abaixo). Essa checagem precisa acontecer ANTES do `INSERT`
-   do passo 6, nunca depois — checar depois sempre encontraria a própria
-   linha recém-gravada.
+5. **Antes de inserir**, decide `ePrimeiraRespostaCliente`: se
+   `ehDoAtendente` (passo 1), é sempre `false` **sem** chamar
+   `existeMensagemClienteAnterior` (não faz sentido essa checagem pra
+   mensagem que não é do cliente); senão, checa
+   `mensagensModel.existeMensagemClienteAnterior(contatoId,
+   numeroRemetenteId)` (2 parâmetros desde a mudança pra threads separadas
+   por [contato, número] — ver "Mudança de modelo: threads por [contato,
+   número]" mais abaixo) — se a thread nunca teve nenhuma mensagem
+   `remetente='cliente'` até agora, esta é a primeira resposta dela
+   (handoff IA→humano), e `ePrimeiraRespostaCliente=true` é repassado para
+   o insert (ver "Sino de notificações" abaixo). Essa checagem precisa
+   acontecer ANTES do `INSERT` do passo 6, nunca depois — checar depois
+   sempre encontraria a própria linha recém-gravada.
 6. Insere em `Mensagens`: `contato_id`, `numero_remetente_id` = o número
-   **desta sessão** (que recebeu a mensagem), `remetente='cliente'`,
-   `corpo`, `baileys_message_id = msg.key.id`, `lida=0`,
-   `e_primeira_resposta_cliente` = o valor calculado no passo 5. Uma
-   violação do índice único filtrado (evento duplicado) é capturada e
-   ignorada em silêncio pelo model (ver "Contexto e decisões de design"
-   acima).
+   **desta sessão** (que recebeu a mensagem), `remetente: ehDoAtendente ?
+   'atendente' : 'cliente'`, `corpo`, `baileys_message_id = msg.key.id`,
+   `lida=0`, `e_primeira_resposta_cliente` = o valor calculado no passo 5.
+   `mensagens.model.js: inserirMensagemRecebida` recebe `remetente` como
+   parâmetro opcional (default `'cliente'`, pra não quebrar chamadores que
+   não passam esse campo). Uma violação do índice único filtrado (evento
+   duplicado) é capturada e ignorada em silêncio pelo model (ver "Contexto
+   e decisões de design" acima).
 
 Nenhum erro inesperado (falha de banco, etc.) derruba o processo — capturado
 e só logado, mesmo princípio do resto da integração Baileys deste projeto.
@@ -1801,10 +1832,14 @@ handoff IA→humano e ainda não foram vistos — diferente de "notificar a cada
 mensagem nova", que geraria ruído a cada troca de mensagem de uma conversa já
 em andamento.
 
-- `mensagens.model.js: existeMensagemClienteAnterior(contatoId)` — checagem
-  de existência simples (`SELECT TOP (1) 1 ... WHERE contato_id = @contatoId
-  AND remetente = 'cliente'`), chamada pelo listener antes de cada insert de
-  mensagem recebida (ver passo 5 acima).
+- `mensagens.model.js: existeMensagemClienteAnterior(contatoId,
+  numeroRemetenteId)` — checagem de existência simples (`SELECT TOP (1) 1
+  ... WHERE contato_id = @contatoId AND numero_remetente_id =
+  @numeroRemetenteId AND remetente = 'cliente'`; ganhou o segundo parâmetro
+  na mudança pra threads separadas por [contato, número] — antes filtrava
+  só por `contatoId`), chamada pelo listener antes de cada insert de
+  mensagem recebida, só quando a mensagem NÃO é do atendente (ver passo 5
+  acima).
 - `mensagens.model.js: contarNotificacoesNaoVistas()` —
   `SELECT COUNT(*) ... WHERE e_primeira_resposta_cliente = 1 AND lida = 0`,
   usada pela rota `GET /notificacoes` abaixo. "Vista" aqui é o mesmo conceito
@@ -1814,19 +1849,25 @@ em andamento.
   também (não há uma coluna/flag separada só para o sino).
 - `mensagens.model.js: listNotificacoesPendentes(limite = 10)` — mesmo
   filtro de `contarNotificacoesNaoVistas`, só que devolvendo linhas
-  (`contatoId`/`nomeContato`/`telefone`/`preview`/`criado_em`) em vez de
-  `COUNT(*)`, `ORDER BY criado_em DESC`, `TOP (@limite)` parametrizado.
-  Usada pela rota `GET /notificacoes` abaixo para alimentar o dropdown do
-  sino no frontend com nome/preview/horário de cada notificação pendente.
-  Sem paginação nesta fase — `limite` é fixo em 10 (as 10 notificações mais
-  recentes), não configurável por query string. `preview` é o `corpo` da
-  mensagem truncado para no máximo 80 caracteres, com "…" acrescentado no
-  final quando de fato corta (corpo com 80 caracteres ou menos vem
-  inalterado, sem reticências) — truncagem feita em `truncarTexto`, dentro
-  do próprio `mensagens.model.js`. `criado_em` é devolvido em snake_case
-  (não convertido para `criadoEm`), mesmo padrão já usado por
-  `GET /conversas/:contatoId/mensagens` (`listMensagensEMarcarLidas`) para
-  timestamp de mensagem nesta área da API — não é inconsistência.
+  (`contatoId`/`numeroRemetenteId`/`nomeContato`/`telefone`/`preview`/
+  `criado_em`) em vez de `COUNT(*)`, `ORDER BY criado_em DESC`, `TOP
+  (@limite)` parametrizado. `numeroRemetenteId` (campo novo, mudança
+  posterior à v7 original — vem de `m.numero_remetente_id` no SELECT) é
+  necessário pro clique numa notificação no frontend conseguir pré-
+  selecionar a thread certa (`contatoId`+`numeroRemetenteId`) sem depender
+  da lista de `GET /conversas` já estar carregada. Usada pela rota
+  `GET /notificacoes` abaixo para alimentar o dropdown do sino no frontend
+  com nome/preview/horário de cada notificação pendente. Sem paginação
+  nesta fase — `limite` é fixo em 10 (as 10 notificações mais recentes),
+  não configurável por query string. `preview` é o `corpo` da mensagem
+  truncado para no máximo 80 caracteres, com "…" acrescentado no final
+  quando de fato corta (corpo com 80 caracteres ou menos vem inalterado,
+  sem reticências) — truncagem feita em `truncarTexto`, dentro do próprio
+  `mensagens.model.js`. `criado_em` é devolvido em snake_case (não
+  convertido para `criadoEm`), mesmo padrão já usado por
+  `GET /conversas/:contatoId/:numeroRemetenteId/mensagens`
+  (`listMensagensEMarcarLidas`) para timestamp de mensagem nesta área da
+  API — não é inconsistência.
 - O payload do evento `'mensagem-recebida'` emitido em
   `mensagensEvents.service.js` (consumido por `GET /conversas/stream`, ver
   seção 4 abaixo) ganhou o campo `primeiraResposta` (boolean) — reflete se
@@ -1849,7 +1890,17 @@ como falha, e **não** dispara reenvio nem reprocessamento.
 
 ### 1. `GET /api/controle-ligacoes/conversas`
 
-Lista os contatos que já têm pelo menos 1 mensagem trocada, ordenados pela
+> **MUDANÇA DE MODELO (posterior à v7 original): esta rota agora lista
+> THREADS `(contato, número remetente)`, não mais "1 linha por contato".**
+> `mensagens.model.js: listConversas` foi reescrita — a query virou uma CTE
+> agrupando por `(c.id, m.numero_remetente_id, n.apelido, ...)` com um
+> `CROSS APPLY` pra pegar a última mensagem de cada thread, em vez do
+> antigo `GROUP BY` só por `contato_id` + duas queries em lote separadas
+> (`MAX(id)`/`MIN(id)`) pra achar "número atual" vs "número inicial". Um
+> contato com histórico em mais de um número aparece em **múltiplas
+> linhas** nesta lista agora, uma por thread — antes aparecia numa linha só.
+
+Lista as threads que já têm pelo menos 1 mensagem trocada, ordenadas pela
 mensagem mais recente (DESC). Protegida por `authMiddleware` +
 `operadorCobrancaMiddleware`.
 
@@ -1865,78 +1916,83 @@ mensagem mais recente (DESC). Protegida por `authMiddleware` +
   {
     "contato": { "id": 42, "nome": "Maria Silva", "telefone": "5598900000000" },
     "numeroRemetenteAtual": { "id": 3, "apelido": "CDC Cohatrac" },
-    "numeroRemetenteInicial": { "id": 7, "apelido": "CDC Imperatriz" },
+    "numeroRemetenteInicial": { "id": 3, "apelido": "CDC Cohatrac" },
     "ultimaMensagem": { "corpo": "Oi, tudo bem?", "remetente": "cliente", "criado_em": "2026-08-25T12:00:00.000Z" },
     "naoLidas": 2
   }
 ]
 ```
-`numeroRemetenteInicial` (campo novo — **aditivo**, não é uma mudança
-breaking) é o número remetente da mensagem de **MENOR** `id`/`criado_em`
-daquele contato, ou seja, o número que **iniciou** a conversa —
-`numeroRemetenteAtual` continua sendo o da mensagem mais recente, sem
-nenhuma mudança de cálculo. Como um contato nunca fica travado a um número
-remetente específico (ver "Contexto e decisões de design" acima), os dois
-campos podem apontar para números diferentes ao longo do tempo. Ambos vêm
-`null` só na teoria (todo item desta lista já tem, por definição, ao menos 1
-mensagem — não há caso real de `numeroRemetenteInicial: null` aqui).
+`numeroRemetenteAtual` e `numeroRemetenteInicial` **são sempre o mesmo
+valor agora** — como cada item já é uma thread escopada a um único número,
+não existe mais "número que iniciou" vs "número mais recente" divergindo
+(diferente do modelo antigo, onde um contato podia ser respondido por
+números diferentes ao longo do tempo dentro da MESMA linha da lista). O
+campo duplicado foi mantido de propósito, não removido, só pra não quebrar
+o frontend — que já lia os dois campos separadamente (ex.: o chip `via
+{apelido}` na lista usa `numeroRemetenteInicial`). Ambos vêm `null` só na
+teoria (todo item desta lista já tem, por definição, ao menos 1 mensagem —
+não há caso real de `null` aqui).
 
 #### Erros
 - `500`: `{ "error": "Erro interno ao listar conversas." }`
 
-### 2. `GET /api/controle-ligacoes/conversas/:contatoId/mensagens`
+### 2. `GET /api/controle-ligacoes/conversas/:contatoId/:numeroRemetenteId/mensagens`
 
-Histórico completo de mensagens de um contato, ordenado por `criado_em ASC`.
-**Efeito colateral esperado**: ao ser chamada, marca como lida (`lida=1`)
-toda mensagem `remetente='cliente' AND lida=0` daquele contato — "abrir a
-conversa = marcar como lida", como qualquer inbox. Protegida por
-`authMiddleware` + `operadorCobrancaMiddleware`.
+> **MUDANÇA DE ROTA (adendo posterior).** O path ganhou o segmento
+> `:numeroRemetenteId` — era `GET /conversas/:contatoId/mensagens`. Motivo:
+> cada combinação (contato, número remetente) passou a ser tratada como uma
+> thread separada (ver `mensagens.model.js: listConversas`/
+> `listMensagensEMarcarLidas`/`existeMensagemNaThread`), então o histórico
+> de mensagens também precisa ser escopado por thread, não só por contato.
+
+Histórico completo de mensagens de uma thread (contato + número remetente),
+ordenado por `criado_em ASC`. **Efeito colateral esperado**: ao ser chamada,
+marca como lida (`lida=1`) toda mensagem `remetente='cliente' AND lida=0`
+daquele contato **e daquele número remetente** — "abrir a conversa = marcar
+como lida", como qualquer inbox. Protegida por `authMiddleware` +
+`operadorCobrancaMiddleware`.
 
 #### Parâmetros
 | Nome | Tipo | Obrigatório | Validação |
 |---|---|---|---|
 | `:contatoId` | path, number | sim | inteiro positivo; `400` se não for |
+| `:numeroRemetenteId` | path, number | sim | inteiro positivo; `400` se não for |
 
 #### Resposta de sucesso — `200 OK`
 
-> **MUDANÇA DE FORMATO (breaking, não aditiva).** Antes desta revisão, esta
-> rota devolvia um **array puro** de mensagens (`[{...}, {...}]`). A partir
-> de agora devolve um **objeto** `{ mensagens, numeroRemetenteInicial }` —
-> qualquer consumidor que fizesse `response.map(...)`/`response.length`
-> diretamente sobre o corpo da resposta precisa ser atualizado para ler
-> `response.mensagens` em vez disso. `numeroRemetenteAtual` **não** entra
-> nesta resposta de propósito — o frontend já tem esse dado disponível na
-> lista de conversas carregada previamente por `GET /conversas` (ver seção
-> 1 acima), não há necessidade de duplicá-lo aqui.
+> **MUDANÇA DE FORMATO (breaking, não aditiva).** O campo
+> `numeroRemetenteInicial` saiu desta resposta — como a thread já é
+> escopada por `(contatoId, numeroRemetenteId)`, o número é sempre o mesmo
+> do início ao fim; o cabeçalho da conversa no frontend usa
+> `numeroRemetenteAtual`, já disponível na lista de `GET /conversas` (ver
+> seção 1 acima), sem precisar duplicar essa informação aqui.
 
 ```json
 {
   "mensagens": [
     { "id": 1, "remetente": "cliente", "corpo": "Oi, tudo bem?", "criado_em": "2026-08-25T12:00:00.000Z" },
     { "id": 2, "remetente": "ia", "corpo": "Olá! ...", "criado_em": "2026-08-25T12:01:00.000Z" }
-  ],
-  "numeroRemetenteInicial": { "id": 3, "apelido": "Teste Junior" }
+  ]
 }
 ```
-`numeroRemetenteInicial` é o número remetente da mensagem MAIS ANTIGA
-daquele contato (a que iniciou a conversa) — `{ id, apelido }`, ou `null` se
-o contato existe mas nunca teve nenhuma mensagem (caso teórico, coberto por
-robustez; na prática essa rota só é chamada a partir de uma conversa que já
-tem histórico). Um contato que existe mas nunca teve mensagem devolve `200`
-com `{ "mensagens": [], "numeroRemetenteInicial": null }` — **não** `404`
-(só `:contatoId` inexistente em `Contatos` vira `404`, ver abaixo).
+Uma thread que existe (contato válido) mas nunca teve nenhuma mensagem
+nessa combinação específica devolve `200` com `{ "mensagens": [] }` —
+**não** `404` (só `:contatoId` inexistente em `Contatos` vira `404`, ver
+abaixo; `existeMensagemNaThread` decide isso na rota de resposta, seção 3).
 
 #### Erros
-- `400`: `{ "error": "Parâmetro \"contatoId\" deve ser um número inteiro positivo." }`
+- `400`: `{ "error": "Parâmetros \"contatoId\" e \"numeroRemetenteId\" devem ser números inteiros positivos." }`
 - `404`: `{ "error": "Contato não encontrado." }`
 - `500`: `{ "error": "Erro interno ao listar mensagens do contato." }`
 
-### 3. `POST /api/controle-ligacoes/conversas/:contatoId/mensagens`
+### 3. `POST /api/controle-ligacoes/conversas/:contatoId/:numeroRemetenteId/mensagens`
+
+> Mesma mudança de rota da seção 2 — ganhou `:numeroRemetenteId` no path.
 
 Envia uma resposta manual (`remetente='colaboradora'`) para o contato, pelo
-mesmo número remetente da última mensagem daquela conversa (ver "Contexto e
-decisões de design" acima — não há seleção manual de número aqui).
-Protegida por `authMiddleware` + `operadorCobrancaMiddleware`.
+número remetente informado na própria rota (a thread selecionada) — não
+mais "o último número que respondeu", já que agora a thread já deixa isso
+explícito. Protegida por `authMiddleware` + `operadorCobrancaMiddleware`.
 
 #### Corpo da requisição
 ```json
@@ -1944,11 +2000,11 @@ Protegida por `authMiddleware` + `operadorCobrancaMiddleware`.
 ```
 
 #### Validações (nesta ordem)
-1. `:contatoId` inteiro positivo (`400` se não for).
+1. `:contatoId` e `:numeroRemetenteId` inteiros positivos (`400` combinado se qualquer um não for).
 2. `corpo` presente e não-vazio após `trim()` (`400` se ausente/vazio/só espaços).
 3. `:contatoId` existe em `Contatos` (`404` se não existir).
-4. O contato tem pelo menos 1 mensagem em `Mensagens` (`400` se nunca teve —
-   não há como saber por qual número responder).
+4. A thread `(contatoId, numeroRemetenteId)` tem pelo menos 1 mensagem em
+   `Mensagens` (`400` se nunca teve — `existeMensagemNaThread`).
 5. A sessão Baileys do número resolvido está `'conectado'` em memória
    (`409` se não estiver).
 6. `sock.onWhatsApp(telefone do contato)` confirma uma conta ativa (`500`
@@ -1969,7 +2025,7 @@ Protegida por `authMiddleware` + `operadorCobrancaMiddleware`.
 
 #### Erros
 - `400`: `{ "error": "Campo \"corpo\" é obrigatório." }`
-- `400`: `{ "error": "Parâmetro \"contatoId\" deve ser um número inteiro positivo." }`
+- `400`: `{ "error": "Parâmetros \"contatoId\" e \"numeroRemetenteId\" devem ser números inteiros positivos." }`
 - `400`: `{ "error": "Não é possível responder um contato sem histórico de conversa." }`
 - `404`: `{ "error": "Contato não encontrado." }`
 - `409`: `{ "error": "Número não está conectado." }`
@@ -2064,6 +2120,7 @@ Nenhum.
   "itens": [
     {
       "contatoId": 603,
+      "numeroRemetenteId": 7,
       "nomeContato": "Natanael Soares Lima Junior",
       "telefone": "5585982336124",
       "preview": "ola",
@@ -2089,12 +2146,18 @@ alterar esse limite nesta versão, "limite razoável" para o dropdown do
 sino). `naoVistas` pode ser **maior** que `itens.length` quando houver mais
 de 10 pendentes ao mesmo tempo — isso é esperado, o dropdown do sino mostra
 só as mais recentes, `naoVistas` continua sendo a contagem exata para o
-badge numérico. Cada item: `contatoId` (int), `nomeContato`/`telefone` do
-contato, `preview` (o `corpo` da própria mensagem que gerou a notificação,
-truncado no backend para no máximo **80 caracteres**, com "…" acrescentado
-no final quando de fato corta — corpo com 80 caracteres ou menos vem
-inalterado, sem reticências) e `criado_em` (timestamp da mensagem, em
-snake_case — mesmo padrão de `GET /conversas/:contatoId/mensagens`, não é
+badge numérico. Cada item: `contatoId` (int), `numeroRemetenteId` (int —
+campo novo, adicionado junto com a mudança de rota da seção 2/3 para
+`.../:contatoId/:numeroRemetenteId/mensagens`; é o `numero_remetente_id` da
+própria mensagem que gerou a notificação, necessário para o frontend poder
+navegar direto para a thread certa a partir do dropdown do sino, sem
+depender da lista de `GET /conversas` já estar carregada), `nomeContato`/
+`telefone` do contato, `preview` (o `corpo` da própria mensagem que gerou a
+notificação, truncado no backend para no máximo **80 caracteres**, com "…"
+acrescentado no final quando de fato corta — corpo com 80 caracteres ou
+menos vem inalterado, sem reticências) e `criado_em` (timestamp da
+mensagem, em snake_case — mesmo padrão de
+`GET /conversas/:contatoId/:numeroRemetenteId/mensagens`, não é
 inconsistência com o resto da API em camelCase).
 
 #### Erros

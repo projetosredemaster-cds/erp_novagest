@@ -81,84 +81,83 @@ describe('conversas.service.listarNotificacoesPendentes', () => {
 });
 
 describe('conversas.service.listarMensagens', () => {
+  const NUMERO_REMETENTE_ID = 7;
+
   it('retorna null quando o contato não existe (controller decide o 404)', async () => {
     mensagensModel.existeContato.mockResolvedValue(false);
 
-    const resultado = await conversasService.listarMensagens(999);
+    const resultado = await conversasService.listarMensagens(999, NUMERO_REMETENTE_ID);
 
     expect(resultado).toBeNull();
     expect(mensagensModel.listMensagensEMarcarLidas).not.toHaveBeenCalled();
-    expect(mensagensModel.findPrimeiroNumeroRemetenteDaConversa).not.toHaveBeenCalled();
   });
 
-  it('busca mensagens + numeroRemetenteInicial quando o contato existe', async () => {
+  it('busca mensagens da thread (contatoId, numeroRemetenteId) quando o contato existe', async () => {
     mensagensModel.existeContato.mockResolvedValue(true);
     mensagensModel.listMensagensEMarcarLidas.mockResolvedValue([{ id: 1, remetente: 'cliente', corpo: 'oi' }]);
-    mensagensModel.findPrimeiroNumeroRemetenteDaConversa.mockResolvedValue({ id: 3, apelido: 'Teste Junior' });
 
-    const resultado = await conversasService.listarMensagens(42);
+    const resultado = await conversasService.listarMensagens(42, NUMERO_REMETENTE_ID);
 
     expect(resultado).toEqual({
       mensagens: [{ id: 1, remetente: 'cliente', corpo: 'oi' }],
-      numeroRemetenteInicial: { id: 3, apelido: 'Teste Junior' },
     });
-    expect(mensagensModel.listMensagensEMarcarLidas).toHaveBeenCalledWith(42);
-    expect(mensagensModel.findPrimeiroNumeroRemetenteDaConversa).toHaveBeenCalledWith(42);
+    expect(mensagensModel.listMensagensEMarcarLidas).toHaveBeenCalledWith(42, NUMERO_REMETENTE_ID);
   });
 
-  it('numeroRemetenteInicial vem null quando o contato existe mas nunca teve mensagem', async () => {
+  it('mensagens vem vazio quando a thread existe mas ainda não tem histórico', async () => {
     mensagensModel.existeContato.mockResolvedValue(true);
     mensagensModel.listMensagensEMarcarLidas.mockResolvedValue([]);
-    mensagensModel.findPrimeiroNumeroRemetenteDaConversa.mockResolvedValue(null);
 
-    const resultado = await conversasService.listarMensagens(42);
+    const resultado = await conversasService.listarMensagens(42, NUMERO_REMETENTE_ID);
 
-    expect(resultado).toEqual({ mensagens: [], numeroRemetenteInicial: null });
+    expect(resultado).toEqual({ mensagens: [] });
   });
 });
 
 describe('conversas.service.responder', () => {
   const CONTATO_ID = 42;
+  const NUMERO_REMETENTE_ID = 3;
 
   it('status=contato_nao_encontrado quando o contato não existe', async () => {
     mensagensModel.existeContato.mockResolvedValue(false);
 
-    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+    const resultado = await conversasService.responder(CONTATO_ID, NUMERO_REMETENTE_ID, 'oi');
 
     expect(resultado).toEqual({ status: 'contato_nao_encontrado' });
-    expect(mensagensModel.findUltimoNumeroRemetenteDaConversa).not.toHaveBeenCalled();
+    expect(mensagensModel.existeMensagemNaThread).not.toHaveBeenCalled();
   });
 
-  it('status=sem_historico quando o contato nunca teve nenhuma mensagem', async () => {
+  it('status=sem_historico quando existeMensagemNaThread retorna false', async () => {
     mensagensModel.existeContato.mockResolvedValue(true);
-    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(null);
+    mensagensModel.existeMensagemNaThread.mockResolvedValue(false);
 
-    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+    const resultado = await conversasService.responder(CONTATO_ID, NUMERO_REMETENTE_ID, 'oi');
 
     expect(resultado).toEqual({ status: 'sem_historico' });
+    expect(mensagensModel.existeMensagemNaThread).toHaveBeenCalledWith(CONTATO_ID, NUMERO_REMETENTE_ID);
     expect(baileysSessionService.obterSocketConectado).not.toHaveBeenCalled();
   });
 
   it('status=numero_desconectado quando a sessão Baileys não está conectada', async () => {
     mensagensModel.existeContato.mockResolvedValue(true);
-    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(3);
+    mensagensModel.existeMensagemNaThread.mockResolvedValue(true);
     baileysSessionService.obterSocketConectado.mockReturnValue(null);
 
-    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+    const resultado = await conversasService.responder(CONTATO_ID, NUMERO_REMETENTE_ID, 'oi');
 
     expect(resultado).toEqual({ status: 'numero_desconectado' });
   });
 
   it('status=sem_whatsapp quando sock.onWhatsApp não confirma o número', async () => {
     mensagensModel.existeContato.mockResolvedValue(true);
-    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(3);
+    mensagensModel.existeMensagemNaThread.mockResolvedValue(true);
     mensagensModel.findTelefoneContato.mockResolvedValue('5598900000000');
 
     const sendMessage = vi.fn();
     const onWhatsApp = vi.fn().mockResolvedValue([]);
     baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
 
-    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+    const resultado = await conversasService.responder(CONTATO_ID, NUMERO_REMETENTE_ID, 'oi');
 
     expect(resultado).toEqual({
       status: 'sem_whatsapp',
@@ -169,14 +168,14 @@ describe('conversas.service.responder', () => {
 
   it('status=sem_whatsapp quando sock.onWhatsApp lança erro', async () => {
     mensagensModel.existeContato.mockResolvedValue(true);
-    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(3);
+    mensagensModel.existeMensagemNaThread.mockResolvedValue(true);
     mensagensModel.findTelefoneContato.mockResolvedValue('5598900000000');
 
     const sendMessage = vi.fn();
     const onWhatsApp = vi.fn().mockRejectedValue(new Error('conexão instável'));
     baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
 
-    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+    const resultado = await conversasService.responder(CONTATO_ID, NUMERO_REMETENTE_ID, 'oi');
 
     expect(resultado).toEqual({ status: 'sem_whatsapp', erro: 'conexão instável' });
     expect(sendMessage).not.toHaveBeenCalled();
@@ -184,14 +183,14 @@ describe('conversas.service.responder', () => {
 
   it('status=falha_envio quando sock.sendMessage lança erro', async () => {
     mensagensModel.existeContato.mockResolvedValue(true);
-    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(3);
+    mensagensModel.existeMensagemNaThread.mockResolvedValue(true);
     mensagensModel.findTelefoneContato.mockResolvedValue('5598900000000');
 
     const sendMessage = vi.fn().mockRejectedValue(new Error('timeout de rede'));
     const onWhatsApp = vi.fn().mockResolvedValue([{ jid: '5598900000000@s.whatsapp.net', exists: true }]);
     baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
 
-    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+    const resultado = await conversasService.responder(CONTATO_ID, NUMERO_REMETENTE_ID, 'oi');
 
     expect(resultado).toEqual({ status: 'falha_envio', erro: 'timeout de rede' });
     expect(mensagensModel.inserirMensagemEnviada).not.toHaveBeenCalled();
@@ -199,7 +198,7 @@ describe('conversas.service.responder', () => {
 
   it('status=enviada e grava em Mensagens (remetente=colaboradora) usando o jid confirmado', async () => {
     mensagensModel.existeContato.mockResolvedValue(true);
-    mensagensModel.findUltimoNumeroRemetenteDaConversa.mockResolvedValue(3);
+    mensagensModel.existeMensagemNaThread.mockResolvedValue(true);
     mensagensModel.findTelefoneContato.mockResolvedValue('5598900000000');
     mensagensModel.inserirMensagemEnviada.mockResolvedValue({
       id: 10,
@@ -212,12 +211,12 @@ describe('conversas.service.responder', () => {
     const onWhatsApp = vi.fn().mockResolvedValue([{ jid: '5598900000000@s.whatsapp.net', exists: true }]);
     baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
 
-    const resultado = await conversasService.responder(CONTATO_ID, 'oi');
+    const resultado = await conversasService.responder(CONTATO_ID, NUMERO_REMETENTE_ID, 'oi');
 
     expect(sendMessage).toHaveBeenCalledWith('5598900000000@s.whatsapp.net', { text: 'oi' });
     expect(mensagensModel.inserirMensagemEnviada).toHaveBeenCalledWith({
       contatoId: CONTATO_ID,
-      numeroRemetenteId: 3,
+      numeroRemetenteId: NUMERO_REMETENTE_ID,
       remetente: 'colaboradora',
       corpo: 'oi',
     });

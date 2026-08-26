@@ -44,8 +44,8 @@ router.get('/disparos/:id', disparosController.detalhe);
 
 router.get('/conversas', conversasController.listar);
 router.get('/conversas/stream', conversasController.stream);
-router.get('/conversas/:contatoId/mensagens', conversasController.mensagens);
-router.post('/conversas/:contatoId/mensagens', conversasController.responder);
+router.get('/conversas/:contatoId/:numeroRemetenteId/mensagens', conversasController.mensagens);
+router.post('/conversas/:contatoId/:numeroRemetenteId/mensagens', conversasController.responder);
 router.get('/notificacoes', conversasController.notificacoes);
 
 module.exports = router;

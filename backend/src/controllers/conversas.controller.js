@@ -39,14 +39,15 @@ async function notificacoes(req, res) {
 
 async function mensagens(req, res) {
   const contatoIdNum = Number(req.params.contatoId);
-  if (!isPositiveInteger(contatoIdNum)) {
+  const numeroRemetenteIdNum = Number(req.params.numeroRemetenteId);
+  if (!isPositiveInteger(contatoIdNum) || !isPositiveInteger(numeroRemetenteIdNum)) {
     return res
       .status(400)
-      .json({ error: 'Parâmetro "contatoId" deve ser um número inteiro positivo.' });
+      .json({ error: 'Parâmetros "contatoId" e "numeroRemetenteId" devem ser números inteiros positivos.' });
   }
 
   try {
-    const resultado = await conversasService.listarMensagens(contatoIdNum);
+    const resultado = await conversasService.listarMensagens(contatoIdNum, numeroRemetenteIdNum);
 
     if (resultado === null) {
       return res.status(404).json({ error: 'Contato não encontrado.' });
@@ -61,10 +62,11 @@ async function mensagens(req, res) {
 
 async function responder(req, res) {
   const contatoIdNum = Number(req.params.contatoId);
-  if (!isPositiveInteger(contatoIdNum)) {
+  const numeroRemetenteIdNum = Number(req.params.numeroRemetenteId);
+  if (!isPositiveInteger(contatoIdNum) || !isPositiveInteger(numeroRemetenteIdNum)) {
     return res
       .status(400)
-      .json({ error: 'Parâmetro "contatoId" deve ser um número inteiro positivo.' });
+      .json({ error: 'Parâmetros "contatoId" e "numeroRemetenteId" devem ser números inteiros positivos.' });
   }
 
   const corpo = typeof req.body?.corpo === 'string' ? req.body.corpo.trim() : '';
@@ -73,7 +75,7 @@ async function responder(req, res) {
   }
 
   try {
-    const resultado = await conversasService.responder(contatoIdNum, corpo);
+    const resultado = await conversasService.responder(contatoIdNum, numeroRemetenteIdNum, corpo);
 
     switch (resultado.status) {
       case 'contato_nao_encontrado':

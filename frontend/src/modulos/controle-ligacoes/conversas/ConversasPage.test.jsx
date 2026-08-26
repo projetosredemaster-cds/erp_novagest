@@ -42,11 +42,8 @@ function conversa({
   };
 }
 
-function mensagensResposta({
-  mensagens = [],
-  numeroRemetenteInicial = { id: 3, apelido: 'Teste Junior' },
-} = {}) {
-  return { mensagens, numeroRemetenteInicial };
+function mensagensResposta({ mensagens = [] } = {}) {
+  return { mensagens };
 }
 
 async function renderPage() {
@@ -121,12 +118,49 @@ describe('ConversasPage — painel de chat', () => {
 
     fireEvent.click(screen.getByText('Maria Silva'));
 
-    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 42));
+    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 42, 3));
     expect(await screen.findByText('Olá! Como posso ajudar?')).toBeInTheDocument();
     expect(screen.getAllByText('Oi, tudo bem?').length).toBeGreaterThan(0);
 
     // badge de não lidas some do item da lista após abrir a conversa
     await waitFor(() => expect(screen.queryByText('2')).not.toBeInTheDocument());
+  });
+
+  it('trocar entre duas conversas do mesmo contato (números remetentes diferentes) sempre recarrega as mensagens e move o destaque visual', async () => {
+    const conversaBruno = conversa({
+      numeroRemetenteAtual: { id: 3, apelido: 'Bruno' },
+      numeroRemetenteInicial: { id: 3, apelido: 'Bruno' },
+    });
+    const conversaLivia = conversa({
+      numeroRemetenteAtual: { id: 9, apelido: 'Livia' },
+      numeroRemetenteInicial: { id: 9, apelido: 'Livia' },
+    });
+    api.fetchConversas.mockResolvedValue([conversaBruno, conversaLivia]);
+    api.fetchMensagens
+      .mockResolvedValueOnce(mensagensResposta({
+        mensagens: [{ id: 1, remetente: 'cliente', corpo: 'Mensagem via Bruno', criado_em: '2026-08-25T12:00:00.000Z' }],
+      }))
+      .mockResolvedValueOnce(mensagensResposta({
+        mensagens: [{ id: 2, remetente: 'cliente', corpo: 'Mensagem via Livia', criado_em: '2026-08-25T12:01:00.000Z' }],
+      }));
+
+    await renderPage();
+
+    const botaoBruno = screen.getByText('via Bruno').closest('button');
+    const botaoLivia = screen.getByText('via Livia').closest('button');
+
+    fireEvent.click(botaoBruno);
+    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 42, 3));
+    expect(await screen.findByText('Mensagem via Bruno')).toBeInTheDocument();
+    expect(botaoBruno).toHaveAttribute('aria-pressed', 'true');
+    expect(botaoLivia).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(botaoLivia);
+    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 42, 9));
+    expect(await screen.findByText('Mensagem via Livia')).toBeInTheDocument();
+    expect(botaoBruno).toHaveAttribute('aria-pressed', 'false');
+    expect(botaoLivia).toHaveAttribute('aria-pressed', 'true');
+    expect(api.fetchMensagens).toHaveBeenCalledTimes(2);
   });
 
   it('envio de mensagem com sucesso aparece no chat e limpa o campo', async () => {
@@ -148,7 +182,7 @@ describe('ConversasPage — painel de chat', () => {
     fireEvent.change(textarea, { target: { value: 'Oi Maria, tudo ótimo!' } });
     fireEvent.click(screen.getByRole('button', { name: 'Enviar' }));
 
-    await waitFor(() => expect(api.enviarMensagem).toHaveBeenCalledWith('token-teste', 42, 'Oi Maria, tudo ótimo!'));
+    await waitFor(() => expect(api.enviarMensagem).toHaveBeenCalledWith('token-teste', 42, 3, 'Oi Maria, tudo ótimo!'));
     expect(await screen.findByText('Oi Maria, tudo ótimo!')).toBeInTheDocument();
     expect(textarea).toHaveValue('');
   });
@@ -226,7 +260,7 @@ describe('ConversasPage — tempo real (SSE)', () => {
     onEvent('nova-mensagem', { contatoId: 42, numeroRemetenteId: 3 });
 
     await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledTimes(2));
-    expect(api.fetchMensagens).toHaveBeenLastCalledWith('token-teste', 42);
+    expect(api.fetchMensagens).toHaveBeenLastCalledWith('token-teste', 42, 3);
   });
 
   it('evento "nova-mensagem" com contatoId diferente do selecionado NÃO rebusca as mensagens', async () => {
@@ -251,6 +285,28 @@ describe('ConversasPage — tempo real (SSE)', () => {
     expect(api.fetchMensagens).toHaveBeenCalledTimes(1);
   });
 
+  it('evento "nova-mensagem" com mesmo contatoId mas numeroRemetenteId diferente (outra thread do mesmo contato) NÃO rebusca as mensagens', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValue(mensagensResposta({
+      mensagens: [
+        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+      ],
+    }));
+    let onEvent;
+    api.abrirStreamConversas.mockImplementation((token, opts) => {
+      onEvent = opts.onEvent;
+      return new Promise(() => {});
+    });
+
+    await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledTimes(1));
+
+    onEvent('nova-mensagem', { contatoId: 42, numeroRemetenteId: 999 });
+    await waitFor(() => expect(api.fetchConversas).toHaveBeenCalledTimes(2));
+    expect(api.fetchMensagens).toHaveBeenCalledTimes(1);
+  });
+
 });
 
 describe('ConversasPage — sino de notificações (Outlet context)', () => {
@@ -267,7 +323,7 @@ describe('ConversasPage — sino de notificações (Outlet context)', () => {
     await renderPage();
     fireEvent.click(screen.getByText('Maria Silva'));
 
-    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 42));
+    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 42, 3));
     await waitFor(() => expect(refetchNotificacoes).toHaveBeenCalledTimes(1));
   });
 
@@ -283,7 +339,7 @@ describe('ConversasPage — sino de notificações (Outlet context)', () => {
     await renderPage();
     fireEvent.click(screen.getByText('Maria Silva'));
 
-    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 42));
+    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 42, 3));
     expect((await screen.findAllByText('Oi, tudo bem?')).length).toBeGreaterThan(0);
   });
 
@@ -299,7 +355,7 @@ describe('ConversasPage — sino de notificações (Outlet context)', () => {
     await renderPage();
     fireEvent.click(screen.getByText('Maria Silva'));
 
-    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 42));
+    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 42, 3));
     expect((await screen.findAllByText('Oi, tudo bem?')).length).toBeGreaterThan(0);
   });
 });
@@ -344,19 +400,15 @@ describe('ConversasPage — lista de conversas: número remetente inicial', () =
   });
 });
 
-describe('ConversasPage — origem do atendimento (número inicial x número atual)', () => {
-  it('mesmo número inicial e atual: mostra uma única menção "Atendido por"', async () => {
+describe('ConversasPage — origem do atendimento (thread com um único número, do início ao fim)', () => {
+  it('mostra "Atendido por: {apelido}" usando o numeroRemetenteAtual da thread selecionada', async () => {
     api.fetchConversas.mockResolvedValue([
-      conversa({
-        numeroRemetenteAtual: { id: 3, apelido: 'Teste Junior' },
-        numeroRemetenteInicial: { id: 3, apelido: 'Teste Junior' },
-      }),
+      conversa({ numeroRemetenteAtual: { id: 3, apelido: 'Teste Junior' } }),
     ]);
     api.fetchMensagens.mockResolvedValue(mensagensResposta({
       mensagens: [
         { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
       ],
-      numeroRemetenteInicial: { id: 3, apelido: 'Teste Junior' },
     }));
 
     await renderPage();
@@ -366,44 +418,22 @@ describe('ConversasPage — origem do atendimento (número inicial x número atu
     expect(screen.queryByText(/Iniciado por/)).not.toBeInTheDocument();
   });
 
-  it('números diferentes: mostra claramente quem iniciou e quem está respondendo agora', async () => {
-    api.fetchConversas.mockResolvedValue([
-      conversa({
-        numeroRemetenteAtual: { id: 5, apelido: 'Ana Paula' },
-        numeroRemetenteInicial: { id: 3, apelido: 'Teste Junior' },
-      }),
-    ]);
+  it('thread pré-selecionada via location.state que ainda não está na lista carregada: não quebra a tela e não mostra a linha extra', async () => {
+    useLocation.mockReturnValue({
+      pathname: '/controle-ligacoes/conversas',
+      state: { contatoId: 99, numeroRemetenteId: 11, nome: 'Carla Nunes', telefone: '5598900009999' },
+    });
+    api.fetchConversas.mockResolvedValue([conversa()]);
     api.fetchMensagens.mockResolvedValue(mensagensResposta({
       mensagens: [
-        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+        { id: 1, remetente: 'cliente', corpo: 'Mensagem da Carla', criado_em: '2026-08-25T12:00:00.000Z' },
       ],
-      numeroRemetenteInicial: { id: 3, apelido: 'Teste Junior' },
     }));
 
     await renderPage();
-    fireEvent.click(screen.getByText('Maria Silva'));
 
-    expect(await screen.findByText('Iniciado por: Teste Junior • Respondendo por: Ana Paula')).toBeInTheDocument();
-  });
-
-  it('numeroRemetenteInicial nulo: não quebra a tela e não mostra a linha extra', async () => {
-    api.fetchConversas.mockResolvedValue([
-      conversa({
-        numeroRemetenteAtual: { id: 3, apelido: 'Teste Junior' },
-        numeroRemetenteInicial: null,
-      }),
-    ]);
-    api.fetchMensagens.mockResolvedValue(mensagensResposta({
-      mensagens: [
-        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
-      ],
-      numeroRemetenteInicial: null,
-    }));
-
-    await renderPage();
-    fireEvent.click(screen.getByText('Maria Silva'));
-
-    await screen.findByText('Oi, tudo bem?');
+    await screen.findByText('Mensagem da Carla');
+    expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 99, 11);
     expect(screen.queryByText(/Atendido por/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Iniciado por/)).not.toBeInTheDocument();
   });
@@ -419,12 +449,13 @@ describe('ConversasPage — pré-seleção via location.state (dropdown de notif
     expect(api.fetchMensagens).not.toHaveBeenCalled();
   });
 
-  it('com location.state.contatoId, pré-seleciona o contato e carrega as mensagens sem esperar a lista', async () => {
+  it('com location.state.contatoId/numeroRemetenteId, pré-seleciona a thread e carrega as mensagens sem esperar a lista', async () => {
     useLocation.mockReturnValue({
       pathname: '/controle-ligacoes/conversas',
-      state: { contatoId: 99, nome: 'Carla Nunes', telefone: '5598900009999' },
+      state: { contatoId: 99, numeroRemetenteId: 11, nome: 'Carla Nunes', telefone: '5598900009999' },
     });
-    // Contato pré-selecionado nem precisa estar na lista já carregada.
+    // Contato pré-selecionado nem precisa estar na lista já carregada — o numeroRemetenteId
+    // vem direto do location.state (originado da notificação), não de uma busca na lista.
     api.fetchConversas.mockResolvedValue([conversa()]);
     api.fetchMensagens.mockResolvedValue(mensagensResposta({
       mensagens: [
@@ -434,7 +465,7 @@ describe('ConversasPage — pré-seleção via location.state (dropdown de notif
 
     await renderPage();
 
-    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 99));
+    await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 99, 11));
     expect(await screen.findByText('Carla Nunes')).toBeInTheDocument();
     expect(screen.getByText('Mensagem da Carla')).toBeInTheDocument();
   });
@@ -442,7 +473,7 @@ describe('ConversasPage — pré-seleção via location.state (dropdown de notif
   it('depois de consumir o state, navega em replace limpando o state (evita re-selecionar em voltar/atualizar)', async () => {
     useLocation.mockReturnValue({
       pathname: '/controle-ligacoes/conversas',
-      state: { contatoId: 99, nome: 'Carla Nunes', telefone: '5598900009999' },
+      state: { contatoId: 99, numeroRemetenteId: 11, nome: 'Carla Nunes', telefone: '5598900009999' },
     });
     api.fetchConversas.mockResolvedValue([]);
     api.fetchMensagens.mockResolvedValue(mensagensResposta());

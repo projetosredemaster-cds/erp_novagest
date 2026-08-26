@@ -228,7 +228,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
     await flush();
 
     expect(mensagensModel.findContatoIdPorTelefoneComVariantes).toHaveBeenCalledWith(gerarVariantesTelefoneBr('5598912345678'));
-    expect(mensagensModel.existeMensagemClienteAnterior).toHaveBeenCalledWith(42);
+    expect(mensagensModel.existeMensagemClienteAnterior).toHaveBeenCalledWith(42, 100);
     expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith({
       contatoId: 42,
       numeroRemetenteId: 100,
@@ -264,7 +264,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
     });
     await flush();
 
-    expect(mensagensModel.existeMensagemClienteAnterior).toHaveBeenCalledWith(44);
+    expect(mensagensModel.existeMensagemClienteAnterior).toHaveBeenCalledWith(44, 108);
     expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith({
       contatoId: 44,
       numeroRemetenteId: 108,
