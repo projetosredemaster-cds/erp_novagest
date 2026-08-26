@@ -2165,6 +2165,266 @@ inconsistência com o resto da API em camelCase).
 
 ---
 
+## Status de Conversa e Dashboard (v8)
+
+> Adendo ao contrato v2 acima — implementa duas features que não têm
+> relação direta com o fluxo de disparo/mensageria em si, mas dependem
+> do schema já existente (`DisparoContatos`/`Disparos`/`Mensagens`):
+> (1) um resultado comercial atribuível manualmente a cada thread de
+> conversa (`atendeu`/`agendou`/`nao_atendeu`/`venda`/`perdido`), e
+> (2) um dashboard de métricas agregadas, 100% derivado, sem persistir
+> nada novo além do que a feature (1) já grava. Chamado de "v8" porque
+> "v7" já pertence ao adendo "Central de Mensagens" logo acima.
+>
+> **Nota sobre o item registrado em "Fora de escopo" no fim deste
+> documento**: o pipeline de atendimento ali previsto ("não atendido"/
+> "atendido"/"perdido"/"agendado") foi implementado aqui, mas **como
+> tabela nova** (`ConversasStatus`), não como colunas em `Contatos` —
+> decisão tomada nesta tarefa porque o resultado é por **thread**
+> (contato + número remetente), não por contato isolado, e porque um
+> contato pode ter resultados diferentes em disparos/threads diferentes
+> ao longo do tempo.
+
+### Contexto e decisões de design
+
+- **`ConversasStatus` é 1 linha por thread, não um histórico** — `PUT`
+  faz `MERGE`: setar um status novo sempre sobrescreve o anterior da
+  mesma combinação `(contato_id, numero_remetente_id)`. Não há log de
+  quem/quando mudou o status nem dos valores anteriores.
+- **Sem máquina de estados** — o enum não impõe progressão. O operador
+  pode setar `venda` direto numa thread que nunca teve `agendou`, ou
+  voltar de `venda` pra `perdido`. A UI (`<select>`) não bloqueia
+  nenhuma transição.
+- **Auto-seed em `atendeu`** — a primeira mensagem de cliente de uma
+  thread sem status nenhum grava `status='atendeu'` automaticamente
+  (`marcarAtendeuSeVazio`, chamada de dentro do listener de
+  `messages.upsert`, ver "Central de Mensagens (v7)" acima) — reflete
+  que só o fato de o cliente ter respondido já é "atendimento". Uma
+  thread sem status (`null` na API) só existe enquanto o cliente nunca
+  respondeu.
+- **O dashboard não persiste nada** — os 8 blocos da resposta de
+  `GET /dashboard` são sempre recalculados na hora, a partir de
+  `DisparoContatos`/`Disparos`/`Estados`/`NumerosRemetentes`/
+  `ConversasStatus` já existentes. Não há tabela/cache de métricas.
+- **Filtro por Estado é opcional e uniforme entre os 8 blocos** — todas
+  as queries do dashboard usam o mesmo padrão de filtro
+  `(@estadoId IS NULL OR d.estado_id = @estadoId)`; `estadoId` ausente
+  significa "todos os Estados" (visão geral), não "nenhum".
+- **Taxas cumulativas, não por status isolado** — como cada thread tem
+  só 1 status final (não uma jornada), um contato com `status='venda'`
+  não é contado em `atendeuCount`/`agendouCount`. Onde o significado
+  pretendido é "chegou a esta etapa ou além" (funil, e os KPIs de
+  agendamento/conversão/perda do frontend), os status subsequentes
+  entram na soma (ex.: "chegou a agendar" = `agendouCount + vendaCount`).
+  Isso é responsabilidade do **frontend** — a API devolve contagens
+  brutas por status (`statusGeral`), não pré-somadas cumulativamente.
+
+### Schema novo
+
+```sql
+CREATE TABLE ConversasStatus (
+    id                   INT IDENTITY(1,1) PRIMARY KEY,
+    contato_id           INT NOT NULL FOREIGN KEY REFERENCES Contatos(id),
+    numero_remetente_id  INT NOT NULL FOREIGN KEY REFERENCES NumerosRemetentes(id),
+    status               VARCHAR(20) NOT NULL, -- 'atendeu'|'agendou'|'nao_atendeu'|'venda'|'perdido'
+    atualizado_em        DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_ConversasStatus_Thread UNIQUE (contato_id, numero_remetente_id)
+);
+```
+
+Criado por `backend/src/scripts/MIGRATION-CONVERSAS-STATUS.sql`
+(idempotente, `IF NOT EXISTS` sobre `sys.tables`, mesmo padrão de
+`MIGRATION-STATUS-ENTREGA.sql`/`MIGRATION-ENVIO-DISPAROS.sql`).
+**Este script ainda não foi executado contra nenhum banco** — precisa
+rodar manualmente (local: `erp-novagest-dev`) antes da rota de status
+e do dashboard funcionarem de verdade.
+
+Também nova nesta tarefa, mas fora deste adendo em termos de escopo
+funcional: `Mensagens.status_entrega VARCHAR(20) NULL` (status de
+entrega real da mensagem no WhatsApp — `'pendente'|'enviado'|
+'entregue'|'lido'|'erro'`, criada por `MIGRATION-STATUS-ENTREGA.sql`,
+execução contra banco também não confirmada), atualizada pelo listener
+`sock.ev.on('messages.update', ...)` (`baileysSession.service.js:
+handleMessagesUpdate`) e repassada em tempo real via
+`event: status-atualizado` no mesmo stream SSE de Conversas (ver seção
+4 de "Central de Mensagens (v7)" acima). Documentado com mais detalhe
+em `CLAUDE.md`, schema do Controle de Ligações.
+
+---
+
+## `PUT /api/controle-ligacoes/conversas/:contatoId/:numeroRemetenteId/status`
+
+Define/troca o status comercial de uma thread. Protegida por
+`authMiddleware` + `operadorCobrancaMiddleware` (herdado do mount,
+nenhuma checagem própria na rota).
+
+#### Parâmetros (path)
+- `contatoId` — inteiro positivo.
+- `numeroRemetenteId` — inteiro positivo.
+
+Não é validado que a thread já tenha histórico de mensagens (diferente
+de `POST .../mensagens`, seção 3 de "Central de Mensagens (v7)") — dá
+pra setar um status numa combinação `(contatoId, numeroRemetenteId)`
+que nunca trocou mensagem nenhuma; o `MERGE` simplesmente insere.
+
+#### Corpo da requisição
+```json
+{ "status": "venda" }
+```
+`status` — obrigatório, precisa ser exatamente um de: `"atendeu"`,
+`"agendou"`, `"nao_atendeu"`, `"venda"`, `"perdido"`.
+
+#### Resposta de sucesso — `200 OK`
+```json
+{ "contatoId": 603, "numeroRemetenteId": 7, "status": "venda" }
+```
+
+#### Erros
+- `400`: `{ "error": "Parâmetros \"contatoId\" e \"numeroRemetenteId\" devem ser números inteiros positivos." }`
+- `400`: `{ "error": "Campo \"status\" inválido ou ausente." }`
+- `500`: `{ "error": "Erro interno ao atualizar status da conversa." }`
+
+---
+
+## `GET /api/controle-ligacoes/conversas` — campo novo
+
+A rota já documentada na seção 1 de "Central de Mensagens (v7)" ganhou
+um campo aditivo em cada item da lista: `status` (string do enum, ou
+`null` se a thread nunca teve status atribuído/auto-seedado). Não é
+uma mudança breaking — quem já consumia a resposta sem esse campo
+continua funcionando.
+
+---
+
+## `GET /api/controle-ligacoes/dashboard`
+
+Métricas agregadas de disparo/atendimento, opcionalmente filtradas por
+Estado. Protegida por `authMiddleware` + `operadorCobrancaMiddleware`
+(herdado do mount, nenhuma checagem própria na rota).
+
+#### Parâmetros (query)
+- `estadoId` (opcional) — ausente ou string vazia = sem filtro (visão
+  geral, todos os Estados). Se presente, precisa ser um inteiro
+  positivo que exista em `Estados`.
+
+#### Resposta de sucesso — `200 OK`
+```json
+{
+  "totalDisparos": 120,
+  "taxas": {
+    "atendeu": 80.5,
+    "agendou": 12.3,
+    "nao_atendeu": 5.0,
+    "venda": 10.1,
+    "perdido": 3.2
+  },
+  "disparosPorRegiao": [
+    { "estadoId": 1, "nome": "Ceará", "uf": "CE", "total": 40 }
+  ],
+  "statusGeral": [
+    { "status": "atendeu", "total": 96 }
+  ],
+  "rankingAtendentes": [
+    {
+      "numeroRemetenteId": 3,
+      "apelido": "Livia",
+      "atendeu": 30,
+      "agendou": 5,
+      "nao_atendeu": 2,
+      "venda": 4,
+      "perdido": 1,
+      "total": 42
+    }
+  ],
+  "funilConversao": { "taxaConversaoEngajados": 23.5 },
+  "tendenciaDiaria": [
+    { "dia": "2026-07-28", "total": 4 }
+  ],
+  "comparativoSemanal": {
+    "atual": {
+      "atendeu": 80.5, "agendou": 12.3, "nao_atendeu": 5.0,
+      "venda": 10.1, "perdido": 3.2
+    },
+    "anterior": {
+      "atendeu": 75.0, "agendou": 14.0, "nao_atendeu": 6.0,
+      "venda": 8.5, "perdido": 4.0
+    }
+  }
+}
+```
+
+#### Detalhamento de cada bloco (`backend/src/models/dashboard.model.js`)
+
+- **`totalDisparos`** — `COUNT(DisparoContatos.id)` no filtro de
+  Estado. Base de todos os percentuais de `taxas`.
+- **`taxas`** — percentual de cada status **sobre `totalDisparos`**
+  (não sobre um subconjunto engajado), arredondado a 1 casa decimal
+  (`ROUND(..., 1)`). `NULLIF` no denominador evita erro de divisão por
+  zero; `0` sem disparo nenhum.
+- **`disparosPorRegiao`** — `GROUP BY estado_id`, ordenado por `total`
+  decrescente.
+- **`statusGeral`** — `GROUP BY status`, ignora `NULL` (threads sem
+  status atribuído não aparecem aqui). Contagem bruta, **não**
+  cumulativa — ver "Taxas cumulativas" em Contexto acima.
+- **`rankingAtendentes`** — `GROUP BY numero_remetente_id`, contagem
+  de cada status + `total`, ordenado por `total` decrescente.
+- **`funilConversao.taxaConversaoEngajados`** —
+  `Venda ÷ (Atendeu + Agendou + Venda + Perdido) × 100`, arredondado a
+  1 casa. Denominador **exclui** `nao_atendeu`/`NULL` de propósito —
+  é a conversão de quem *engajou* (respondeu de algum jeito), não de
+  todo mundo que recebeu o disparo.
+- **`tendenciaDiaria`** — disparos por dia, últimos 30 dias
+  (`CAST(criado_em AS DATE)`, formatado como string `YYYY-MM-DD` via
+  `CONVERT(..., 23)` no próprio SQL, pra não depender de conversão de
+  timezone no driver). **Sempre 30 entradas, zero-preenchidas em JS**
+  para dias sem nenhum disparo — sem isso o `GROUP BY` simplesmente
+  omite o dia, o que faria um gráfico de linha "pular" o dia em vez de
+  descer a zero.
+- **`comparativoSemanal`** — as mesmas 5 taxas de `taxas`, calculadas
+  duas vezes: `atual` (últimos 7 dias) e `anterior` (os 7 dias
+  anteriores a esses). O "agora" usado pra calcular as duas janelas é
+  computado **uma única vez em JavaScript** (não duas chamadas
+  separadas a `SYSUTCDATETIME()` no SQL) e o período `anterior` usa
+  limite superior **exclusivo** — as duas janelas ficam adjacentes,
+  sem sobreposição nem lacuna de alguns milissegundos entre elas.
+
+#### Erros
+- `400`: `{ "error": "Parâmetro \"estadoId\" deve ser um número inteiro positivo." }`
+- `400`: `{ "error": "Estado não encontrado." }`
+- `500`: `{ "error": "Erro interno ao buscar dashboard." }`
+
+### Frontend: `InicioPage.jsx`
+
+Consome `GET /dashboard` em
+`frontend/src/modulos/controle-ligacoes/inicio/` (`dashboardApi.js` +
+`InicioPage.jsx`) — é a tela que a rota "Início" do Controle de
+Ligações renderiza hoje (antes era um placeholder estático, "Módulo em
+construção", componente `ControleLigacoesHomePage.jsx`, já deletado do
+repo). Tema `--pd-*`/classe `painel-disparo-light-theme` (mesmo tema
+claro do Painel de Disparo, não o tema escuro do resto do módulo). Usa
+`recharts` (dependência nova em `frontend/package.json`) para
+`FunnelChart` (etapas cumulativas do funil), `PieChart` (rosca
+comparando `nao_atendeu` vs. `perdido`) e `LineChart`
+(`tendenciaDiaria`), além de dois `BarChart` já existentes (por
+região, por status). Os 6 KPIs do topo usam um denominador comum,
+`baseEngajados = atendeuCount + agendouCount + vendaCount + perdidoCount`
+(derivado no cliente a partir de `statusGeral`, não vem pronto da API)
+— ver "Taxas cumulativas" em Contexto acima pro porquê. `STATUS_HEX`
+(cores fixas por status) usa os mesmos hex literais de `STATUS_CORES`
+em `ConversasPage.jsx`, mantendo a mesma identidade visual por status
+nas duas telas apesar dos temas claro/escuro diferentes.
+
+### Lacuna conhecida: sem teste automatizado
+
+Nem `dashboard.model.js`/`.service.js`/`.controller.js`, nem
+`InicioPage.jsx`/`dashboardApi.js`, nem as funções novas de
+`ConversasStatus` em `mensagens.model.js`/`conversas.service.js`/
+`.controller.js` têm teste automatizado ainda — feature implementada
+sem a fase de QA que o resto do projeto normalmente recebe (ver
+`.claude/agents/test-engineer.md`/`qa-tester` em `CLAUDE.md`).
+
+---
+
 ## Fora de escopo deste v2 (registrado, não implementar agora)
 
 - ~~Central de Mensagens (Baileys) + conexão real via QR Code (`numero` e
@@ -2185,8 +2445,12 @@ inconsistência com o resto da API em camelCase).
   **tela de inbox** (as rotas da v7 existem para o frontend consumir numa
   fase posterior, mas nenhuma tela própria foi implementada nesta tarefa).
 - Disparo em massa (limite de 10/número, aviso de 3 dias, seleção manual).
-- Pipeline de atendimento (`não atendido`/`atendido`/`perdido`/`agendado`)
-  — colunas entram em `Contatos`, não em tabela nova.
+- ~~Pipeline de atendimento (`não atendido`/`atendido`/`perdido`/
+  `agendado`) — colunas entram em `Contatos`, não em tabela nova.~~
+  **Implementado — ver "Status de Conversa e Dashboard (v8)" mais
+  acima.** Saiu diferente do previsto aqui: virou tabela nova
+  (`ConversasStatus`), não colunas em `Contatos`, porque o resultado é
+  por thread (contato + número remetente), não por contato isolado.
 - Handoff automático IA → Lívia (regra: IA manda a 1ª mensagem; assim que o
   cliente responder, transfere para a Lívia — sem réplica da IA).
 - Integração com Gemini (`GEMINI_API_KEY` — ainda não provisionada).

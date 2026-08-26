@@ -1,6 +1,22 @@
 // style-system: Tailwind
 import { useCallback, useEffect, useState } from 'react';
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Funnel,
+  FunnelChart,
+  LabelList,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { useAuth } from '../../../app/AuthContext.jsx';
 import { fetchDashboard } from './dashboardApi.js';
 import { fetchEstados } from '../configuracoes/controleLigacoesConfigApi.js';
@@ -46,6 +62,23 @@ function formatComparativo(diff) {
 
 function formatDiaCurto(dia) {
   return `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;
+}
+
+function formatRatio(numerador, denominador) {
+  if (!denominador) return '-';
+  return `${((numerador / denominador) * 100).toFixed(1)}%`;
+}
+
+function InfoTooltip({ texto }) {
+  return (
+    <span title={texto} aria-label={texto} className="inline-flex shrink-0 cursor-help text-[var(--pd-text-secondary)]">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
+      </svg>
+    </span>
+  );
 }
 
 export default function InicioPage() {
@@ -107,6 +140,73 @@ export default function InicioPage() {
   const comparativoAtual = dashboard?.comparativoSemanal?.atual || {};
   const comparativoAnterior = dashboard?.comparativoSemanal?.anterior || {};
 
+  const contagem = (status) => statusGeral.find((s) => s.status === status)?.total ?? 0;
+  const atendeuCount = contagem('atendeu');
+  const agendouCount = contagem('agendou');
+  const naoAtendeuCount = contagem('nao_atendeu');
+  const vendaCount = contagem('venda');
+  const perdidoCount = contagem('perdido');
+  const totalDisparos = dashboard?.totalDisparos ?? 0;
+  const baseEngajados = atendeuCount + agendouCount + vendaCount + perdidoCount;
+
+  const kpis = [
+    {
+      key: 'atendimento',
+      label: 'Taxa de Atendimento',
+      valor: formatRatio(atendeuCount, totalDisparos),
+      cor: STATUS_HEX.atendeu,
+      comparativo: true,
+      info: '% de disparos cujo cliente respondeu pelo menos uma vez.',
+    },
+    {
+      key: 'agendamento',
+      label: 'Taxa de Agendamento',
+      valor: formatRatio(agendouCount + vendaCount, baseEngajados),
+      cor: STATUS_HEX.agendou,
+      comparativo: false,
+      info: '% de quem respondeu que chegou a agendar uma visita.',
+    },
+    {
+      key: 'conversao-agendados',
+      label: 'Conversão dos Agendados',
+      valor: formatRatio(vendaCount, agendouCount),
+      cor: STATUS_HEX.venda,
+      comparativo: false,
+      info: '% de quem agendou que efetivamente comprou.',
+    },
+    {
+      key: 'conversao-engajados',
+      label: 'Conversão dos Engajados',
+      valor: formatRatio(vendaCount, baseEngajados),
+      cor: STATUS_HEX.venda,
+      comparativo: false,
+      info: '% de quem respondeu que comprou, considerando toda a base de quem teve retorno.',
+    },
+    {
+      key: 'perda',
+      label: 'Taxa de Perda',
+      valor: formatRatio(perdidoCount, baseEngajados),
+      cor: STATUS_HEX.perdido,
+      comparativo: false,
+      info: '% de quem respondeu e não converteu em venda.',
+    },
+  ];
+
+  const diffAtendeuBruto = (comparativoAtual.atendeu ?? 0) - (comparativoAnterior.atendeu ?? 0);
+  const diffAtendeu = Math.round(diffAtendeuBruto * 10) / 10;
+
+  const funilEtapas = [
+    { name: 'Disparados', value: totalDisparos, fill: 'var(--pd-accent)' },
+    { name: 'Atendeu', value: atendeuCount + agendouCount + vendaCount + perdidoCount, fill: STATUS_HEX.atendeu },
+    { name: 'Agendou', value: agendouCount + vendaCount, fill: STATUS_HEX.agendou },
+    { name: 'Venda', value: vendaCount, fill: STATUS_HEX.venda },
+  ];
+
+  const dadosSaida = [
+    { status: 'nao_atendeu', label: STATUS_LABELS.nao_atendeu, value: naoAtendeuCount },
+    { status: 'perdido', label: STATUS_LABELS.perdido, value: perdidoCount },
+  ];
+
   return (
     <div className="painel-disparo-light-theme min-h-screen bg-[var(--pd-bg)] p-4 sm:p-6 text-[var(--pd-text-primary)]">
       <div className="mx-auto max-w-[1400px]">
@@ -147,42 +247,42 @@ export default function InicioPage() {
           <div className="px-1 py-10 text-center text-sm text-[var(--pd-text-secondary)]">Nenhum dado ainda.</div>
         ) : (
           <div className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
               <div className={cardCompacto} style={{ borderLeftColor: 'var(--pd-border)', borderLeftWidth: 4 }}>
-                <span className="text-[11.5px] font-semibold uppercase tracking-[.08em] text-[var(--pd-text-secondary)]">
+                <span className="flex items-center gap-1 text-[11.5px] font-semibold uppercase tracking-[.08em] text-[var(--pd-text-secondary)]">
                   Total de Disparos
+                  <InfoTooltip texto="Quantidade de contatos que receberam a mensagem inicial." />
                 </span>
                 <span className="pd-font-serif mt-1 text-[26px] font-extrabold leading-none text-[var(--pd-text-primary)]">
-                  {dashboard.totalDisparos ?? 0}
+                  {totalDisparos}
                 </span>
               </div>
-              {Object.keys(STATUS_LABELS).map((status) => {
-                const diffBruto = (comparativoAtual[status] ?? 0) - (comparativoAnterior[status] ?? 0);
-                const diff = Math.round(diffBruto * 10) / 10;
-                return (
-                  <div
-                    key={status}
-                    className={cardCompacto}
-                    style={{ borderLeftColor: STATUS_HEX[status], borderLeftWidth: 4 }}
+              {kpis.map((kpi) => (
+                <div
+                  key={kpi.key}
+                  className={cardCompacto}
+                  style={{ borderLeftColor: kpi.cor, borderLeftWidth: 4 }}
+                >
+                  <span className="flex items-center gap-1 text-[11.5px] font-semibold uppercase tracking-[.08em] text-[var(--pd-text-secondary)]">
+                    {kpi.label}
+                    <InfoTooltip texto={kpi.info} />
+                  </span>
+                  <span
+                    className="pd-font-serif mt-1 text-[26px] font-extrabold leading-none"
+                    style={{ color: kpi.cor }}
                   >
-                    <span className="text-[11.5px] font-semibold uppercase tracking-[.08em] text-[var(--pd-text-secondary)]">
-                      {STATUS_LABELS[status]}
-                    </span>
-                    <span
-                      className="pd-font-serif mt-1 text-[26px] font-extrabold leading-none"
-                      style={{ color: STATUS_HEX[status] }}
-                    >
-                      {(dashboard.taxas?.[status] ?? 0)}%
-                    </span>
+                    {kpi.valor}
+                  </span>
+                  {kpi.comparativo && (
                     <span
                       className="text-[11px] font-semibold"
-                      style={{ color: corComparativo(status, diff) }}
+                      style={{ color: corComparativo('atendeu', diffAtendeu) }}
                     >
-                      {formatComparativo(diff)}
+                      {formatComparativo(diffAtendeu)}
                     </span>
-                  </div>
-                );
-              })}
+                  )}
+                </div>
+              ))}
             </div>
 
             <div className={card}>
@@ -217,7 +317,10 @@ export default function InicioPage() {
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div className={`${card} lg:col-span-1`}>
-                <h2 className="pd-font-serif mb-3 text-[16px] font-bold leading-tight">Funil de Conversão</h2>
+                <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                  Funil de Conversão
+                  <InfoTooltip texto="Mesmo cálculo da Conversão dos Engajados, isolado em destaque." />
+                </h2>
                 <span className="text-[11.5px] font-semibold uppercase tracking-[.08em] text-[var(--pd-text-secondary)]">
                   Taxa de Conversão (engajados)
                 </span>
@@ -230,7 +333,10 @@ export default function InicioPage() {
               </div>
 
               <div className={`${card} lg:col-span-2`}>
-                <h2 className="pd-font-serif mb-3 text-[16px] font-bold leading-tight">Tendência Diária (últimos 30 dias)</h2>
+                <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                  Tendência Diária (últimos 30 dias)
+                  <InfoTooltip texto="Quantidade de disparos feitos por dia, últimos 30 dias." />
+                </h2>
                 {tendenciaDiaria.length === 0 ? (
                   <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum disparo registrado.</div>
                 ) : (
@@ -256,7 +362,61 @@ export default function InicioPage() {
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <div className={card}>
-                <h2 className="pd-font-serif mb-3 text-[16px] font-bold leading-tight">Disparos por Região (gráfico)</h2>
+                <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                  Etapas do Funil
+                  <InfoTooltip texto="Cada barra soma quem está naquela etapa ou já avançou além dela, não implica que passou por todas em ordem." />
+                </h2>
+                {totalDisparos === 0 ? (
+                  <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum disparo registrado.</div>
+                ) : (
+                  <>
+                    <ResponsiveContainer width="100%" height={280}>
+                      <FunnelChart>
+                        <Tooltip
+                          contentStyle={{ background: 'var(--pd-card-bg)', border: '1px solid var(--pd-border)', borderRadius: 8, fontSize: 12 }}
+                        />
+                        <Funnel dataKey="value" data={funilEtapas} isAnimationActive={false}>
+                          <LabelList position="right" fill="var(--pd-text-primary)" stroke="none" dataKey="name" fontSize={12} />
+                        </Funnel>
+                      </FunnelChart>
+                    </ResponsiveContainer>
+                    <span className="mt-2 block text-[11px] text-[var(--pd-text-secondary)]">
+                      Cada etapa soma quem está nela ou já avançou, não significa que passou necessariamente por todas.
+                    </span>
+                  </>
+                )}
+              </div>
+
+              <div className={card}>
+                <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                  Motivos de Saída
+                  <InfoTooltip texto="Distribuição entre quem não teve interesse e quem foi à loja mas não comprou." />
+                </h2>
+                {naoAtendeuCount === 0 && perdidoCount === 0 ? (
+                  <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum registro.</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Tooltip
+                        contentStyle={{ background: 'var(--pd-card-bg)', border: '1px solid var(--pd-border)', borderRadius: 8, fontSize: 12 }}
+                      />
+                      <Pie data={dadosSaida} dataKey="value" nameKey="label" innerRadius={60} outerRadius={100} paddingAngle={2}>
+                        {dadosSaida.map((entry) => (
+                          <Cell key={entry.status} fill={STATUS_HEX[entry.status]} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className={card}>
+                <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                  Disparos por Região (gráfico)
+                  <InfoTooltip texto="Quantidade de disparos feitos, agrupados por Estado." />
+                </h2>
                 {disparosPorRegiao.length === 0 ? (
                   <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum disparo registrado.</div>
                 ) : (
@@ -276,7 +436,10 @@ export default function InicioPage() {
               </div>
 
               <div className={card}>
-                <h2 className="pd-font-serif mb-3 text-[16px] font-bold leading-tight">Status Geral</h2>
+                <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                  Status Geral
+                  <InfoTooltip texto="Quantidade de conversas em cada status atual." />
+                </h2>
                 {statusGeral.length === 0 ? (
                   <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum status registrado.</div>
                 ) : (
@@ -300,7 +463,10 @@ export default function InicioPage() {
             </div>
 
             <div className={card}>
-              <h2 className="pd-font-serif mb-3 text-[16px] font-bold leading-tight">Disparos por Região (tabela)</h2>
+              <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                Disparos por Região (tabela)
+                <InfoTooltip texto="Quantidade de disparos feitos, agrupados por Estado." />
+              </h2>
               {disparosPorRegiao.length === 0 ? (
                 <div className="px-1 py-6 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum registro.</div>
               ) : (
@@ -328,7 +494,10 @@ export default function InicioPage() {
             </div>
 
             <div className={card}>
-              <h2 className="pd-font-serif mb-3 text-[16px] font-bold leading-tight">Ranking de Atendentes</h2>
+              <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                Ranking de Atendentes
+                <InfoTooltip texto="Quantidade de cada status por atendente/número usado." />
+              </h2>
               {rankingAtendentes.length === 0 ? (
                 <div className="px-1 py-6 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum atendimento registrado.</div>
               ) : (
