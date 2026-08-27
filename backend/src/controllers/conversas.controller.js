@@ -125,6 +125,14 @@ async function responder(req, res) {
 }
 
 const STATUS_VALIDOS = ['atendeu', 'agendou', 'nao_atendeu', 'venda', 'perdido'];
+const MOTIVOS_PERDIDO_VALIDOS = [
+  'nao_foi_loja',
+  'foi_loja_nao_comprou',
+  'preco_condicao',
+  'comprou_outro_lugar',
+  'desistiu_sem_resposta',
+  'outro',
+];
 
 async function atualizarStatus(req, res) {
   const contatoIdNum = Number(req.params.contatoId);
@@ -140,8 +148,26 @@ async function atualizarStatus(req, res) {
     return res.status(400).json({ error: 'Campo "status" inválido ou ausente.' });
   }
 
+  const motivo = req.body?.motivo;
+  if (motivo !== undefined && motivo !== null && motivo !== '' && !MOTIVOS_PERDIDO_VALIDOS.includes(motivo)) {
+    return res.status(400).json({ error: 'Campo "motivo" inválido.' });
+  }
+
+  const motivoDetalhe = typeof req.body?.motivoDetalhe === 'string' ? req.body.motivoDetalhe : null;
+
   try {
-    await conversasService.atualizarStatus(contatoIdNum, numeroRemetenteIdNum, status);
+    const resultado = await conversasService.atualizarStatus(
+      contatoIdNum,
+      numeroRemetenteIdNum,
+      status,
+      motivo ?? null,
+      motivoDetalhe
+    );
+
+    if (resultado === 'motivo_obrigatorio') {
+      return res.status(400).json({ error: 'Campo "motivo" é obrigatório quando o status é "perdido".' });
+    }
+
     return res.status(200).json({ contatoId: contatoIdNum, numeroRemetenteId: numeroRemetenteIdNum, status });
   } catch (err) {
     console.error('[conversas.controller] Erro ao atualizar status da conversa:', err);

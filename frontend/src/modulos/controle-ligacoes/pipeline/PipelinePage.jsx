@@ -4,6 +4,9 @@ import { useAuth } from '../../../app/AuthContext.jsx';
 import { fetchPipeline, fetchHistoricoStatus, atualizarStatusConversa } from './pipelineApi.js';
 import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';
+import ModalMotivoPerdido, { MOTIVOS_PERDIDO } from '../components/ModalMotivoPerdido.jsx';
+
+const MOTIVO_PERDIDO_LABELS = Object.fromEntries(MOTIVOS_PERDIDO.map((m) => [m.value, m.label]));
 
 const STATUS_LABELS = {
   atendeu: 'Atendeu',
@@ -153,6 +156,13 @@ function PipelineCard({ item, salvando, onAlterarStatus, onAbrirDetalhe }) {
           <option key={coluna.status} value={coluna.status} disabled={coluna.status === 'atendeu'}>{coluna.titulo}</option>
         ))}
       </select>
+
+      {item.status === 'perdido' && item.motivo ? (
+        <p className="mt-1 text-[11px] text-[var(--pd-text-secondary)]">
+          Motivo: {MOTIVO_PERDIDO_LABELS[item.motivo] ?? item.motivo}
+          {item.motivoDetalhe ? ` — ${item.motivoDetalhe}` : ''}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -294,6 +304,7 @@ export default function PipelinePage() {
   const [loadError, setLoadError] = useState(null);
   const [salvandoId, setSalvandoId] = useState(null);
   const [cardSelecionado, setCardSelecionado] = useState(null);
+  const [itemPendenteMotivo, setItemPendenteMotivo] = useState(null);
 
   const [buscaInput, setBuscaInput] = useState('');
   const [busca, setBusca] = useState('');
@@ -355,17 +366,25 @@ export default function PipelinePage() {
     carregarPipeline();
   }
 
-  function handleAlterarStatus(item, novoStatus) {
-    if (novoStatus === item.status) return;
-
+  function aplicarNovoStatus(item, novoStatus, motivo = null, motivoDetalhe = null) {
     setSalvandoId(item.contato_id);
-    atualizarStatusConversa(token, item.contato_id, item.numero_remetente_id, novoStatus)
+    atualizarStatusConversa(token, item.contato_id, item.numero_remetente_id, novoStatus, motivo, motivoDetalhe)
       .then(() => carregarPipeline())
       .catch((err) => {
         console.error('Erro ao atualizar status no pipeline:', err);
         setLoadError(err.message || 'Erro ao atualizar status.');
       })
       .finally(() => setSalvandoId(null));
+  }
+
+  function handleAlterarStatus(item, novoStatus) {
+    if (novoStatus === item.status) return;
+
+    if (novoStatus === 'perdido') {
+      setItemPendenteMotivo(item);
+      return;
+    }
+    aplicarNovoStatus(item, novoStatus);
   }
 
   const itensPorStatus = COLUNAS.reduce((acc, coluna) => {
@@ -479,6 +498,17 @@ export default function PipelinePage() {
           item={cardSelecionado}
           token={token}
           onFechar={() => setCardSelecionado(null)}
+        />
+      ) : null}
+
+      {itemPendenteMotivo ? (
+        <ModalMotivoPerdido
+          onConfirmar={(motivo, motivoDetalhe) => {
+            const item = itemPendenteMotivo;
+            setItemPendenteMotivo(null);
+            aplicarNovoStatus(item, 'perdido', motivo, motivoDetalhe);
+          }}
+          onCancelar={() => setItemPendenteMotivo(null)}
         />
       ) : null}
     </div>

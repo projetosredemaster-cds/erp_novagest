@@ -1,5 +1,6 @@
 // style-system: Tailwind
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Bar,
   BarChart,
@@ -8,6 +9,7 @@ import {
   Funnel,
   FunnelChart,
   LabelList,
+  Legend,
   Line,
   LineChart,
   Pie,
@@ -18,9 +20,10 @@ import {
   YAxis,
 } from 'recharts';
 import { useAuth } from '../../../app/AuthContext.jsx';
-import { fetchDashboard } from './dashboardApi.js';
+import { fetchDashboard, fetchAguardandoAcao } from './dashboardApi.js';
 import { fetchEstados } from '../configuracoes/controleLigacoesConfigApi.js';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';
+import { MOTIVOS_PERDIDO } from '../components/ModalMotivoPerdido.jsx';
 
 const btn = "bg-[var(--pd-accent)] text-white border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
 const btnGhost = "bg-transparent border border-[var(--pd-border)] text-[var(--pd-text-primary)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--pd-surface-alt)] disabled:cursor-not-allowed disabled:opacity-50";
@@ -48,6 +51,8 @@ const STATUS_HEX = {
 
 const STATUS_INVERTIDO = new Set(['nao_atendeu', 'perdido']);
 
+const MOTIVO_PERDIDO_LABELS = Object.fromEntries(MOTIVOS_PERDIDO.map((m) => [m.value, m.label]));
+
 function corComparativo(status, diff) {
   if (diff === 0) return 'var(--pd-text-secondary)';
   const subiuEBom = diff > 0 && !STATUS_INVERTIDO.has(status);
@@ -71,6 +76,35 @@ function formatRatio(numerador, denominador) {
   return `${((numerador / denominador) * 100).toFixed(1)}%`;
 }
 
+function formatHorasMedias(horas) {
+  if (horas === null || horas === undefined) return null;
+  if (horas >= 24) {
+    const dias = Math.floor(horas / 24);
+    const resto = (horas % 24).toFixed(1);
+    return `${dias}d ${resto}h`;
+  }
+  return `${horas.toFixed(1)}h`;
+}
+
+const AGUARDANDO_ACAO_LABELS = {
+  sem_resposta: (tempoRelativo) => `Sem resposta há ${tempoRelativo}`,
+  agendado_parado: (tempoRelativo) => `Agendado há ${tempoRelativo} sem fechar`,
+};
+
+function formatRelativoNotificacao(iso) {
+  if (!iso) return '';
+  const data = new Date(iso);
+  if (Number.isNaN(data.getTime())) return '';
+  const diffMs = Date.now() - data.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'agora';
+  if (diffMin < 60) return `${diffMin}min`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h`;
+  const diffD = Math.floor(diffH / 24);
+  return `${diffD}d`;
+}
+
 function InfoTooltip({ texto }) {
   return (
     <span title={texto} aria-label={texto} className="inline-flex shrink-0 cursor-help text-[var(--pd-text-secondary)]">
@@ -85,6 +119,7 @@ function InfoTooltip({ texto }) {
 
 export default function InicioPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
 
   const [estados, setEstados] = useState([]);
   const [estadoSelecionado, setEstadoSelecionado] = useState('');
@@ -95,11 +130,36 @@ export default function InicioPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
+  const [aguardandoAcao, setAguardandoAcao] = useState(null);
+  const [loadingAguardandoAcao, setLoadingAguardandoAcao] = useState(true);
+  const [erroAguardandoAcao, setErroAguardandoAcao] = useState(null);
+
   useEffect(() => {
     fetchEstados(token)
       .then((lista) => setEstados(lista || []))
       .catch(() => setEstados([]));
   }, [token]);
+
+  useEffect(() => {
+    fetchAguardandoAcao(token)
+      .then((lista) => {
+        setAguardandoAcao(lista || []);
+        setErroAguardandoAcao(null);
+      })
+      .catch((err) => setErroAguardandoAcao(err.message || 'Erro ao carregar pendências.'))
+      .finally(() => setLoadingAguardandoAcao(false));
+  }, [token]);
+
+  function irParaConversa(item) {
+    navigate('/controle-ligacoes/conversas', {
+      state: {
+        contatoId: item.contatoId,
+        numeroRemetenteId: item.numeroRemetenteId,
+        nome: item.nome,
+        telefone: item.telefone,
+      },
+    });
+  }
 
   const carregarDashboard = useCallback(() => {
     fetchDashboard(token, { estadoId: estadoSelecionado || null, dataInicio, dataFim })
@@ -134,6 +194,13 @@ export default function InicioPage() {
     setEstadoSelecionado('');
     setDataInicio(null);
     setDataFim(null);
+    fetchDashboard(token, { estadoId: null, dataInicio: null, dataFim: null })
+      .then((resultado) => {
+        setDashboard(resultado || null);
+        setLoadError(null);
+      })
+      .catch((err) => setLoadError(err.message || 'Erro ao carregar dashboard.'))
+      .finally(() => setLoading(false));
   }
 
   function retryDashboard() {
@@ -155,7 +222,6 @@ export default function InicioPage() {
   }));
 
   const tendenciaDiaria = dashboard?.tendenciaDiaria || [];
-  const taxaConversaoEngajados = dashboard?.funilConversao?.taxaConversaoEngajados ?? 0;
   const comparativoAtual = dashboard?.comparativoSemanal?.atual || {};
   const comparativoAnterior = dashboard?.comparativoSemanal?.anterior || {};
 
@@ -173,6 +239,7 @@ export default function InicioPage() {
       key: 'atendimento',
       label: 'Taxa de Atendimento',
       valor: formatRatio(atendeuCount, totalDisparos),
+      contagemAbsoluta: atendeuCount,
       cor: STATUS_HEX.atendeu,
       comparativo: true,
       info: '% de disparos cujo cliente respondeu pelo menos uma vez.',
@@ -181,6 +248,7 @@ export default function InicioPage() {
       key: 'agendamento',
       label: 'Taxa de Agendamento',
       valor: formatRatio(agendouCount + vendaCount, baseEngajados),
+      contagemAbsoluta: agendouCount + vendaCount,
       cor: STATUS_HEX.agendou,
       comparativo: false,
       info: '% de quem respondeu que chegou a agendar uma visita.',
@@ -189,6 +257,7 @@ export default function InicioPage() {
       key: 'conversao-agendados',
       label: 'Conversão dos Agendados',
       valor: formatRatio(vendaCount, agendouCount),
+      contagemAbsoluta: vendaCount,
       cor: STATUS_HEX.venda,
       comparativo: false,
       info: '% de quem agendou que efetivamente comprou.',
@@ -197,6 +266,7 @@ export default function InicioPage() {
       key: 'conversao-engajados',
       label: 'Conversão dos Engajados',
       valor: formatRatio(vendaCount, baseEngajados),
+      contagemAbsoluta: vendaCount,
       cor: STATUS_HEX.venda,
       comparativo: false,
       info: '% de quem respondeu que comprou, considerando toda a base de quem teve retorno.',
@@ -205,6 +275,7 @@ export default function InicioPage() {
       key: 'perda',
       label: 'Taxa de Perda',
       valor: formatRatio(perdidoCount, baseEngajados),
+      contagemAbsoluta: perdidoCount,
       cor: STATUS_HEX.perdido,
       comparativo: false,
       info: '% de quem respondeu e não converteu em venda.',
@@ -225,6 +296,18 @@ export default function InicioPage() {
     { status: 'nao_atendeu', label: STATUS_LABELS.nao_atendeu, value: naoAtendeuCount },
     { status: 'perdido', label: STATUS_LABELS.perdido, value: perdidoCount },
   ];
+
+  const tempoMedioPorEtapa = dashboard?.tempoMedioPorEtapa || [];
+  const tempoMedioConversao = dashboard?.tempoMedioConversao ?? { horasMedias: null };
+  const velocidadeRespostaAtendente = dashboard?.velocidadeRespostaAtendente || [];
+  const taxaRecuo = dashboard?.taxaRecuo ?? { taxaPct: null };
+  const caminhosComuns = dashboard?.caminhosComuns || [];
+  const statusPuladosTotal = dashboard?.statusPulados?.total ?? 0;
+  const origemPorDia = dashboard?.origemPorDia || [];
+  const motivosPerdido = (dashboard?.motivosPerdido || []).map((m) => ({
+    ...m,
+    label: MOTIVO_PERDIDO_LABELS[m.motivo] ?? m.motivo,
+  }));
 
   return (
     <div className="painel-disparo-light-theme min-h-screen bg-[var(--pd-bg)] p-4 sm:p-6 text-[var(--pd-text-primary)]">
@@ -263,6 +346,58 @@ export default function InicioPage() {
           </div>
         </div>
 
+        <div className={`${card} mb-4`}>
+          <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+            Aguardando Ação
+            <InfoTooltip texto="Conversas que precisam de atenção agora: sem resposta há mais de 24h, ou agendadas há mais de 3 dias sem fechar." />
+          </h2>
+          {loadingAguardandoAcao ? (
+            <div className="px-1 py-6 text-center text-[13px] text-[var(--pd-text-secondary)]">Carregando...</div>
+          ) : erroAguardandoAcao ? (
+            <div className="px-1 py-6 text-center text-[13px] text-[var(--pd-danger)]">
+              Não foi possível carregar as pendências: {erroAguardandoAcao}
+            </div>
+          ) : !aguardandoAcao || aguardandoAcao.length === 0 ? (
+            <div className="px-1 py-6 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhuma pendência no momento.</div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-[var(--pd-border)]">
+              <div className="max-h-72 overflow-y-auto">
+                <table className="w-full min-w-[560px] border-collapse text-[13px]">
+                  <thead className="sticky top-0 z-10 bg-[var(--pd-card-bg)]">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Nome</th>
+                      <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Telefone</th>
+                      <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Atendente</th>
+                      <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Situação</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--pd-border)]">
+                    {aguardandoAcao.map((item, index) => {
+                      const tempoRelativo = formatRelativoNotificacao(item.referencia);
+                      const situacao = AGUARDANDO_ACAO_LABELS[item.tipo]?.(tempoRelativo) ?? item.tipo;
+                      const intensidade = Math.max(0, 1 - index / aguardandoAcao.length);
+                      const corFundo = `rgba(224, 100, 90, ${intensidade * 0.15})`;
+                      return (
+                        <tr
+                          key={`${item.contatoId}-${item.tipo}`}
+                          onClick={() => irParaConversa(item)}
+                          style={{ backgroundColor: corFundo }}
+                          className="cursor-pointer hover:brightness-95"
+                        >
+                          <td className="px-3 py-2 font-semibold text-[var(--pd-text-primary)]">{item.nome}</td>
+                          <td className="px-3 py-2 text-[var(--pd-text-primary)]">{item.telefone}</td>
+                          <td className="px-3 py-2 text-[var(--pd-text-primary)]">{item.apelido || '—'}</td>
+                          <td className="px-3 py-2 text-[var(--pd-text-secondary)]">{situacao}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
         {loading ? (
           <div className="px-1 py-10 text-center text-sm text-[var(--pd-text-secondary)]">Carregando...</div>
         ) : loadError ? (
@@ -298,7 +433,7 @@ export default function InicioPage() {
                     className="pd-font-serif mt-1 text-[26px] font-extrabold leading-none"
                     style={{ color: kpi.cor }}
                   >
-                    {kpi.valor}
+                    {kpi.valor} <span className="text-xs text-[var(--pd-text-secondary)]">({kpi.contagemAbsoluta})</span>
                   </span>
                   {kpi.comparativo && (
                     <span
@@ -312,77 +447,143 @@ export default function InicioPage() {
               ))}
             </div>
 
-            <div className={card}>
-              <h2 className="pd-font-serif mb-3 text-[16px] font-bold leading-tight">Valores Absolutos</h2>
-              <div className="overflow-x-auto rounded-lg border border-[var(--pd-border)]">
-                <table className="w-full min-w-[280px] border-collapse text-[13px]">
-                  <thead className="bg-[var(--pd-surface-alt)]">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Status</th>
-                      <th className="px-3 py-2 text-right font-semibold text-[var(--pd-text-secondary)]">Quantidade</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--pd-border)]">
-                    {valoresAbsolutos.map((item) => (
-                      <tr key={item.status}>
-                        <td className="px-3 py-2 text-[var(--pd-text-primary)]">
-                          <span className="flex items-center gap-2">
-                            <span
-                              className="inline-block h-2.5 w-2.5 rounded-full"
-                              style={{ background: STATUS_HEX[item.status] }}
-                            />
-                            {STATUS_LABELS[item.status]}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right font-semibold text-[var(--pd-text-primary)]">{item.total}</td>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className={card}>
+                <h2 className="pd-font-serif mb-3 text-[16px] font-bold leading-tight">Valores Absolutos</h2>
+                <div className="overflow-x-auto rounded-lg border border-[var(--pd-border)]">
+                  <table className="w-full min-w-[280px] border-collapse text-[13px]">
+                    <thead className="bg-[var(--pd-surface-alt)]">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Status</th>
+                        <th className="px-3 py-2 text-right font-semibold text-[var(--pd-text-secondary)]">Quantidade</th>
+                        <th className="px-3 py-2 text-right font-semibold text-[var(--pd-text-secondary)]">%</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--pd-border)]">
+                      {valoresAbsolutos.map((item) => (
+                        <tr key={item.status}>
+                          <td className="px-3 py-2 text-[var(--pd-text-primary)]">
+                            <span className="flex items-center gap-2">
+                              <span
+                                className="inline-block h-2.5 w-2.5 rounded-full"
+                                style={{ background: STATUS_HEX[item.status] }}
+                              />
+                              {STATUS_LABELS[item.status]}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold text-[var(--pd-text-primary)]">{item.total}</td>
+                          <td className="px-3 py-2 text-right text-[var(--pd-text-secondary)]">{formatRatio(item.total, totalDisparos)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <div className={`${card} lg:col-span-1`}>
+              <div className={card}>
                 <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
-                  Funil de Conversão
-                  <InfoTooltip texto="Mesmo cálculo da Conversão dos Engajados, isolado em destaque." />
+                  Status Geral
+                  <InfoTooltip texto="Quantidade de conversas em cada status atual." />
                 </h2>
-                <span className="text-[11.5px] font-semibold uppercase tracking-[.08em] text-[var(--pd-text-secondary)]">
-                  Taxa de Conversão (engajados)
-                </span>
-                <span className="pd-font-serif mt-2 text-[36px] font-extrabold leading-none text-[var(--pd-text-primary)]">
-                  {taxaConversaoEngajados}%
-                </span>
-                <span className="mt-3 text-[11px] text-[var(--pd-text-secondary)]">
-                  Venda ÷ (Atendeu + Agendou + Venda + Perdido) — exclui quem nunca respondeu
-                </span>
-              </div>
-
-              <div className={`${card} lg:col-span-2`}>
-                <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
-                  Tendência Diária (últimos 30 dias)
-                  <InfoTooltip texto="Quantidade de disparos feitos por dia, últimos 30 dias." />
-                </h2>
-                {tendenciaDiaria.length === 0 ? (
-                  <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum disparo registrado.</div>
+                {statusGeral.length === 0 ? (
+                  <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum status registrado.</div>
                 ) : (
                   <ResponsiveContainer width="100%" height={280}>
-                    <LineChart data={tendenciaDiaria}>
+                    <BarChart data={statusGeral}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--pd-border)" />
-                      <XAxis
-                        dataKey="dia"
-                        tickFormatter={formatDiaCurto}
-                        tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }}
-                      />
+                      <XAxis dataKey="label" tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
                       <YAxis allowDecimals={false} tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
                       <Tooltip
                         contentStyle={{ background: 'var(--pd-card-bg)', border: '1px solid var(--pd-border)', borderRadius: 8, fontSize: 12 }}
-                        labelFormatter={(dia) => formatDiaCurto(dia)}
                       />
-                      <Line type="monotone" dataKey="total" stroke="var(--pd-accent)" strokeWidth={2} dot={false} />
-                    </LineChart>
+                      <Bar dataKey="total" radius={[4, 4, 0, 0]}>
+                        {statusGeral.map((entry) => (
+                          <Cell key={entry.status} fill={STATUS_HEX[entry.status] ?? 'var(--pd-accent)'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
                   </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+
+            <div className={card}>
+              <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                Tendência Diária (últimos 30 dias)
+                <InfoTooltip texto="Quantidade de disparos feitos por dia, últimos 30 dias." />
+              </h2>
+              {tendenciaDiaria.length === 0 ? (
+                <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum disparo registrado.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={tendenciaDiaria}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--pd-border)" />
+                    <XAxis
+                      dataKey="dia"
+                      tickFormatter={formatDiaCurto}
+                      tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }}
+                    />
+                    <YAxis allowDecimals={false} tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
+                    <Tooltip
+                      contentStyle={{ background: 'var(--pd-card-bg)', border: '1px solid var(--pd-border)', borderRadius: 8, fontSize: 12 }}
+                      labelFormatter={(dia) => formatDiaCurto(dia)}
+                    />
+                    <Line type="monotone" dataKey="total" stroke="var(--pd-accent)" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className={card}>
+                <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                  Disparos por Região (gráfico)
+                  <InfoTooltip texto="Quantidade de disparos feitos, agrupados por Estado." />
+                </h2>
+                {disparosPorRegiao.length === 0 ? (
+                  <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum disparo registrado.</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={disparosPorRegiao}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--pd-border)" />
+                      <XAxis dataKey="uf" tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
+                      <YAxis allowDecimals={false} tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
+                      <Tooltip
+                        contentStyle={{ background: 'var(--pd-card-bg)', border: '1px solid var(--pd-border)', borderRadius: 8, fontSize: 12 }}
+                        labelFormatter={(uf) => disparosPorRegiao.find((r) => r.uf === uf)?.nome ?? uf}
+                      />
+                      <Bar dataKey="total" fill="var(--pd-accent)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              <div className={card}>
+                <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                  Disparos por Região (tabela)
+                  <InfoTooltip texto="Quantidade de disparos feitos, agrupados por Estado." />
+                </h2>
+                {disparosPorRegiao.length === 0 ? (
+                  <div className="px-1 py-6 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum registro.</div>
+                ) : (
+                  <div className="max-h-[320px] overflow-y-auto rounded-lg border border-[var(--pd-border)]">
+                    <table className="w-full border-collapse text-[13px]">
+                      <thead className="sticky top-0 bg-[var(--pd-surface-alt)]">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Estado</th>
+                          <th className="px-3 py-2 text-right font-semibold text-[var(--pd-text-secondary)]">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--pd-border)]">
+                        {disparosPorRegiao.map((regiao) => (
+                          <tr key={regiao.estadoId}>
+                            <td className="px-3 py-2 text-[var(--pd-text-primary)]">{regiao.nome}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-[var(--pd-text-primary)]">{regiao.total}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             </div>
@@ -438,85 +639,25 @@ export default function InicioPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <div className={card}>
-                <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
-                  Disparos por Região (gráfico)
-                  <InfoTooltip texto="Quantidade de disparos feitos, agrupados por Estado." />
-                </h2>
-                {disparosPorRegiao.length === 0 ? (
-                  <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum disparo registrado.</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={280}>
-                    <BarChart data={disparosPorRegiao}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--pd-border)" />
-                      <XAxis dataKey="uf" tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
-                      <YAxis allowDecimals={false} tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
-                      <Tooltip
-                        contentStyle={{ background: 'var(--pd-card-bg)', border: '1px solid var(--pd-border)', borderRadius: 8, fontSize: 12 }}
-                        labelFormatter={(uf) => disparosPorRegiao.find((r) => r.uf === uf)?.nome ?? uf}
-                      />
-                      <Bar dataKey="total" fill="var(--pd-accent)" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-
-              <div className={card}>
-                <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
-                  Status Geral
-                  <InfoTooltip texto="Quantidade de conversas em cada status atual." />
-                </h2>
-                {statusGeral.length === 0 ? (
-                  <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum status registrado.</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={280}>
-                    <BarChart data={statusGeral}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--pd-border)" />
-                      <XAxis dataKey="label" tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
-                      <YAxis allowDecimals={false} tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
-                      <Tooltip
-                        contentStyle={{ background: 'var(--pd-card-bg)', border: '1px solid var(--pd-border)', borderRadius: 8, fontSize: 12 }}
-                      />
-                      <Bar dataKey="total" radius={[4, 4, 0, 0]}>
-                        {statusGeral.map((entry) => (
-                          <Cell key={entry.status} fill={STATUS_HEX[entry.status] ?? 'var(--pd-accent)'} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
-
             <div className={card}>
               <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
-                Disparos por Região (tabela)
-                <InfoTooltip texto="Quantidade de disparos feitos, agrupados por Estado." />
+                Motivos de Perda
+                <InfoTooltip texto="Distribuição dos motivos registrados ao marcar uma conversa como Perdido." />
               </h2>
-              {disparosPorRegiao.length === 0 ? (
-                <div className="px-1 py-6 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum registro.</div>
+              {motivosPerdido.length === 0 ? (
+                <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum registro.</div>
               ) : (
-                <div className="max-h-[320px] overflow-y-auto rounded-lg border border-[var(--pd-border)]">
-                  <table className="w-full border-collapse text-[13px]">
-                    <thead className="sticky top-0 bg-[var(--pd-surface-alt)]">
-                      <tr>
-                        <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Estado</th>
-                        <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">UF</th>
-                        <th className="px-3 py-2 text-right font-semibold text-[var(--pd-text-secondary)]">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--pd-border)]">
-                      {disparosPorRegiao.map((regiao) => (
-                        <tr key={regiao.estadoId}>
-                          <td className="px-3 py-2 text-[var(--pd-text-primary)]">{regiao.nome}</td>
-                          <td className="px-3 py-2 text-[var(--pd-text-secondary)]">{regiao.uf}</td>
-                          <td className="px-3 py-2 text-right font-semibold text-[var(--pd-text-primary)]">{regiao.total}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={motivosPerdido}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--pd-border)" />
+                    <XAxis dataKey="label" tick={{ fill: 'var(--pd-text-secondary)', fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={60} />
+                    <YAxis allowDecimals={false} tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
+                    <Tooltip
+                      contentStyle={{ background: 'var(--pd-card-bg)', border: '1px solid var(--pd-border)', borderRadius: 8, fontSize: 12 }}
+                    />
+                    <Bar dataKey="total" fill={STATUS_HEX.perdido} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               )}
             </div>
 
@@ -556,6 +697,157 @@ export default function InicioPage() {
                     </tbody>
                   </table>
                 </div>
+              )}
+            </div>
+
+            <div className="bg-[var(--pd-card-bg)] rounded-xl p-4 border border-[var(--pd-border)]/60">
+              <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                Tempo por Etapa
+                <InfoTooltip texto="Tempo médio que uma thread fica em cada status antes de mudar para o próximo." />
+              </h2>
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div>
+                  {tempoMedioPorEtapa.length === 0 ? (
+                    <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum registro.</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart data={tempoMedioPorEtapa}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--pd-border)" />
+                        <XAxis
+                          dataKey="status"
+                          tickFormatter={(status) => STATUS_LABELS[status] ?? status}
+                          tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }}
+                        />
+                        <YAxis allowDecimals={false} tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
+                        <Tooltip
+                          contentStyle={{ background: 'var(--pd-card-bg)', border: '1px solid var(--pd-border)', borderRadius: 8, fontSize: 12 }}
+                          labelFormatter={(status) => STATUS_LABELS[status] ?? status}
+                          formatter={(value) => [formatHorasMedias(value), 'Tempo médio']}
+                        />
+                        <Bar dataKey="horasMedias" radius={[4, 4, 0, 0]}>
+                          {tempoMedioPorEtapa.map((entry) => (
+                            <Cell key={entry.status} fill={STATUS_HEX[entry.status] ?? 'var(--pd-accent)'} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-4">
+                  <div className={cardCompacto}>
+                    <span className="text-[11.5px] font-semibold uppercase tracking-[.08em] text-[var(--pd-text-secondary)]">
+                      Tempo médio até a venda
+                    </span>
+                    <span className="pd-font-serif mt-1 text-[22px] font-extrabold leading-none text-[var(--pd-text-primary)]">
+                      {formatHorasMedias(tempoMedioConversao.horasMedias) ?? 'Sem conversões ainda'}
+                    </span>
+                  </div>
+
+                  <div>
+                    <h3 className="mb-2 text-[13px] font-semibold text-[var(--pd-text-secondary)]">Velocidade de Resposta por Atendente</h3>
+                    {velocidadeRespostaAtendente.length === 0 ? (
+                      <div className="px-1 py-6 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum atendimento registrado.</div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-lg border border-[var(--pd-border)]">
+                        <table className="w-full min-w-[280px] border-collapse text-[13px]">
+                          <thead className="bg-[var(--pd-surface-alt)]">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Colaboradora</th>
+                              <th className="px-3 py-2 text-right font-semibold text-[var(--pd-text-secondary)]">Tempo médio</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[var(--pd-border)]">
+                            {velocidadeRespostaAtendente.map((atendente) => (
+                              <tr key={atendente.apelido}>
+                                <td className="px-3 py-2 font-semibold text-[var(--pd-text-primary)]">{atendente.apelido}</td>
+                                <td className="px-3 py-2 text-right text-[var(--pd-text-primary)]">{formatHorasMedias(atendente.horasMedias)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-[var(--pd-card-bg)] rounded-xl p-4 border border-[var(--pd-border)]/60">
+              <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                Padrões de Comportamento
+                <InfoTooltip texto="Indicadores de threads que avançaram no funil mas não converteram." />
+              </h2>
+              <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className={cardCompacto}>
+                  <span className="text-[11.5px] font-semibold uppercase tracking-[.08em] text-[var(--pd-text-secondary)]">
+                    Taxa de Recuo
+                  </span>
+                  <span className="pd-font-serif mt-1 text-[22px] font-extrabold leading-none text-[var(--pd-text-primary)]">
+                    {taxaRecuo.taxaPct === null ? '—' : `${taxaRecuo.taxaPct}%`}
+                  </span>
+                </div>
+                <div className={cardCompacto}>
+                  <span className="text-[11.5px] font-semibold uppercase tracking-[.08em] text-[var(--pd-text-secondary)]">
+                    Vendas sem Agendamento
+                  </span>
+                  <span className="pd-font-serif mt-1 text-[22px] font-extrabold leading-none text-[var(--pd-text-primary)]">
+                    {statusPuladosTotal}
+                  </span>
+                </div>
+              </div>
+
+              <h3 className="mb-2 text-[13px] font-semibold text-[var(--pd-text-secondary)]">Caminhos Mais Comuns</h3>
+              {caminhosComuns.length === 0 ? (
+                <div className="px-1 py-6 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum registro.</div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-[var(--pd-border)]">
+                  <table className="w-full min-w-[280px] border-collapse text-[13px]">
+                    <thead className="bg-[var(--pd-surface-alt)]">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Caminho</th>
+                        <th className="px-3 py-2 text-right font-semibold text-[var(--pd-text-secondary)]">Quantidade</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--pd-border)]">
+                      {caminhosComuns.map((item) => (
+                        <tr key={item.caminho}>
+                          <td className="px-3 py-2 text-[var(--pd-text-primary)]">{item.caminho}</td>
+                          <td className="px-3 py-2 text-right font-semibold text-[var(--pd-text-primary)]">{item.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-[var(--pd-card-bg)] rounded-xl p-4 border border-[var(--pd-border)]/60">
+              <h2 className="pd-font-serif mb-3 flex items-center gap-1 text-[16px] font-bold leading-tight">
+                Atividade por Origem
+                <InfoTooltip texto="Quantidade de mudanças de status feitas pelo sistema (automático) vs. manualmente pelo atendente, por dia, últimos 30 dias." />
+              </h2>
+              {origemPorDia.length === 0 ? (
+                <div className="px-1 py-8 text-center text-[13px] text-[var(--pd-text-secondary)]">Nenhum registro.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={origemPorDia}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--pd-border)" />
+                    <XAxis
+                      dataKey="dia"
+                      tickFormatter={formatDiaCurto}
+                      tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }}
+                    />
+                    <YAxis allowDecimals={false} tick={{ fill: 'var(--pd-text-secondary)', fontSize: 12 }} />
+                    <Tooltip
+                      contentStyle={{ background: 'var(--pd-card-bg)', border: '1px solid var(--pd-border)', borderRadius: 8, fontSize: 12 }}
+                      labelFormatter={(dia) => formatDiaCurto(dia)}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Line type="monotone" dataKey="sistema" name="Sistema" stroke="var(--pd-accent)" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="atendente" name="Atendente" stroke="var(--pd-warning)" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
               )}
             </div>
           </div>

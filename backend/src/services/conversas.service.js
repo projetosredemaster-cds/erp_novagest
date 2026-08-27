@@ -80,8 +80,12 @@ async function responder(contatoId, numeroRemetenteId, corpo) {
   return { status: 'enviada', mensagem };
 }
 
-async function atualizarStatus(contatoId, numeroRemetenteId, status) {
-  return mensagensModel.upsertStatusConversa(contatoId, numeroRemetenteId, status);
+async function atualizarStatus(contatoId, numeroRemetenteId, status, motivo = null, motivoDetalhe = null) {
+  if (status === 'perdido' && (motivo === undefined || motivo === null || motivo === '')) {
+    return 'motivo_obrigatorio';
+  }
+
+  return mensagensModel.upsertStatusConversa(contatoId, numeroRemetenteId, status, motivo, motivoDetalhe);
 }
 
 async function listarPipeline({ busca, numeroRemetenteId, statusInicio, statusFim, disparoInicio, disparoFim } = {}) {

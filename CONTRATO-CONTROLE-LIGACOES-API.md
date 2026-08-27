@@ -2631,6 +2631,127 @@ novos em `listConversas`/`getDashboard`, têm teste automatizado ainda.
 
 ---
 
+## Pipeline v2, Motivo de Perda, Aguardando Ação (v10)
+
+> Adendo ao contrato v2 + v8 + v9 acima — três mudanças relacionadas:
+> (1) `GET /pipeline` ganha um segundo par de filtro de período e passa a
+> devolver o motivo da perda; (2) toda thread marcada `'perdido'` passa a
+> exigir um motivo, registrado em `StatusHistorico`; (3) um card novo,
+> "Aguardando Ação", numa rota própria fora de `GET /dashboard`.
+
+### `GET /api/controle-ligacoes/pipeline` — parâmetros renomeados + campos novos
+
+**Breaking, não aditivo**: `dataInicio`/`dataFim` (v9) foram RENOMEADOS
+para `statusInicio`/`statusFim` (mesma semântica, filtram
+`ConversasStatus.atualizado_em`) — os nomes antigos não são mais
+aceitos/lidos pelo backend. Um segundo par novo, `disparoInicio`/
+`disparoFim` (mesmo formato `YYYY-MM-DD`, dia de `dataFim` inclusivo),
+filtra por `Disparos.criado_em` — via `EXISTS` contra
+`DisparoContatos`/`Disparos`, não `JOIN` direto (um `JOIN` duplicaria
+a thread se o contato tiver mais de um `Disparo` no período).
+
+Cada item da resposta ganhou dois campos, `motivo`/`motivoDetalhe`
+(ver seção de motivo abaixo), preenchidos via `OUTER APPLY` buscando a
+linha mais recente de `StatusHistorico` com `status_novo='perdido'`
+daquela thread — `null` pra qualquer thread que não seja `'perdido'`
+atualmente (ou que nunca tenha sido).
+
+```json
+{
+  "contato_id": 603, "nome": "Maria Silva", "telefone": "5598912345678",
+  "numero_remetente_id": 7, "apelido": "Livia",
+  "status": "perdido", "atualizado_em": "2026-08-21T14:32:00.000Z",
+  "motivo": "preco_condicao", "motivoDetalhe": "Achou caro, quer desconto"
+}
+```
+
+### Motivo de perda
+
+`StatusHistorico` ganhou 2 colunas: `motivo VARCHAR(30) NULL`,
+`motivo_detalhe NVARCHAR(255) NULL` (mesma migration
+`MIGRATION-STATUS-HISTORICO.sql`, editada antes de rodar — sem
+`ALTER TABLE`, ainda não executada contra banco nenhum).
+
+`PUT /api/controle-ligacoes/conversas/:contatoId/:numeroRemetenteId/status`
+aceita 2 campos novos no corpo:
+```json
+{ "status": "perdido", "motivo": "preco_condicao", "motivoDetalhe": "opcional" }
+```
+- `motivo` é **obrigatório** quando `status === 'perdido'` — ausente/
+  `null`/`''` nesse caso: `400 { "error": "Campo \"motivo\" é obrigatório quando o status é \"perdido\"." }`.
+  Pra qualquer outro `status`, `motivo`/`motivoDetalhe` são ignorados
+  (gravados `null`).
+- `motivo`, quando presente, precisa ser um destes 6 valores — outro
+  valor qualquer: `400 { "error": "Campo \"motivo\" inválido." }`:
+  ```
+  nao_foi_loja | foi_loja_nao_comprou | preco_condicao |
+  comprou_outro_lugar | desistiu_sem_resposta | outro
+  ```
+- `motivoDetalhe` é texto livre opcional, sem validação de conteúdo/
+  tamanho além de precisar ser string (se não for, o backend trata
+  como `null`).
+- Resposta de sucesso não muda: `200 { contatoId, numeroRemetenteId, status }`
+  (não ecoa `motivo`/`motivoDetalhe`).
+
+No frontend, os 6 valores/rótulos vivem em UM SÓ lugar,
+`frontend/src/modulos/controle-ligacoes/components/ModalMotivoPerdido.jsx`
+(`export const MOTIVOS_PERDIDO`), reaproveitado por `ConversasPage.jsx`,
+`PipelinePage.jsx` e `InicioPage.jsx` — nunca duplicado.
+
+### `GET /api/controle-ligacoes/dashboard` — 7 blocos novos
+
+Adicionados ao mesmo `Promise.all`/mesmo filtro `estadoId`/`dataInicio`/
+`dataFim` dos 8 blocos originais:
+
+- `tempoMedioPorEtapa`: `[{ status, horasMedias }]` — tempo médio até a
+  próxima mudança de status, via `LEAD()` particionado por thread.
+- `tempoMedioConversao`: `{ horasMedias: number|null }` — tempo médio
+  entre `'atendeu'` e `'venda'`; `null` sem nenhuma conversão.
+- `velocidadeRespostaAtendente`: `[{ apelido, horasMedias }]` — tempo
+  entre o disparo e a primeira ação do atendente na thread.
+- `taxaRecuo`: `{ taxaPct: number|null }` — % de quem chegou a
+  `'agendou'` e terminou `'perdido'`; `null` sem ninguém no filtro
+  tendo chegado a agendar.
+- `caminhosComuns`: até 5 `[{ caminho, total }]` — sequência de status
+  por thread (`"atendeu → agendou → venda"`), mais frequentes primeiro.
+- `statusPulados`: `{ total }` — vendas que nunca passaram por
+  `'agendou'`.
+- `origemPorDia`: 30 entradas zero-preenchidas `[{ dia, sistema, atendente }]`
+  — contagem de mudanças de status por `origem`, últimos 30 dias.
+- `motivosPerdido`: `[{ motivo, total }]` — distribuição dos motivos
+  de perda (sem zero-fill, só motivos com pelo menos 1 registro).
+
+### `GET /api/controle-ligacoes/aguardando-acao` — rota nova, separada de `GET /dashboard`
+
+Protegida pelos mesmos middlewares do mount (`authMiddleware` +
+`operadorCobrancaMiddleware`). **Sem `estadoId`/`dataInicio`/`dataFim`**
+— sempre visão atual, cross-Estado, propositalmente.
+
+#### Resposta de sucesso — `200 OK`
+```json
+[
+  {
+    "contatoId": 603, "numeroRemetenteId": 7, "nome": "Maria Silva",
+    "telefone": "5598912345678", "apelido": "Livia",
+    "referencia": "2026-08-18T09:00:00.000Z", "tipo": "sem_resposta"
+  }
+]
+```
+`tipo` é `'sem_resposta'` (disparado há mais de 24h, sem nenhum
+`ConversasStatus`) ou `'agendado_parado'` (`status='agendou'` há mais
+de 3 dias sem fechar) — ordenado `ASC` por `referencia` (mais
+antigo/crítico primeiro). `'sem_resposta'` é agrupado por
+`(contato_id, numero_remetente_id)`, usando o `Disparo` MAIS RECENTE
+como referência — evita duplicar a mesma thread pendente quando o
+contato foi redisparado mais de uma vez sem responder.
+
+No frontend, tabela "Aguardando Ação" no topo de `InicioPage.jsx`
+(acima dos KPIs, busca independente dos filtros Estado/Período),
+linha clicável navegando pra `/controle-ligacoes/conversas` com o
+mesmo `state` que o sino de notificações já usa.
+
+---
+
 ## Fora de escopo deste v2 (registrado, não implementar agora)
 
 - ~~Central de Mensagens (Baileys) + conexão real via QR Code (`numero` e

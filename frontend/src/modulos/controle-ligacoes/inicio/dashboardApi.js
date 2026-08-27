@@ -11,3 +11,7 @@ export function fetchDashboard(token, { estadoId, dataInicio, dataFim } = {}) {
     { token, cache: 'no-store' }
   );
 }
+
+export function fetchAguardandoAcao(token) {
+  return apiRequest('/api/controle-ligacoes/aguardando-acao', { token, cache: 'no-store' });
+}

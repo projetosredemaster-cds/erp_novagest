@@ -107,6 +107,37 @@ function IconBell({ size = 20, className }) {
   );
 }
 
+function IconUpload({ size = 20, className }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function tocarSomNotificacao() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const tocarTom = (freq, inicio, duracao) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.15, ctx.currentTime + inicio);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + inicio + duracao);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + inicio);
+      osc.stop(ctx.currentTime + inicio + duracao);
+    };
+    tocarTom(880, 0, 0.12);
+    tocarTom(1175, 0.1, 0.15);
+  } catch (err) {
+    void err;
+  }
+}
+
 export default function ControleLigacoesShell() {
   const { isAdmin, token } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -196,6 +227,7 @@ export default function ControleLigacoesShell() {
         onEvent: (event, data) => {
           if (event !== 'nova-mensagem' || !data || data.primeiraResposta !== true) return;
           refetchNotificacoes();
+          tocarSomNotificacao();
         },
       }).catch((err) => {
         if (err?.name === 'AbortError') return;
@@ -290,14 +322,14 @@ export default function ControleLigacoesShell() {
           <div className="font-display mt-0.5 text-xl font-extrabold leading-none text-[var(--text)]">Controle de Ligações</div>
         </div>
 
-        <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+        <nav className="flex min-h-0 flex-1 flex-col gap-1">
           <div className="group relative">
             <NavLink to="/controle-ligacoes" end onClick={() => setMobileOpen(false)} className={navItemClass(sidebarColapsada)}>
               <IconLayoutGrid size={20} className="shrink-0" />
               <span className={sidebarColapsada ? 'lg:hidden' : ''}>Início</span>
             </NavLink>
             {sidebarColapsada ? (
-              <span className="pointer-events-none absolute left-full top-1/2 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-[var(--pd-text-primary)] px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 lg:block z-50">
+              <span className="pointer-events-none absolute left-full top-1/2 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 lg:block z-50">
                 Início
               </span>
             ) : null}
@@ -308,7 +340,7 @@ export default function ControleLigacoesShell() {
               <span className={sidebarColapsada ? 'lg:hidden' : ''}>Painel de Disparo</span>
             </NavLink>
             {sidebarColapsada ? (
-              <span className="pointer-events-none absolute left-full top-1/2 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-[var(--pd-text-primary)] px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 lg:block z-50">
+              <span className="pointer-events-none absolute left-full top-1/2 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 lg:block z-50">
                 Painel de Disparo
               </span>
             ) : null}
@@ -319,7 +351,7 @@ export default function ControleLigacoesShell() {
               <span className={sidebarColapsada ? 'lg:hidden' : ''}>Conversas</span>
             </NavLink>
             {sidebarColapsada ? (
-              <span className="pointer-events-none absolute left-full top-1/2 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-[var(--pd-text-primary)] px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 lg:block z-50">
+              <span className="pointer-events-none absolute left-full top-1/2 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 lg:block z-50">
                 Conversas
               </span>
             ) : null}
@@ -330,18 +362,18 @@ export default function ControleLigacoesShell() {
               <span className={sidebarColapsada ? 'lg:hidden' : ''}>Pipeline</span>
             </NavLink>
             {sidebarColapsada ? (
-              <span className="pointer-events-none absolute left-full top-1/2 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-[var(--pd-text-primary)] px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 lg:block z-50">
+              <span className="pointer-events-none absolute left-full top-1/2 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 lg:block z-50">
                 Pipeline
               </span>
             ) : null}
           </div>
           <div className="group relative">
             <NavLink to="/controle-ligacoes/importacao" onClick={() => setMobileOpen(false)} className={navItemClass(sidebarColapsada)}>
-              <span className="text-base leading-none">📥</span>
+              <IconUpload size={20} className="shrink-0" />
               <span className={sidebarColapsada ? 'lg:hidden' : ''}>Importação</span>
             </NavLink>
             {sidebarColapsada ? (
-              <span className="pointer-events-none absolute left-full top-1/2 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-[var(--pd-text-primary)] px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 lg:block z-50">
+              <span className="pointer-events-none absolute left-full top-1/2 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 lg:block z-50">
                 Importação
               </span>
             ) : null}

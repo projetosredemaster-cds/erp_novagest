@@ -9,6 +9,8 @@ BEGIN
     status_anterior VARCHAR(20) NULL,
     status_novo VARCHAR(20) NOT NULL,
     origem VARCHAR(20) NOT NULL,
+    motivo VARCHAR(30) NULL,
+    motivo_detalhe NVARCHAR(255) NULL,
     alterado_em DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
   );
   PRINT 'Tabela StatusHistorico criada com sucesso.';

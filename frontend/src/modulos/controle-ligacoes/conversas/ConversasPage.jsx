@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../../app/AuthContext.jsx';
 import { fetchConversas, fetchMensagens, enviarMensagem, atualizarStatusConversa, abrirStreamConversas } from './conversasApi.js';
 import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
+import ModalMotivoPerdido from '../components/ModalMotivoPerdido.jsx';
 
 
 const RECONEXAO_SSE_MS = 5000;
@@ -299,6 +300,7 @@ export default function ConversasPage() {
   const [enviando, setEnviando] = useState(false);
   const [envioError, setEnvioError] = useState(null);
   const [statusError, setStatusError] = useState(null);
+  const [modalMotivoAberto, setModalMotivoAberto] = useState(false);
   const contatoSelecionadoRef = useRef(contatoSelecionado);
   useEffect(() => {
     contatoSelecionadoRef.current = contatoSelecionado;
@@ -430,11 +432,11 @@ export default function ConversasPage() {
       .finally(() => setEnviando(false));
   }
 
-  function handleAlterarStatus(novoStatus) {
+  function aplicarNovoStatus(novoStatus, motivo = null, motivoDetalhe = null) {
     if (!contatoSelecionado) return;
     const { id: contatoId, numeroRemetenteId } = contatoSelecionado;
     setStatusError(null);
-    atualizarStatusConversa(token, contatoId, numeroRemetenteId, novoStatus)
+    atualizarStatusConversa(token, contatoId, numeroRemetenteId, novoStatus, motivo, motivoDetalhe)
       .then(() => {
         setConversas((prev) => prev.map((c) => (
           c.contato.id === contatoId && c.numeroRemetenteAtual?.id === numeroRemetenteId
@@ -448,6 +450,15 @@ export default function ConversasPage() {
       });
   }
 
+  function handleAlterarStatus(novoStatus) {
+    if (!contatoSelecionado) return;
+    if (novoStatus === 'perdido') {
+      setModalMotivoAberto(true);
+      return;
+    }
+    aplicarNovoStatus(novoStatus);
+  }
+
   const conversaAberta = conversas.find((c) => (
     c.contato.id === contatoSelecionado?.id && c.numeroRemetenteAtual?.id === contatoSelecionado?.numeroRemetenteId
   ));
@@ -459,6 +470,16 @@ export default function ConversasPage() {
 
   return (
     <div className="flex h-screen flex-col bg-[var(--bg)] p-4 text-[var(--text)] sm:p-6">
+      {modalMotivoAberto ? (
+        <ModalMotivoPerdido
+          onConfirmar={(motivo, motivoDetalhe) => {
+            setModalMotivoAberto(false);
+            aplicarNovoStatus('perdido', motivo, motivoDetalhe);
+          }}
+          onCancelar={() => setModalMotivoAberto(false)}
+        />
+      ) : null}
+
       <div className="mb-4 border-b border-[var(--border)] pb-[18px]">
         <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--violet)]">Controle de Ligações</div>
         <h1 className="font-display mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Conversas</h1>

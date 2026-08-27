@@ -32,10 +32,10 @@ export function enviarMensagem(token, contatoId, numeroRemetenteId, corpo) {
   });
 }
 
-export function atualizarStatusConversa(token, contatoId, numeroRemetenteId, status) {
+export function atualizarStatusConversa(token, contatoId, numeroRemetenteId, status, motivo = null, motivoDetalhe = null) {
   return apiRequest(`/api/controle-ligacoes/conversas/${contatoId}/${numeroRemetenteId}/status`, {
     method: 'PUT',
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, motivo, motivoDetalhe }),
     token,
   });
 }

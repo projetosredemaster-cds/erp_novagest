@@ -39,6 +39,17 @@ async function getDashboard(req, res) {
   }
 }
 
+async function getAguardandoAcao(req, res) {
+  try {
+    const itens = await dashboardService.getAguardandoAcao();
+    return res.status(200).json(itens);
+  } catch (err) {
+    console.error('[dashboard.controller] Erro ao buscar aguardando-acao:', err);
+    return res.status(500).json({ error: 'Erro interno ao buscar aguardando-acao.' });
+  }
+}
+
 module.exports = {
   getDashboard,
+  getAguardandoAcao,
 };

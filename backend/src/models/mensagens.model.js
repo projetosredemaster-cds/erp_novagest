@@ -304,7 +304,7 @@ async function findUltimoNumeroRemetenteDaConversa(contatoId) {
   return result.recordset[0]?.numero_remetente_id ?? null;
 }
 
-async function registrarHistoricoStatus(contatoId, numeroRemetenteId, statusAnterior, statusNovo, origem) {
+async function registrarHistoricoStatus(contatoId, numeroRemetenteId, statusAnterior, statusNovo, origem, motivo = null, motivoDetalhe = null) {
   const pool = await getPool();
   await pool.request()
     .input('contatoId', sql.Int, contatoId)
@@ -312,13 +312,15 @@ async function registrarHistoricoStatus(contatoId, numeroRemetenteId, statusAnte
     .input('statusAnterior', sql.VarChar(20), statusAnterior ?? null)
     .input('statusNovo', sql.VarChar(20), statusNovo)
     .input('origem', sql.VarChar(20), origem)
+    .input('motivo', sql.VarChar(30), motivo ?? null)
+    .input('motivoDetalhe', sql.NVarChar(255), motivoDetalhe ?? null)
     .query(`
-      INSERT INTO StatusHistorico (contato_id, numero_remetente_id, status_anterior, status_novo, origem, alterado_em)
-      VALUES (@contatoId, @numeroRemetenteId, @statusAnterior, @statusNovo, @origem, SYSUTCDATETIME());
+      INSERT INTO StatusHistorico (contato_id, numero_remetente_id, status_anterior, status_novo, origem, motivo, motivo_detalhe, alterado_em)
+      VALUES (@contatoId, @numeroRemetenteId, @statusAnterior, @statusNovo, @origem, @motivo, @motivoDetalhe, SYSUTCDATETIME());
     `);
 }
 
-async function upsertStatusConversa(contatoId, numeroRemetenteId, status) {
+async function upsertStatusConversa(contatoId, numeroRemetenteId, status, motivo = null, motivoDetalhe = null) {
   const pool = await getPool();
 
   const statusAtualResult = await pool.request()
@@ -344,7 +346,7 @@ async function upsertStatusConversa(contatoId, numeroRemetenteId, status) {
         VALUES (@contatoId, @numeroRemetenteId, @status, SYSUTCDATETIME());
     `);
 
-  await registrarHistoricoStatus(contatoId, numeroRemetenteId, statusAnterior, status, 'atendente');
+  await registrarHistoricoStatus(contatoId, numeroRemetenteId, statusAnterior, status, 'atendente', motivo, motivoDetalhe);
 }
 
 async function marcarAtendeuSeVazio(contatoId, numeroRemetenteId) {
@@ -377,10 +379,17 @@ async function listPipeline({ busca, numeroRemetenteId, statusInicio, statusFim,
     .input('disparoInicio', sql.Date, disparoInicio ?? null)
     .input('disparoFim', sql.Date, disparoFim ?? null)
     .query(`
-      SELECT c.id AS contato_id, c.nome, c.telefone, n.id AS numero_remetente_id, n.apelido, cs.status, cs.atualizado_em
+      SELECT c.id AS contato_id, c.nome, c.telefone, n.id AS numero_remetente_id, n.apelido, cs.status, cs.atualizado_em,
+        ultimoMotivo.motivo, ultimoMotivo.motivo_detalhe
       FROM ConversasStatus cs
       JOIN Contatos c ON c.id = cs.contato_id
       JOIN NumerosRemetentes n ON n.id = cs.numero_remetente_id
+      OUTER APPLY (
+        SELECT TOP 1 motivo, motivo_detalhe
+        FROM StatusHistorico sh2
+        WHERE sh2.contato_id = cs.contato_id AND sh2.numero_remetente_id = cs.numero_remetente_id AND sh2.status_novo = 'perdido'
+        ORDER BY sh2.alterado_em DESC
+      ) ultimoMotivo
       WHERE cs.status IS NOT NULL
         AND (@busca IS NULL OR c.nome LIKE @busca)
         AND (@numeroRemetenteId IS NULL OR cs.numero_remetente_id = @numeroRemetenteId)
@@ -398,7 +407,10 @@ async function listPipeline({ busca, numeroRemetenteId, statusInicio, statusFim,
         )
       ORDER BY cs.atualizado_em DESC
     `);
-  return result.recordset;
+  return result.recordset.map((row) => {
+    const { motivo_detalhe, ...resto } = row;
+    return { ...resto, motivoDetalhe: motivo_detalhe };
+  });
 }
 
 async function findPrimeiroNumeroRemetenteDaConversa(contatoId) {

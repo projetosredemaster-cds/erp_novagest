@@ -9,7 +9,12 @@ async function existeEstado(estadoId) {
   return estadosModel.existeEstado(estadoId);
 }
 
+async function getAguardandoAcao() {
+  return dashboardModel.getAguardandoAcao();
+}
+
 module.exports = {
   getDashboard,
   existeEstado,
+  getAguardandoAcao,
 };

@@ -56,3 +56,11 @@ body {
 .cl-figtree {
   font-family: 'Figtree', sans-serif;
 }
+
+.cl-figtree button:not(:disabled),
+.cl-figtree a,
+.cl-figtree select,
+.cl-figtree [role="button"],
+.cl-figtree .cursor-pointer-target {
+  cursor: pointer;
+}

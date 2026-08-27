@@ -38,6 +38,7 @@ router.post('/contatos/importar/:loteId/confirmar', importacaoController.confirm
 router.get('/contatos/importar/:loteId', importacaoController.detalhe);
 
 router.get('/dashboard', dashboardController.getDashboard);
+router.get('/aguardando-acao', dashboardController.getAguardandoAcao);
 
 router.get('/painel-disparo', disparosController.painelDisparo);
 router.get('/estados/:estadoId/contatos-disponiveis', disparosController.contatosDisponiveis);
