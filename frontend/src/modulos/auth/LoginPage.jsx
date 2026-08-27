@@ -5,8 +5,8 @@ import { moduleRegistry } from '../../app/moduleRegistry.js';
 
 const btn = "flex h-11 w-full items-center justify-center bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 text-sm font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
 const btnReativacao = "flex h-11 w-full items-center justify-center bg-[var(--pd-accent,var(--teal))] text-white border-none rounded-lg px-3.5 text-sm font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
-const inputErp = "w-full bg-[var(--pd-surface-alt,var(--panel-alt))] border border-[var(--pd-border,var(--border))] text-[var(--text)] px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:border-[var(--teal)]";
-const inputReativacao = "w-full bg-[var(--pd-surface-alt,var(--panel-alt))] border border-[var(--pd-border,var(--border))] text-[var(--text)] px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:border-[var(--pd-accent,var(--teal))]";
+const inputErp = "w-full bg-[var(--pd-surface-alt,var(--panel-alt))] border border-[var(--pd-border,var(--border))] text-[var(--pd-text-primary,var(--text))] px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:border-[var(--teal)]";
+const inputReativacao = "w-full bg-[var(--pd-surface-alt,var(--panel-alt))] border border-[var(--pd-border,var(--border))] text-[var(--pd-text-primary,var(--text))] px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:border-[var(--pd-accent,var(--teal))]";
 
 const defaultPath = moduleRegistry.find((mod) => !mod.adminOnly)?.path || '/ranking';
 

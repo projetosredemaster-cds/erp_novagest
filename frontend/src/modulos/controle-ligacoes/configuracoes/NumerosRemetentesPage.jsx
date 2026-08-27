@@ -63,8 +63,6 @@ function ConexaoWhatsAppModal({ numero, token, onClose, onConectado }) {
         }
       },
     }).catch((err) => {
-      // requisição cancelada pelo próprio usuário (fechou o modal) — não é
-      // um erro a ser exibido.
       if (controller.signal.aborted) return;
       setErro(err.message || 'Erro ao conectar ao WhatsApp.');
       setStatus('erro');
@@ -386,8 +384,8 @@ export default function NumerosRemetentesPage() {
       <div className="mx-auto max-w-[900px]">
         <div className="mb-[22px] flex flex-col gap-3 border-b border-[var(--pd-border)] pb-[18px] sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--pd-accent-strong)]">Configurações</div>
-            <h1 className="font-display mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Números Remetentes</h1>
+            <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--pd-accent-strong)]">Controle de ligações - Configurações</div>
+            <h1 className="pd-font-serif mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Números Remetentes</h1>
           </div>
           <button type="button" className={`${btn} w-full sm:w-auto`} onClick={openCreateForm}>
             + Novo número remetente

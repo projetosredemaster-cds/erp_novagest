@@ -5,7 +5,7 @@ import { importarContatos, fetchHistoricoImportacoes, fetchDetalheImportacao } f
 
 const btn = "bg-[var(--pd-accent)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
 const btnGhost = "bg-transparent border border-[var(--pd-border)] text-[var(--pd-text-primary)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--pd-card-bg)] disabled:cursor-not-allowed disabled:opacity-50";
-const inputCls = "w-full rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3 py-3 sm:py-2 text-sm text-[var(--pd-text-primary)] focus:outline-none focus:border-[var(--pd-accent)]";
+const inputCls = "w-full rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] cursor-pointer px-3 py-3 sm:py-2 text-sm text-[var(--pd-text-primary)] focus:outline-none focus:border-[var(--pd-accent)]";
 const card = "bg-[var(--pd-card-bg)] border border-[var(--pd-border)] rounded-2xl px-4 pt-5 pb-[22px] sm:px-5";
 
 function formatDataHora(iso) {
@@ -250,7 +250,7 @@ export default function ImportacaoPage() {
       <div className="mx-auto max-w-[900px]">
         <div className="mb-[22px] border-b border-[var(--pd-border)] pb-[18px]">
           <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--pd-accent-strong)]">Controle de Ligações</div>
-          <h1 className="font-display mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Importação de contatos</h1>
+          <h1 className="pd-font-serif mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Importação de contatos</h1>
         </div>
 
         {view === 'detalhe' ? (

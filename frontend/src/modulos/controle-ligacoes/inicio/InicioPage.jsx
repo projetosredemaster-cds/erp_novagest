@@ -39,8 +39,6 @@ const STATUS_LABELS = {
   perdido: 'Perdido',
 };
 
-// Mesmos hex literais usados em ConversasPage.jsx (tema escuro) — identidade de cor
-// por status mantida em toda a aplicação, independente do tema claro/escuro da tela.
 const STATUS_HEX = {
   atendeu: '#4fd1c5',
   agendou: '#a78bfa',
@@ -316,6 +314,7 @@ export default function InicioPage() {
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--pd-accent-strong)]">Controle de Ligações</div>
             <h1 className="pd-font-serif mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Início</h1>
+            <h3 className="pd-font-serif mt-0.5 text-[18px] font-extrabold leading-tight sm:text-[18px] sm:leading-none">Visão Geral</h3>
           </div>
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end">
             <div className="w-full sm:w-auto">
@@ -433,7 +432,7 @@ export default function InicioPage() {
                     className="pd-font-serif mt-1 text-[26px] font-extrabold leading-none"
                     style={{ color: kpi.cor }}
                   >
-                    {kpi.valor} <span className="text-xs text-[var(--pd-text-secondary)]">({kpi.contagemAbsoluta})</span>
+                    {kpi.contagemAbsoluta} <span className="text-xs text-[var(--pd-text-secondary)]">({kpi.valor} )</span>
                   </span>
                   {kpi.comparativo && (
                     <span
