@@ -1,11 +1,12 @@
+// style-system: Tailwind
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../../app/AuthContext.jsx';
 import { importarContatos, fetchHistoricoImportacoes, fetchDetalheImportacao } from './importacaoApi.js';
 
-const btn = "bg-[var(--violet)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
-const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--panel-alt)] disabled:cursor-not-allowed disabled:opacity-50";
-const inputCls = "w-full rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-3 sm:py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--violet)]";
-const card = "bg-[var(--panel)] border border-[var(--border)] rounded-2xl px-4 pt-5 pb-[22px] sm:px-5";
+const btn = "bg-[var(--pd-accent)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
+const btnGhost = "bg-transparent border border-[var(--pd-border)] text-[var(--pd-text-primary)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--pd-card-bg)] disabled:cursor-not-allowed disabled:opacity-50";
+const inputCls = "w-full rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3 py-3 sm:py-2 text-sm text-[var(--pd-text-primary)] focus:outline-none focus:border-[var(--pd-accent)]";
+const card = "bg-[var(--pd-card-bg)] border border-[var(--pd-border)] rounded-2xl px-4 pt-5 pb-[22px] sm:px-5";
 
 function formatDataHora(iso) {
   if (!iso) return '—';
@@ -30,9 +31,9 @@ const STAT_VARIANTS = {
 function Stat({ label, value, variant }) {
   const v = variant ? STAT_VARIANTS[variant] : null;
   return (
-    <div className={`rounded-lg border px-3 py-2.5 text-center ${v ? `${v.border} ${v.bg}` : 'border-[var(--border)] bg-[var(--panel-alt)]'}`}>
-      <div className={`font-display text-[20px] font-extrabold leading-none ${v ? v.value : 'text-[var(--text)]'}`}>{value}</div>
-      <div className="mt-1 text-[11px] uppercase tracking-[.06em] text-[var(--muted)]">{label}</div>
+    <div className={`rounded-lg border px-3 py-2.5 text-center ${v ? `${v.border} ${v.bg}` : 'border-[var(--pd-border)] bg-[var(--pd-card-bg)]'}`}>
+      <div className={`font-display text-[20px] font-extrabold leading-none ${v ? v.value : 'text-[var(--pd-text-primary)]'}`}>{value}</div>
+      <div className="mt-1 text-[11px] uppercase tracking-[.06em] text-[var(--pd-text-secondary)]">{label}</div>
     </div>
   );
 }
@@ -91,7 +92,7 @@ function DetalheImportacao({ loteId, token, onVoltar }) {
       </div>
 
       {loading ? (
-        <div className="px-1 py-6 text-center text-sm text-[var(--muted)]">Carregando...</div>
+        <div className="px-1 py-6 text-center text-sm text-[var(--pd-text-secondary)]">Carregando...</div>
       ) : error ? (
         <div className="flex flex-col items-stretch justify-between gap-3 rounded-xl border border-[var(--danger)] bg-[var(--danger-bg)] px-5 py-4 text-sm text-[var(--danger)] sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
           <span className="break-words">{error}</span>
@@ -103,8 +104,8 @@ function DetalheImportacao({ loteId, token, onVoltar }) {
         </div>
       ) : detalhe ? (
         <>
-          <div className="mb-4 text-sm text-[var(--muted)]">
-            <div className="text-[15px] font-semibold text-[var(--text)]">{detalhe.nomeArquivo}</div>
+          <div className="mb-4 text-sm text-[var(--pd-text-secondary)]">
+            <div className="text-[15px] font-semibold text-[var(--pd-text-primary)]">{detalhe.nomeArquivo}</div>
             <div>
               {detalhe.usuarioEmail || 'usuário removido'} · {formatDataHora(detalhe.criado_em)}
             </div>
@@ -114,7 +115,7 @@ function DetalheImportacao({ loteId, token, onVoltar }) {
 
           <h3 className="font-display mt-5 mb-2.5 text-[15px] font-bold">Por estado</h3>
           {(detalhe.porEstado || []).length === 0 ? (
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 text-[13px] text-[var(--muted)]">
+            <div className="rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3.5 py-2.5 text-[13px] text-[var(--pd-text-secondary)]">
               Nenhum contato com estado reconhecido nesta importação.
             </div>
           ) : (
@@ -122,10 +123,10 @@ function DetalheImportacao({ loteId, token, onVoltar }) {
               {detalhe.porEstado.map((item) => (
                 <div
                   key={item.estado.id}
-                  className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 text-sm"
+                  className="flex items-center justify-between rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3 py-2.5 text-sm"
                 >
-                  <span className="font-semibold text-[var(--text)]">{item.estado.nome} ({item.estado.uf})</span>
-                  <span className="text-[var(--muted)]">{item.totalContatos} contato(s)</span>
+                  <span className="font-semibold text-[var(--pd-text-primary)]">{item.estado.nome} ({item.estado.uf})</span>
+                  <span className="text-[var(--pd-text-secondary)]">{item.totalContatos} contato(s)</span>
                 </div>
               ))}
             </div>
@@ -133,14 +134,14 @@ function DetalheImportacao({ loteId, token, onVoltar }) {
 
           <h3 className="font-display mt-5 mb-2.5 text-[15px] font-bold">Linhas rejeitadas</h3>
           {(detalhe.erros || []).length === 0 ? (
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 text-[13px] text-[var(--muted)]">
+            <div className="rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3.5 py-2.5 text-[13px] text-[var(--pd-text-secondary)]">
               Nenhum erro nesta importação.
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
+            <div className="overflow-x-auto rounded-lg border border-[var(--pd-border)]">
               <table className="w-full min-w-[520px] text-left text-[13px]">
                 <thead>
-                  <tr className="bg-[var(--panel-alt)] text-[11px] uppercase tracking-[.06em] text-[var(--muted)]">
+                  <tr className="bg-[var(--pd-card-bg)] text-[11px] uppercase tracking-[.06em] text-[var(--pd-text-secondary)]">
                     <th className="px-3 py-2 font-semibold">Linha</th>
                     <th className="px-3 py-2 font-semibold">Tipo</th>
                     <th className="px-3 py-2 font-semibold">Nome</th>
@@ -148,16 +149,16 @@ function DetalheImportacao({ loteId, token, onVoltar }) {
                     <th className="px-3 py-2 font-semibold">Motivo</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[var(--border)]">
+                <tbody className="divide-y divide-[var(--pd-border)]">
                   {detalhe.erros.map((erro, idx) => (
                     <tr key={`${erro.linha}-${idx}`}>
-                      <td className="px-3 py-2 text-[var(--text)]">{erro.linha}</td>
+                      <td className="px-3 py-2 text-[var(--pd-text-primary)]">{erro.linha}</td>
                       <td className="px-3 py-2">
                         <TipoErroBadge tipo={erro.tipo} />
                       </td>
-                      <td className="px-3 py-2 text-[var(--text)]">{erro.nomePlanilha || '—'}</td>
-                      <td className="px-3 py-2 text-[var(--muted)]">{erro.contatoPlanilha || '—'}</td>
-                      <td className="px-3 py-2 text-[var(--muted)]">{erro.motivo}</td>
+                      <td className="px-3 py-2 text-[var(--pd-text-primary)]">{erro.nomePlanilha || '—'}</td>
+                      <td className="px-3 py-2 text-[var(--pd-text-secondary)]">{erro.contatoPlanilha || '—'}</td>
+                      <td className="px-3 py-2 text-[var(--pd-text-secondary)]">{erro.motivo}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -245,10 +246,10 @@ export default function ImportacaoPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] p-4 sm:p-6 text-[var(--text)]">
+    <div className="painel-disparo-light-theme min-h-screen bg-[var(--pd-bg)] p-4 sm:p-6 text-[var(--pd-text-primary)]">
       <div className="mx-auto max-w-[900px]">
-        <div className="mb-[22px] border-b border-[var(--border)] pb-[18px]">
-          <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--violet)]">Controle de Ligações</div>
+        <div className="mb-[22px] border-b border-[var(--pd-border)] pb-[18px]">
+          <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--pd-accent-strong)]">Controle de Ligações</div>
           <h1 className="font-display mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Importação de contatos</h1>
         </div>
 
@@ -258,9 +259,9 @@ export default function ImportacaoPage() {
           <>
             <div className={`${card} mb-[18px]`}>
               <h2 className="font-display mb-3 text-[19px] font-bold">Enviar planilha</h2>
-              <p className="mb-3.5 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 text-[12.5px] text-[var(--muted)]">
-                A planilha deve conter as colunas <strong className="text-[var(--text)]">NOME</strong> e{' '}
-                <strong className="text-[var(--text)]">CONTATO</strong> (com DDI, ex: 5598999999999).
+              <p className="mb-3.5 rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3.5 py-2.5 text-[12.5px] text-[var(--pd-text-secondary)]">
+                A planilha deve conter as colunas <strong className="text-[var(--pd-text-primary)]">NOME</strong> e{' '}
+                <strong className="text-[var(--pd-text-primary)]">CONTATO</strong> (com DDI, ex: 5598999999999).
               </p>
 
               <form onSubmit={handleUpload} noValidate className="flex flex-col gap-3 sm:flex-row sm:items-start">
@@ -283,12 +284,12 @@ export default function ImportacaoPage() {
               ) : null}
 
               {resultadoUpload ? (
-                <div className="mt-4 border-t border-[var(--border)] pt-4">
+                <div className="mt-4 border-t border-[var(--pd-border)] pt-4">
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="font-display text-[15px] font-bold">Resumo da importação</h3>
                     <button type="button" className={btnGhost} onClick={() => setResultadoUpload(null)}>Fechar</button>
                   </div>
-                  <p className="mb-3.5 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 text-[12.5px] text-[var(--muted)]">
+                  <p className="mb-3.5 rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3.5 py-2.5 text-[12.5px] text-[var(--pd-text-secondary)]">
                     Importação concluída — os contatos já estão disponíveis no Painel de Disparo.
                   </p>
                   <ResumoStats resumo={resultadoUpload} />
@@ -297,10 +298,10 @@ export default function ImportacaoPage() {
                       {resultadoUpload.porEstado.map((item) => (
                         <div
                           key={item.estado.id}
-                          className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 text-sm"
+                          className="flex items-center justify-between rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3 py-2.5 text-sm"
                         >
-                          <span className="font-semibold text-[var(--text)]">{item.estado.nome} ({item.estado.uf})</span>
-                          <span className="text-[var(--muted)]">{item.totalContatos} contato(s)</span>
+                          <span className="font-semibold text-[var(--pd-text-primary)]">{item.estado.nome} ({item.estado.uf})</span>
+                          <span className="text-[var(--pd-text-secondary)]">{item.totalContatos} contato(s)</span>
                         </div>
                       ))}
                     </div>
@@ -312,14 +313,14 @@ export default function ImportacaoPage() {
             <div className={card}>
               <h2 className="font-display mb-3.5 text-[19px] font-bold">Histórico de importações</h2>
               {loadingHistorico ? (
-                <div className="px-1 py-6 text-center text-sm text-[var(--muted)]">Carregando...</div>
+                <div className="px-1 py-6 text-center text-sm text-[var(--pd-text-secondary)]">Carregando...</div>
               ) : historicoError ? (
                 <div className="flex flex-col items-stretch justify-between gap-3 rounded-xl border border-[var(--danger)] bg-[var(--danger-bg)] px-5 py-4 text-sm text-[var(--danger)] sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                   <span className="break-words">Não foi possível carregar o histórico de importações: {historicoError}</span>
                   <button className={`${btn} w-full sm:w-auto`} onClick={retryHistorico}>Tentar novamente</button>
                 </div>
               ) : historico.length === 0 ? (
-                <div className="px-1 py-6 text-center text-sm text-[var(--muted)]">Nenhuma importação realizada ainda.</div>
+                <div className="px-1 py-6 text-center text-sm text-[var(--pd-text-secondary)]">Nenhuma importação realizada ainda.</div>
               ) : (
                 <div className="flex flex-col gap-2.5">
                   {historico.map((item) => (
@@ -327,13 +328,13 @@ export default function ImportacaoPage() {
                       key={item.loteImportacaoId}
                       type="button"
                       onClick={() => abrirDetalhe(item.loteImportacaoId)}
-                      className="flex w-full flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3.5 py-2.5 text-left transition-colors hover:border-[var(--violet)]"
+                      className="flex w-full flex-col gap-1 rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3.5 py-2.5 text-left transition-colors hover:border-[var(--pd-accent)]"
                     >
                       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                        <span className="truncate text-sm font-semibold text-[var(--text)]">{item.nomeArquivo}</span>
-                        <span className="text-[12px] text-[var(--muted)]">{formatDataHora(item.criado_em)}</span>
+                        <span className="truncate text-sm font-semibold text-[var(--pd-text-primary)]">{item.nomeArquivo}</span>
+                        <span className="text-[12px] text-[var(--pd-text-secondary)]">{formatDataHora(item.criado_em)}</span>
                       </div>
-                      <div className="text-[12px] text-[var(--muted)]">
+                      <div className="text-[12px] text-[var(--pd-text-secondary)]">
                         {formatResumoLinha(item)} · {item.usuarioEmail || 'usuário removido'}
                       </div>
                     </button>
@@ -351,7 +352,7 @@ export default function ImportacaoPage() {
         } ${
           flashMsg?.type === 'error'
             ? 'border border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger)]'
-            : 'bg-[var(--violet)] text-[#0b1010]'
+            : 'bg-[var(--pd-accent)] text-[#0b1010]'
         }`}
       >
         {flashMsg?.msg}

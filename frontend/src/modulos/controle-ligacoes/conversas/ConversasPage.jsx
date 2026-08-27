@@ -1,3 +1,4 @@
+// style-system: Tailwind
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../../app/AuthContext.jsx';
@@ -7,11 +8,11 @@ import ModalMotivoPerdido from '../components/ModalMotivoPerdido.jsx';
 
 
 const RECONEXAO_SSE_MS = 5000;
-const btn = "bg-[var(--violet)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
-const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--panel-alt)] disabled:cursor-not-allowed disabled:opacity-50";
-const inputCls = "w-full rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 sm:py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--violet)]";
-const pillCls = "rounded-full border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-1.5 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--violet)]";
-const pillToggleAtivoCls = "rounded-full border border-[var(--violet)] bg-[var(--violet)]/15 px-3 py-1.5 text-sm font-semibold text-[var(--violet)] focus:outline-none";
+const btn = "bg-[var(--pd-accent)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
+const btnGhost = "bg-transparent border border-[var(--pd-border)] text-[var(--pd-text-primary)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--pd-card-bg)] disabled:cursor-not-allowed disabled:opacity-50";
+const inputCls = "w-full rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3 py-2.5 sm:py-2 text-sm text-[var(--pd-text-primary)] focus:outline-none focus:border-[var(--pd-accent)]";
+const pillCls = "rounded-full border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3 py-1.5 text-sm text-[var(--pd-text-primary)] focus:outline-none focus:border-[var(--pd-accent)]";
+const pillToggleAtivoCls = "rounded-full border border-[var(--pd-accent)] bg-[var(--pd-accent)]/15 px-3 py-1.5 text-sm font-semibold text-[var(--pd-accent-strong)] focus:outline-none";
 
 const DEBOUNCE_BUSCA_MS = 400;
 
@@ -37,7 +38,7 @@ const STATUS_CORES = {
 };
 
 function corStatus(status) {
-  return STATUS_CORES[status] ?? { text: 'text-[var(--muted)]', bg: 'bg-transparent', border: 'border-[var(--border)]' };
+  return STATUS_CORES[status] ?? { text: 'text-[var(--pd-text-secondary)]', bg: 'bg-transparent', border: 'border-[var(--pd-border)]' };
 }
 
 function formatRelativo(iso) {
@@ -87,32 +88,32 @@ function ConversaItem({ conversa, selecionada, onSelecionar }) {
       type="button"
       onClick={onSelecionar}
       aria-pressed={selecionada}
-      className={`block w-full border-b border-[var(--border)] px-3 py-3 text-left transition-colors ${
-        selecionada ? 'border-l-2 border-l-[var(--violet)] bg-[var(--panel-alt)]' : 'hover:bg-[var(--panel-alt)]'
+      className={`block w-full border-b border-[var(--pd-border)] px-3 py-3 text-left transition-colors ${
+        selecionada ? 'border-l-2 border-l-[var(--pd-accent)] bg-[var(--pd-card-bg)]' : 'hover:bg-[var(--pd-card-bg)]'
       }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13.5px] font-semibold text-[var(--text)]">{contato.nome}</div>
-          <div className="text-[11.5px] text-[var(--muted)]">{contato.telefone}</div>
+          <div className="truncate text-[13.5px] font-semibold text-[var(--pd-text-primary)]">{contato.nome}</div>
+          <div className="text-[11.5px] text-[var(--pd-text-secondary)]">{contato.telefone}</div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <span className="text-[11px] text-[var(--muted)]">{formatRelativo(ultimaMensagem?.criado_em)}</span>
+          <span className="text-[11px] text-[var(--pd-text-secondary)]">{formatRelativo(ultimaMensagem?.criado_em)}</span>
           {naoLidas > 0 ? (
-            <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[var(--violet)] px-1.5 text-[10.5px] font-bold text-[#0b1010]">
+            <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[var(--pd-accent)] px-1.5 text-[10.5px] font-bold text-[#0b1010]">
               {naoLidas}
             </span>
           ) : null}
         </div>
       </div>
-      <div className="mt-1 truncate text-[12.5px] text-[var(--muted)]">
+      <div className="mt-1 truncate text-[12.5px] text-[var(--pd-text-secondary)]">
         {ultimaMensagem?.corpo || '—'}
       </div>
       {}
       {numeroRemetenteInicial || conversa.status ? (
         <div className="mt-1 flex flex-wrap gap-1">
           {numeroRemetenteInicial ? (
-            <span className="inline-block truncate rounded-full bg-[var(--violet)]/20 px-2 py-0.5 text-[10.5px] font-semibold text-[var(--violet)]">
+            <span className="inline-block truncate rounded-full bg-[var(--pd-accent)]/20 px-2 py-0.5 text-[10.5px] font-semibold text-[var(--pd-accent-strong)]">
               {numeroRemetenteInicial.apelido}
             </span>
           ) : null}
@@ -167,11 +168,11 @@ function StatusEntregaIcone({ status }) {
   const tamanho = 13;
   switch (status) {
     case 'pendente':
-      return <IconClock size={tamanho} className="text-[var(--muted)]" />;
+      return <IconClock size={tamanho} className="text-[var(--pd-text-secondary)]" />;
     case 'enviado':
-      return <IconCheck size={tamanho} className="text-[var(--muted)]" />;
+      return <IconCheck size={tamanho} className="text-[var(--pd-text-secondary)]" />;
     case 'entregue':
-      return <IconCheckCheck size={tamanho} className="text-[var(--muted)]" />;
+      return <IconCheckCheck size={tamanho} className="text-[var(--pd-text-secondary)]" />;
     case 'lido':
       return <IconCheckCheck size={tamanho} className="text-blue-400" />;
     case 'erro':
@@ -182,18 +183,17 @@ function StatusEntregaIcone({ status }) {
 }
 
 function ChatBubble({ mensagem }) {
-  const alinhamento = mensagem.remetente === 'cliente' ? 'justify-start' : 'justify-end';
-  const bubbleColor =
-    mensagem.remetente === 'cliente'
-      ? 'bg-[var(--panel-alt)] border border-[var(--border)] text-[var(--text)]'
-      : mensagem.remetente === 'ia'
-        ? 'bg-[var(--violet)]/20 text-[var(--text)]'
-        : 'bg-[var(--violet)] text-[#0b1010]';
-  const horaColor = ['atendente', 'colaboradora'].includes(mensagem.remetente) ? 'text-[#0b1010]/70' : 'text-[var(--muted)]';
+  const ehEnviada = mensagem.remetente !== 'cliente';
+  const alinhamento = ehEnviada ? 'justify-end' : 'justify-start';
+  const cantoCauda = ehEnviada ? 'rounded-br-sm' : 'rounded-bl-sm';
+  const bubbleColor = ehEnviada
+    ? 'bg-[#D9F2E3] text-[var(--pd-text-primary)]'
+    : 'bg-[var(--pd-card-bg)] border border-[var(--pd-border)] text-[var(--pd-text-primary)]';
+  const horaColor = ehEnviada ? 'text-[var(--pd-text-primary)]/60' : 'text-[var(--pd-text-secondary)]';
 
   return (
     <div className={`flex ${alinhamento}`}>
-      <div className={`max-w-[75%] rounded-2xl px-3.5 py-2 text-[13.5px] ${bubbleColor}`}>
+      <div className={`max-w-[75%] rounded-2xl ${cantoCauda} px-3.5 py-2 text-[13.5px] ${bubbleColor}`}>
         <div className="whitespace-pre-wrap break-words">{mensagem.corpo}</div>
         <div className={`mt-1 flex items-center justify-end gap-1 text-[10.5px] ${horaColor}`}>
           <span>{formatHoraMensagem(mensagem.criado_em)}</span>
@@ -469,7 +469,7 @@ export default function ConversasPage() {
   const conversasExibidas = ocultarVendas ? conversas.filter((c) => c.status !== 'venda') : conversas;
 
   return (
-    <div className="flex h-screen flex-col bg-[var(--bg)] p-4 text-[var(--text)] sm:p-6">
+    <div className="painel-disparo-light-theme flex h-screen flex-col bg-[var(--pd-bg)] p-4 text-[var(--pd-text-primary)] sm:p-6">
       {modalMotivoAberto ? (
         <ModalMotivoPerdido
           onConfirmar={(motivo, motivoDetalhe) => {
@@ -480,15 +480,15 @@ export default function ConversasPage() {
         />
       ) : null}
 
-      <div className="mb-4 border-b border-[var(--border)] pb-[18px]">
-        <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--violet)]">Controle de Ligações</div>
+      <div className="mb-4 border-b border-[var(--pd-border)] pb-[18px]">
+        <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--pd-accent-strong)]">Controle de Ligações</div>
         <h1 className="font-display mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Conversas</h1>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
         {}
-        <div className="flex min-h-0 flex-col rounded-2xl border border-[var(--border)] bg-[var(--panel)]">
-          <div className="flex flex-col gap-2 border-b border-[var(--border)] p-3">
+        <div className="flex min-h-0 flex-col rounded-2xl border border-[var(--pd-border)] bg-[var(--pd-card-bg)]">
+          <div className="flex flex-col gap-2 border-b border-[var(--pd-border)] p-3">
             <div className="flex items-center gap-2">
               <input
                 type="search"
@@ -546,14 +546,14 @@ export default function ConversasPage() {
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             {loading && conversas.length === 0 ? (
-              <div className="px-3 py-8 text-center text-sm text-[var(--muted)]">Carregando...</div>
+              <div className="px-3 py-8 text-center text-sm text-[var(--pd-text-secondary)]">Carregando...</div>
             ) : loadError ? (
               <div className="flex flex-col items-stretch gap-2.5 px-3 py-6 text-[13px] text-[var(--danger)]">
                 <span className="break-words">Não foi possível carregar as conversas: {loadError}</span>
                 <button type="button" className={btnGhost} onClick={retryConversas}>Tentar novamente</button>
               </div>
             ) : conversasExibidas.length === 0 ? (
-              <div className="px-3 py-8 text-center text-sm text-[var(--muted)]">Nenhuma conversa ainda.</div>
+              <div className="px-3 py-8 text-center text-sm text-[var(--pd-text-secondary)]">Nenhuma conversa ainda.</div>
             ) : (
               <ul>
                 {conversasExibidas.map((c) => (
@@ -574,26 +574,26 @@ export default function ConversasPage() {
         </div>
 
         {}
-        <div className="flex min-h-0 flex-col rounded-2xl border border-[var(--border)] bg-[var(--panel)]">
+        <div className="flex min-h-0 flex-col rounded-2xl border border-[var(--pd-border)] bg-[var(--pd-card-bg)]">
           {!contatoSelecionado ? (
-            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-[var(--muted)]">
+            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-[var(--pd-text-secondary)]">
               Selecione uma conversa na lista ao lado para visualizar o histórico.
             </div>
           ) : (
             <>
-              <div className="border-b border-[var(--border)] px-4 py-3">
+              <div className="border-b border-[var(--pd-border)] px-4 py-3 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <div className="text-[14.5px] font-semibold text-[var(--text)]">{contatoSelecionado.nome}</div>
-                    <div className="text-[12px] text-[var(--muted)]">{contatoSelecionado.telefone}</div>
+                    <div className="text-[14.5px] font-semibold text-[var(--pd-text-primary)]">{contatoSelecionado.nome}</div>
+                    <div className="text-[12px] text-[var(--pd-text-secondary)]">{contatoSelecionado.telefone}</div>
                     {origemAtendimento ? (
-                      <div className="mt-0.5 text-[11.5px] text-[var(--muted)]">{origemAtendimento}</div>
+                      <div className="mt-0.5 text-[11.5px] text-[var(--pd-text-secondary)]">{origemAtendimento}</div>
                     ) : null}
                   </div>
-                  <label className="flex flex-col items-end gap-1 text-[11px] text-[var(--muted)]">
+                  <label className="flex flex-col items-end gap-1 text-[11px] text-[var(--pd-text-secondary)]">
                     <span>Status da conversa</span>
                     <select
-                      className={`w-auto rounded-lg border px-3 py-1.5 text-[12.5px] font-medium focus:outline-none focus:border-[var(--violet)] ${corStatus(conversaAberta?.status).border} ${corStatus(conversaAberta?.status).bg} ${corStatus(conversaAberta?.status).text}`}
+                      className={`w-auto rounded-lg border px-3 py-1.5 text-[12.5px] font-medium focus:outline-none focus:border-[var(--pd-accent)] ${corStatus(conversaAberta?.status).border} ${corStatus(conversaAberta?.status).bg} ${corStatus(conversaAberta?.status).text}`}
                       aria-label="Status da conversa"
                       value={conversaAberta?.status ?? ''}
                       onChange={(e) => handleAlterarStatus(e.target.value)}
@@ -611,24 +611,27 @@ export default function ConversasPage() {
                 ) : null}
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              <div
+                className="min-h-0 flex-1 overflow-y-auto bg-[var(--pd-bg)] px-4 py-3"
+                style={{ backgroundImage: 'radial-gradient(var(--pd-border) 0.5px, transparent 0.5px)', backgroundSize: '16px 16px' }}
+              >
                 {loadingMensagens ? (
-                  <div className="px-1 py-8 text-center text-sm text-[var(--muted)]">Carregando mensagens...</div>
+                  <div className="px-1 py-8 text-center text-sm text-[var(--pd-text-secondary)]">Carregando mensagens...</div>
                 ) : mensagensError ? (
                   <div className="flex flex-col items-stretch gap-2.5 text-[13px] text-[var(--danger)]">
                     <span className="break-words">Não foi possível carregar as mensagens: {mensagensError}</span>
                     <button type="button" className={btnGhost} onClick={retryMensagens}>Tentar novamente</button>
                   </div>
                 ) : mensagens.length === 0 ? (
-                  <div className="px-1 py-8 text-center text-sm text-[var(--muted)]">Nenhuma mensagem ainda.</div>
+                  <div className="px-1 py-8 text-center text-sm text-[var(--pd-text-secondary)]">Nenhuma mensagem ainda.</div>
                 ) : (
                   <div className="flex flex-col gap-2">
                     {grupos.map((item) => (
                       item.tipo === 'divider' ? (
                         <div key={item.key} className="my-2 flex items-center gap-3">
-                          <div className="h-px flex-1 bg-[var(--border)]" />
-                          <span className="text-[11px] font-semibold text-[var(--muted)]">{item.data}</span>
-                          <div className="h-px flex-1 bg-[var(--border)]" />
+                          <div className="h-px flex-1 bg-[var(--pd-border)]" />
+                          <span className="text-[11px] font-semibold text-[var(--pd-text-secondary)]">{item.data}</span>
+                          <div className="h-px flex-1 bg-[var(--pd-border)]" />
                         </div>
                       ) : (
                         <ChatBubble key={item.key} mensagem={item.mensagem} />
@@ -638,7 +641,7 @@ export default function ConversasPage() {
                 )}
               </div>
 
-              <form onSubmit={handleEnviar} className="border-t border-[var(--border)] p-3">
+              <form onSubmit={handleEnviar} className="border-t border-[var(--pd-border)] p-3">
                 {envioError ? (
                   <div className="mb-2 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3 py-2 text-[12.5px] text-[var(--danger)] break-words">
                     {envioError}

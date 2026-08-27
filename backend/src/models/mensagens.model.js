@@ -437,7 +437,7 @@ async function listHistoricoStatus(contatoId, numeroRemetenteId) {
     .input('contatoId', sql.Int, contatoId)
     .input('numeroRemetenteId', sql.Int, numeroRemetenteId)
     .query(`
-      SELECT status_anterior, status_novo, origem, alterado_em
+      SELECT status_anterior, status_novo, origem, motivo, motivo_detalhe, alterado_em
       FROM StatusHistorico
       WHERE contato_id = @contatoId AND numero_remetente_id = @numeroRemetenteId
       ORDER BY alterado_em DESC

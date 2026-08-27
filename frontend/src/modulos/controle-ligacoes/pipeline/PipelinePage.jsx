@@ -158,7 +158,7 @@ function PipelineCard({ item, salvando, onAlterarStatus, onAbrirDetalhe }) {
       </select>
 
       {item.status === 'perdido' && item.motivo ? (
-        <p className="mt-1 text-[11px] text-[var(--pd-text-secondary)]">
+        <p className="mt-1 text-[11px] text-[var(--pd-text-secondary)] break-words">
           Motivo: {MOTIVO_PERDIDO_LABELS[item.motivo] ?? item.motivo}
           {item.motivoDetalhe ? ` — ${item.motivoDetalhe}` : ''}
         </p>
@@ -214,7 +214,7 @@ function PipelineCardModal({ item, token, onFechar }) {
       onClick={onFechar}
     >
       <div
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-[var(--pd-border)]/60 bg-[var(--pd-card-bg)] p-5"
+        className="max-h-[85vh] w-full max-w-md overflow-y-auto overflow-x-hidden rounded-2xl border border-[var(--pd-border)]/60 bg-[var(--pd-card-bg)] p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between gap-2">
@@ -269,7 +269,7 @@ function PipelineCardModal({ item, token, onFechar }) {
                 {historico.map((entrada, idx) => (
                   <li
                     key={`${entrada.alterado_em}-${idx}`}
-                    className="rounded-lg border border-[var(--pd-border)]/60 px-3 py-2 text-[12.5px]"
+                    className="min-w-0 rounded-lg border border-[var(--pd-border)]/60 px-3 py-2 text-[12.5px]"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-semibold text-[var(--pd-text-primary)]">
@@ -282,6 +282,12 @@ function PipelineCardModal({ item, token, onFechar }) {
                       </span>
                     </div>
                     <div className="mt-1 text-[11.5px] text-[var(--pd-text-secondary)]">{formatDataHora(entrada.alterado_em)}</div>
+                    {entrada.status_novo === 'perdido' && entrada.motivo ? (
+                      <div className="mt-1.5 text-[11.5px] text-[var(--pd-text-secondary)] break-words">
+                        Motivo: {MOTIVO_PERDIDO_LABELS[entrada.motivo] ?? entrada.motivo}
+                        {entrada.motivo_detalhe ? ` — ${entrada.motivo_detalhe}` : ''}
+                      </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
