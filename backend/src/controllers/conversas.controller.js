@@ -10,12 +10,28 @@ function parseBoolean(value) {
 }
 
 async function listar(req, res) {
-  const { busca, apenasNaoLidas } = req.query || {};
+  const { busca, apenasNaoLidas, numeroRemetenteId, status } = req.query || {};
+
+  let numeroRemetenteIdNum;
+  if (numeroRemetenteId !== undefined) {
+    numeroRemetenteIdNum = Number(numeroRemetenteId);
+    if (!isPositiveInteger(numeroRemetenteIdNum)) {
+      return res
+        .status(400)
+        .json({ error: 'Parâmetro "numeroRemetenteId" deve ser um número inteiro positivo.' });
+    }
+  }
+
+  if (status !== undefined && !STATUS_VALIDOS.includes(status)) {
+    return res.status(400).json({ error: 'Parâmetro "status" inválido.' });
+  }
 
   try {
     const conversas = await conversasService.listarConversas({
       busca: typeof busca === 'string' ? busca : undefined,
       apenasNaoLidas: parseBoolean(apenasNaoLidas),
+      numeroRemetenteId: numeroRemetenteIdNum,
+      status: typeof status === 'string' ? status : undefined,
     });
     return res.json(conversas);
   } catch (err) {
@@ -133,6 +149,53 @@ async function atualizarStatus(req, res) {
   }
 }
 
+async function pipeline(req, res) {
+  const { busca, numeroRemetenteId, statusInicio, statusFim, disparoInicio, disparoFim } = req.query || {};
+
+  let numeroRemetenteIdNum;
+  if (numeroRemetenteId !== undefined) {
+    numeroRemetenteIdNum = Number(numeroRemetenteId);
+    if (!isPositiveInteger(numeroRemetenteIdNum)) {
+      return res
+        .status(400)
+        .json({ error: 'Parâmetro "numeroRemetenteId" deve ser um número inteiro positivo.' });
+    }
+  }
+
+  try {
+    const itens = await conversasService.listarPipeline({
+      busca: typeof busca === 'string' ? busca : undefined,
+      numeroRemetenteId: numeroRemetenteIdNum,
+      statusInicio: typeof statusInicio === 'string' ? statusInicio : undefined,
+      statusFim: typeof statusFim === 'string' ? statusFim : undefined,
+      disparoInicio: typeof disparoInicio === 'string' ? disparoInicio : undefined,
+      disparoFim: typeof disparoFim === 'string' ? disparoFim : undefined,
+    });
+    return res.json(itens);
+  } catch (err) {
+    console.error('[conversas.controller] Erro ao listar pipeline:', err);
+    return res.status(500).json({ error: 'Erro interno ao listar pipeline.' });
+  }
+}
+
+async function pipelineHistorico(req, res) {
+  const contatoIdNum = Number(req.params.contatoId);
+  const numeroRemetenteIdNum = Number(req.params.numeroRemetenteId);
+  if (!isPositiveInteger(contatoIdNum) || !isPositiveInteger(numeroRemetenteIdNum)) {
+    return res
+      .status(400)
+      .json({ error: 'Parâmetros "contatoId" e "numeroRemetenteId" devem ser números inteiros positivos.' });
+  }
+
+  try {
+    const itens = await conversasService.listarHistoricoStatus(contatoIdNum, numeroRemetenteIdNum);
+    return res.json(itens);
+  } catch (err) {
+    console.error('[conversas.controller] Erro ao listar histórico de status do pipeline:', err);
+    return res.status(500).json({ error: 'Erro interno ao listar histórico de status do pipeline.' });
+  }
+}
+
 function stream(req, res) {
   res.set({
     'Content-Type': 'text/event-stream',
@@ -167,5 +230,7 @@ module.exports = {
   mensagens,
   responder,
   atualizarStatus,
+  pipeline,
+  pipelineHistorico,
   stream,
 };

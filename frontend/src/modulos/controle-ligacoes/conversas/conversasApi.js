@@ -1,9 +1,11 @@
 import { apiRequest } from '../../../lib/apiClient.js';
 
-export function fetchConversas(token, { busca, apenasNaoLidas } = {}) {
+export function fetchConversas(token, { busca, apenasNaoLidas, numeroRemetenteId, status } = {}) {
   const params = new URLSearchParams();
   if (busca) params.set('busca', busca);
   if (apenasNaoLidas) params.set('apenasNaoLidas', 'true');
+  if (numeroRemetenteId) params.set('numeroRemetenteId', String(numeroRemetenteId));
+  if (status) params.set('status', status);
   const query = params.toString();
   return apiRequest(
     `/api/controle-ligacoes/conversas${query ? `?${query}` : ''}`,

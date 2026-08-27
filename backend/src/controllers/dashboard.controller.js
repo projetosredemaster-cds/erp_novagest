@@ -5,7 +5,7 @@ function isPositiveInteger(value) {
 }
 
 async function getDashboard(req, res) {
-  const { estadoId } = req.query || {};
+  const { estadoId, dataInicio, dataFim } = req.query || {};
 
   let estadoIdNum = null;
 
@@ -27,7 +27,11 @@ async function getDashboard(req, res) {
       }
     }
 
-    const dashboard = await dashboardService.getDashboard(estadoIdNum);
+    const dashboard = await dashboardService.getDashboard({
+      estadoId: estadoIdNum,
+      dataInicio: typeof dataInicio === 'string' ? dataInicio : undefined,
+      dataFim: typeof dataFim === 'string' ? dataFim : undefined,
+    });
     return res.status(200).json(dashboard);
   } catch (err) {
     console.error('[dashboard.controller] Erro ao buscar dashboard:', err);

@@ -2,12 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../../app/AuthContext.jsx';
 import { fetchConversas, fetchMensagens, enviarMensagem, atualizarStatusConversa, abrirStreamConversas } from './conversasApi.js';
+import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
 
 
 const RECONEXAO_SSE_MS = 5000;
 const btn = "bg-[var(--violet)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
 const btnGhost = "bg-transparent border border-[var(--border)] text-[var(--text)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--panel-alt)] disabled:cursor-not-allowed disabled:opacity-50";
 const inputCls = "w-full rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2.5 sm:py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--violet)]";
+const pillCls = "rounded-full border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-1.5 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--violet)]";
+const pillToggleAtivoCls = "rounded-full border border-[var(--violet)] bg-[var(--violet)]/15 px-3 py-1.5 text-sm font-semibold text-[var(--violet)] focus:outline-none";
 
 const DEBOUNCE_BUSCA_MS = 400;
 
@@ -211,16 +214,26 @@ export default function ConversasPage() {
   const [buscaInput, setBuscaInput] = useState('');
   const [busca, setBusca] = useState('');
   const ultimaBuscaAplicadaRef = useRef('');
+  const [numerosRemetentes, setNumerosRemetentes] = useState([]);
+  const [filtroNumeroRemetenteId, setFiltroNumeroRemetenteId] = useState('');
+  const [filtroStatus, setFiltroStatus] = useState('');
+  const [ocultarVendas, setOcultarVendas] = useState(false);
+
+  useEffect(() => {
+    fetchNumerosRemetentes(token)
+      .then((lista) => setNumerosRemetentes((lista || []).filter((n) => n.ativo)))
+      .catch(() => setNumerosRemetentes([]));
+  }, [token]);
 
   const carregarConversas = useCallback(() => (
-    fetchConversas(token, { busca })
+    fetchConversas(token, { busca, numeroRemetenteId: filtroNumeroRemetenteId, status: filtroStatus })
       .then((lista) => {
         setConversas(lista || []);
         setLoadError(null);
       })
       .catch((err) => setLoadError(err.message || 'Erro ao carregar conversas.'))
       .finally(() => setLoading(false))
-  ), [token, busca]);
+  ), [token, busca, filtroNumeroRemetenteId, filtroStatus]);
 
   const carregarConversasRef = useRef(carregarConversas);
   useEffect(() => {
@@ -253,6 +266,29 @@ export default function ConversasPage() {
     setLoading(true);
     setLoadError(null);
     carregarConversas();
+  }
+
+  function handleChangeFiltroNumeroRemetente(e) {
+    setLoading(true);
+    setLoadError(null);
+    setFiltroNumeroRemetenteId(e.target.value);
+  }
+
+  function handleChangeFiltroStatus(e) {
+    setLoading(true);
+    setLoadError(null);
+    setFiltroStatus(e.target.value);
+  }
+
+  function handleLimparFiltros() {
+    setLoading(true);
+    setLoadError(null);
+    setBuscaInput('');
+    ultimaBuscaAplicadaRef.current = '';
+    setBusca('');
+    setFiltroNumeroRemetenteId('');
+    setFiltroStatus('');
+    setOcultarVendas(false);
   }
 
   const [contatoSelecionado, setContatoSelecionado] = useState(null);
@@ -419,6 +455,7 @@ export default function ConversasPage() {
   const origemAtendimento = formatOrigemAtendimento(numeroRemetenteAtualConversa);
 
   const grupos = agruparPorData(mensagens);
+  const conversasExibidas = ocultarVendas ? conversas.filter((c) => c.status !== 'venda') : conversas;
 
   return (
     <div className="flex h-screen flex-col bg-[var(--bg)] p-4 text-[var(--text)] sm:p-6">
@@ -430,18 +467,60 @@ export default function ConversasPage() {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
         {}
         <div className="flex min-h-0 flex-col rounded-2xl border border-[var(--border)] bg-[var(--panel)]">
-          <div className="flex items-center gap-2 border-b border-[var(--border)] p-3">
-            <input
-              type="search"
-              className={`${inputCls} flex-1`}
-              placeholder="Buscar por nome ou telefone..."
-              aria-label="Buscar conversas"
-              value={buscaInput}
-              onChange={(e) => setBuscaInput(e.target.value)}
-            />
-            <button type="button" className={btnGhost} onClick={handleAtualizar} disabled={loading}>
-              {loading ? '...' : 'Atualizar'}
-            </button>
+          <div className="flex flex-col gap-2 border-b border-[var(--border)] p-3">
+            <div className="flex items-center gap-2">
+              <input
+                type="search"
+                className={`${inputCls} flex-1`}
+                placeholder="Buscar por nome ou telefone..."
+                aria-label="Buscar conversas"
+                value={buscaInput}
+                onChange={(e) => setBuscaInput(e.target.value)}
+              />
+              <button type="button" className={btnGhost} onClick={handleAtualizar} disabled={loading}>
+                {loading ? '...' : 'Atualizar'}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <select
+                className={pillCls}
+                aria-label="Filtrar por atendente"
+                value={filtroNumeroRemetenteId}
+                onChange={handleChangeFiltroNumeroRemetente}
+              >
+                <option value="">Geral</option>
+                {numerosRemetentes.map((n) => (
+                  <option key={n.id} value={n.id}>{n.apelido}</option>
+                ))}
+              </select>
+
+              <select
+                className={pillCls}
+                aria-label="Filtrar por status"
+                value={filtroStatus}
+                onChange={handleChangeFiltroStatus}
+              >
+                {STATUS_CONVERSA_OPCOES.map((opcao, idx) => (
+                  <option key={opcao.value} value={opcao.value}>
+                    {idx === 0 ? 'Todos os status' : opcao.label}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                className={ocultarVendas ? pillToggleAtivoCls : pillCls}
+                aria-pressed={ocultarVendas}
+                onClick={() => setOcultarVendas((atual) => !atual)}
+              >
+                Ocultar vendas
+              </button>
+
+              <button type="button" className={pillCls} onClick={handleLimparFiltros}>
+                Limpar
+              </button>
+            </div>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -452,11 +531,11 @@ export default function ConversasPage() {
                 <span className="break-words">Não foi possível carregar as conversas: {loadError}</span>
                 <button type="button" className={btnGhost} onClick={retryConversas}>Tentar novamente</button>
               </div>
-            ) : conversas.length === 0 ? (
+            ) : conversasExibidas.length === 0 ? (
               <div className="px-3 py-8 text-center text-sm text-[var(--muted)]">Nenhuma conversa ainda.</div>
             ) : (
               <ul>
-                {conversas.map((c) => (
+                {conversasExibidas.map((c) => (
                   <li key={`${c.contato.id}-${c.numeroRemetenteAtual?.id}`}>
                     <ConversaItem
                       conversa={c}
@@ -499,7 +578,7 @@ export default function ConversasPage() {
                       onChange={(e) => handleAlterarStatus(e.target.value)}
                     >
                       {STATUS_CONVERSA_OPCOES.map((opcao) => (
-                        <option key={opcao.value} value={opcao.value}>{opcao.label}</option>
+                        <option key={opcao.value} value={opcao.value} disabled={opcao.value === 'atendeu'}>{opcao.label}</option>
                       ))}
                     </select>
                   </label>

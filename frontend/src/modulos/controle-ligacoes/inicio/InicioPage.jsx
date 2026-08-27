@@ -20,8 +20,10 @@ import {
 import { useAuth } from '../../../app/AuthContext.jsx';
 import { fetchDashboard } from './dashboardApi.js';
 import { fetchEstados } from '../configuracoes/controleLigacoesConfigApi.js';
+import DateRangeFilter from '../components/DateRangeFilter.jsx';
 
 const btn = "bg-[var(--pd-accent)] text-white border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
+const btnGhost = "bg-transparent border border-[var(--pd-border)] text-[var(--pd-text-primary)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--pd-surface-alt)] disabled:cursor-not-allowed disabled:opacity-50";
 const selectCls = "w-full sm:w-[240px] rounded-lg border border-[var(--pd-border)] bg-[var(--pd-surface-alt)] px-2.5 py-2.5 sm:py-2 text-sm text-[var(--pd-text-primary)] focus:outline-none focus:border-[var(--pd-accent)]";
 const card = "bg-[var(--pd-card-bg)] border border-[var(--pd-border)]/60 rounded-2xl px-4 pt-5 pb-[22px] sm:px-5 flex flex-col";
 const cardCompacto = "bg-[var(--pd-card-bg)] border border-[var(--pd-border)]/60 rounded-xl px-3 py-3 flex flex-col gap-1";
@@ -86,6 +88,8 @@ export default function InicioPage() {
 
   const [estados, setEstados] = useState([]);
   const [estadoSelecionado, setEstadoSelecionado] = useState('');
+  const [dataInicio, setDataInicio] = useState(null);
+  const [dataFim, setDataFim] = useState(null);
 
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -98,14 +102,14 @@ export default function InicioPage() {
   }, [token]);
 
   const carregarDashboard = useCallback(() => {
-    fetchDashboard(token, estadoSelecionado || null)
+    fetchDashboard(token, { estadoId: estadoSelecionado || null, dataInicio, dataFim })
       .then((resultado) => {
         setDashboard(resultado || null);
         setLoadError(null);
       })
       .catch((err) => setLoadError(err.message || 'Erro ao carregar dashboard.'))
       .finally(() => setLoading(false));
-  }, [token, estadoSelecionado]);
+  }, [token, estadoSelecionado, dataInicio, dataFim]);
 
   useEffect(() => {
     carregarDashboard();
@@ -115,6 +119,21 @@ export default function InicioPage() {
     setLoading(true);
     setLoadError(null);
     setEstadoSelecionado(valor);
+  }
+
+  function aplicarPeriodo(inicio, fim) {
+    setLoading(true);
+    setLoadError(null);
+    setDataInicio(inicio);
+    setDataFim(fim);
+  }
+
+  function limparFiltros() {
+    setLoading(true);
+    setLoadError(null);
+    setEstadoSelecionado('');
+    setDataInicio(null);
+    setDataFim(null);
   }
 
   function retryDashboard() {
@@ -215,24 +234,32 @@ export default function InicioPage() {
             <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--pd-accent-strong)]">Controle de Ligações</div>
             <h1 className="pd-font-serif mt-0.5 text-[26px] font-extrabold leading-tight sm:text-[34px] sm:leading-none">Início</h1>
           </div>
-          <div className="w-full sm:w-auto">
-            <label htmlFor="dashboard-estado" className="mb-1 block text-[11.5px] font-semibold text-[var(--pd-text-secondary)]">
-              Filtrar por estado
-            </label>
-            <select
-              id="dashboard-estado"
-              className={selectCls}
-              aria-label="Filtrar dashboard por estado"
-              value={estadoSelecionado}
-              onChange={(e) => handleEstadoChange(e.target.value)}
-            >
-              <option value="">Geral</option>
-              {estados.map((estado) => (
-                <option key={estado.id} value={estado.id}>
-                  {estado.nome} ({estado.uf})
-                </option>
-              ))}
-            </select>
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end">
+            <div className="w-full sm:w-auto">
+              <label htmlFor="dashboard-estado" className="mb-1 block text-[11.5px] font-semibold text-[var(--pd-text-secondary)]">
+                Filtrar por estado
+              </label>
+              <select
+                id="dashboard-estado"
+                className={selectCls}
+                aria-label="Filtrar dashboard por estado"
+                value={estadoSelecionado}
+                onChange={(e) => handleEstadoChange(e.target.value)}
+              >
+                <option value="">Geral</option>
+                {estados.map((estado) => (
+                  <option key={estado.id} value={estado.id}>
+                    {estado.nome} ({estado.uf})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <DateRangeFilter dataInicio={dataInicio} dataFim={dataFim} onAplicar={aplicarPeriodo} />
+
+            <button type="button" onClick={limparFiltros} className={btnGhost}>
+              Limpar
+            </button>
           </div>
         </div>
 

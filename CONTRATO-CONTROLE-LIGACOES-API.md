@@ -2425,6 +2425,212 @@ sem a fase de QA que o resto do projeto normalmente recebe (ver
 
 ---
 
+## Pipeline (v9)
+
+> Adendo ao contrato v2 + v8 acima — adiciona uma segunda superfície de
+> consumo pra `ConversasStatus` (já existente desde o v8): uma visão
+> kanban dedicada (`GET /pipeline`), um histórico completo de mudanças
+> de status por thread (tabela nova `StatusHistorico` + `GET
+> /pipeline/:contatoId/:numeroRemetenteId/historico`), e filtros novos
+> em duas rotas já existentes (`GET /conversas`, `GET /dashboard`).
+> Chamado de "v9" porque "v8" já pertence ao adendo anterior.
+
+### Contexto e decisões de design
+
+- **`StatusHistorico` é histórico de verdade, diferente de
+  `ConversasStatus`** — 1 linha por MUDANÇA de status (não 1 por
+  thread). Toda vez que `PUT .../status` grava um novo status via
+  `MERGE`, o valor anterior (lido antes do `MERGE`) e o novo são
+  gravados como uma linha nova em `StatusHistorico`, junto de `origem`
+  (`'atendente'` quando veio desse `PUT`, `'sistema'` quando veio do
+  auto-seed em `'atendeu'` de `marcarAtendeuSeVazio`).
+- **Nome de coluna deliberadamente diferente do resto do schema** — a
+  coluna de data é `alterado_em`, não `criado_em` (convenção usada em
+  quase toda outra tabela do módulo) — decisão explícita porque cada
+  linha representa uma mudança de estado, não a criação de uma
+  entidade nova.
+- **`GET /pipeline` só lista threads COM status** (`WHERE status IS NOT
+  NULL`) — uma thread sem nenhum status atribuído nunca aparece no
+  kanban.
+- **Filtros de `GET /pipeline` sempre bindados, mesmo ausentes** —
+  padrão `(@param IS NULL OR ...)` pra cada um dos 3 filtros opcionais,
+  diferente do padrão usado em `listConversas` (fragmento de SQL
+  condicional montado em JS, só interpolado quando o filtro é
+  informado). As duas abordagens coexistem no mesmo arquivo
+  (`mensagens.model.js`) por serem funções diferentes, sem
+  padronização forçada entre elas.
+- **`dataFim` é inclusivo do dia inteiro** — o filtro usa
+  `atualizado_em < DATEADD(day, 1, @dataFim)`, não
+  `atualizado_em <= @dataFim` — a segunda forma cortaria qualquer
+  evento depois da meia-noite do próprio `dataFim`, já que a coluna é
+  `DATETIME2` e o parâmetro chega como data pura.
+- **`GET /dashboard` ganhou os mesmos 2 filtros de data, aplicados
+  IDENTICAMENTE ao filtro de `estadoId` já existente** — mais uma
+  constraint opcional no `WHERE` de TODAS as 8 queries do dashboard,
+  sem exceção — inclusive dentro da janela fixa de 30 dias de
+  `tendenciaDiaria` e das duas janelas fixas de 7 dias de
+  `comparativoSemanal`, onde o filtro de período do dashboard é uma
+  constraint ADICIONAL sobre a janela fixa que já existia (não
+  substitui/estende essa janela).
+- **`'atendeu'` não pode ser setado manualmente por nenhum `<select>`
+  de troca de status** (regra de frontend, não de backend — `PUT
+  .../status` continua aceitando `'atendeu'` no corpo sem rejeitar) —
+  só o auto-seed (`marcarAtendeuSeVazio`) grava esse valor na prática,
+  via opções `disabled` em `ConversasPage.jsx`/`PipelinePage.jsx`. Não
+  confundir com o `<select>` de FILTRO por status que
+  `ConversasPage.jsx` ganhou nesta mesma leva — ali `'atendeu'`
+  continua totalmente selecionável.
+
+### Schema novo
+
+```sql
+CREATE TABLE StatusHistorico (
+    id                   INT IDENTITY(1,1) PRIMARY KEY,
+    contato_id           INT NOT NULL FOREIGN KEY REFERENCES Contatos(id),
+    numero_remetente_id  INT NOT NULL FOREIGN KEY REFERENCES NumerosRemetentes(id),
+    status_anterior      VARCHAR(20) NULL,
+    status_novo          VARCHAR(20) NOT NULL,
+    origem               VARCHAR(20) NOT NULL, -- 'atendente'|'sistema'
+    alterado_em          DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+```
+
+Criado por `backend/src/scripts/MIGRATION-STATUS-HISTORICO.sql`
+(idempotente, `IF NOT EXISTS` sobre `sys.tables`, mesmo padrão de
+`MIGRATION-CONVERSAS-STATUS.sql`). **Este script ainda não foi
+executado contra nenhum banco** — precisa rodar manualmente (local:
+`erp-novagest-dev`) antes da rota de histórico e do resto do Pipeline
+funcionarem de verdade.
+
+---
+
+## `GET /api/controle-ligacoes/pipeline`
+
+Lista todas as threads que já têm `status` atribuído, num formato
+plano pronto pro kanban. Protegida por `authMiddleware` +
+`operadorCobrancaMiddleware` (herdado do mount).
+
+#### Parâmetros (query, todos opcionais)
+- `busca` — string livre, `LIKE '%busca%'` contra `Contatos.nome`.
+- `numeroRemetenteId` — inteiro positivo.
+- `dataInicio` / `dataFim` — strings `YYYY-MM-DD`, contra
+  `ConversasStatus.atualizado_em`. `dataFim` inclui o dia inteiro.
+
+#### Resposta de sucesso — `200 OK`
+Array flat, sem envelope, campos em snake_case:
+```json
+[
+  {
+    "contato_id": 603,
+    "nome": "Maria Silva",
+    "telefone": "5598912345678",
+    "numero_remetente_id": 7,
+    "apelido": "Livia",
+    "status": "venda",
+    "atualizado_em": "2026-08-21T14:32:00.000Z"
+  }
+]
+```
+
+#### Erros
+- `400`: `{ "error": "Parâmetro \"numeroRemetenteId\" deve ser um número inteiro positivo." }`
+- `500`: `{ "error": "Erro interno ao listar pipeline." }`
+
+---
+
+## `GET /api/controle-ligacoes/pipeline/:contatoId/:numeroRemetenteId/historico`
+
+Histórico completo de mudanças de status de uma thread, mais recente
+primeiro. Protegida por `authMiddleware` + `operadorCobrancaMiddleware`.
+
+#### Parâmetros (path)
+- `contatoId` — inteiro positivo.
+- `numeroRemetenteId` — inteiro positivo.
+
+#### Resposta de sucesso — `200 OK`
+```json
+[
+  {
+    "status_anterior": "agendou",
+    "status_novo": "venda",
+    "origem": "atendente",
+    "alterado_em": "2026-08-21T14:32:00.000Z"
+  },
+  {
+    "status_anterior": null,
+    "status_novo": "atendeu",
+    "origem": "sistema",
+    "alterado_em": "2026-08-18T09:10:00.000Z"
+  }
+]
+```
+Ordenado `DESC` por `alterado_em` — a entrada mais antiga (ex.:
+"primeiro contato") é o ÚLTIMO item do array, não o primeiro.
+
+#### Erros
+- `400`: `{ "error": "Parâmetros \"contatoId\" e \"numeroRemetenteId\" devem ser números inteiros positivos." }`
+- `500`: `{ "error": "Erro interno ao listar histórico de status do pipeline." }`
+
+---
+
+## `GET /api/controle-ligacoes/conversas` — filtros novos
+
+Além de `busca`/`apenasNaoLidas` (já documentados), a rota aceita agora:
+- `numeroRemetenteId` (opcional) — inteiro positivo.
+- `status` (opcional) — um dos 5 valores do enum.
+
+Não é breaking — quem já consumia sem esses filtros continua funcionando.
+
+---
+
+## `GET /api/controle-ligacoes/dashboard` — filtros novos
+
+Além de `estadoId` (já documentado), a rota aceita agora:
+- `dataInicio` / `dataFim` (opcionais) — strings `YYYY-MM-DD`, sem
+  validação de formato além de `typeof === 'string'`. Filtram
+  `Disparos.criado_em` em TODOS os 8 blocos, exatamente como
+  `estadoId` já fazia — inclusive como constraint adicional dentro da
+  janela fixa de 30 dias de `tendenciaDiaria` e das janelas fixas de
+  7 dias de `comparativoSemanal` (ver "Contexto" acima).
+
+Formato da resposta não muda.
+
+---
+
+### Frontend: `PipelinePage.jsx` + `DateRangeFilter.jsx`
+
+`frontend/src/modulos/controle-ligacoes/pipeline/` — `PipelinePage.jsx`
+(kanban de 5 colunas fixas) + `pipelineApi.js`. Novo item de nav
+"Pipeline" entre "Conversas" e "Painel de Disparo" em
+`ControleLigacoesShell.jsx`. Cartão clicável abre `PipelineCardModal`
+(inline no mesmo arquivo, mesmo padrão de `AvisosModal` em
+`PainelDisparoPage.jsx` — modais deste módulo não viram arquivo
+próprio) mostrando o histórico via a rota de histórico acima.
+
+`frontend/src/modulos/controle-ligacoes/components/DateRangeFilter.jsx`
+— primeiro componente compartilhado só deste módulo (`export default`,
+mesmo padrão de `UserFooterMenu.jsx`, que é compartilhado entre
+módulos diferentes). Usado tanto em `PipelinePage.jsx` quanto em
+`InicioPage.jsx`: atalhos de período (Hoje/Ontem/Hoje e ontem/Últimos
+7·14·28·30 dias/Esta semana/Semana passada/Este mês/Mês passado/
+Máximo) + calendário navegável de 42 células, 100% `Date` nativo, sem
+lib nova. `PipelinePage.jsx` e `InicioPage.jsx` ganharam cada um um
+botão "Limpar" que reseta todos os filtros da tela de uma vez.
+
+A partir desta leva, o módulo Controle de Ligações inteiro usa Figtree
+(Google Fonts) em vez de Fraunces/Inter, escopado via uma classe
+`.cl-figtree` na raiz de `ControleLigacoesShell.jsx` — não no `body`
+global, que continua `Inter` (compartilhado pelo resto do ERP).
+
+### Lacuna conhecida: sem teste automatizado
+
+Nem `PipelinePage.jsx`/`pipelineApi.js`/`DateRangeFilter.jsx`, nem as
+funções novas de `mensagens.model.js` (`listPipeline`,
+`listHistoricoStatus`, `registrarHistoricoStatus`), nem os filtros
+novos em `listConversas`/`getDashboard`, têm teste automatizado ainda.
+
+---
+
 ## Fora de escopo deste v2 (registrado, não implementar agora)
 
 - ~~Central de Mensagens (Baileys) + conexão real via QR Code (`numero` e
@@ -2447,10 +2653,12 @@ sem a fase de QA que o resto do projeto normalmente recebe (ver
 - Disparo em massa (limite de 10/número, aviso de 3 dias, seleção manual).
 - ~~Pipeline de atendimento (`não atendido`/`atendido`/`perdido`/
   `agendado`) — colunas entram em `Contatos`, não em tabela nova.~~
-  **Implementado — ver "Status de Conversa e Dashboard (v8)" mais
-  acima.** Saiu diferente do previsto aqui: virou tabela nova
-  (`ConversasStatus`), não colunas em `Contatos`, porque o resultado é
-  por thread (contato + número remetente), não por contato isolado.
+  **Implementado — ver "Status de Conversa e Dashboard (v8)" (a tabela
+  `ConversasStatus`) e "Pipeline (v9)" (a visão kanban + histórico de
+  mudanças, `StatusHistorico`) mais acima.** Saiu diferente do previsto
+  aqui: virou tabela nova (`ConversasStatus`), não colunas em
+  `Contatos`, porque o resultado é por thread (contato + número
+  remetente), não por contato isolado.
 - Handoff automático IA → Lívia (regra: IA manda a 1ª mensagem; assim que o
   cliente responder, transfere para a Lívia — sem réplica da IA).
 - Integração com Gemini (`GEMINI_API_KEY` — ainda não provisionada).

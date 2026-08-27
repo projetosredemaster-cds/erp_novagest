@@ -1,24 +1,28 @@
 const { sql, getPool } = require('../config/db');
 
 const FILTRO_ESTADO = '(@estadoId IS NULL OR d.estado_id = @estadoId)';
+const FILTRO_PERIODO = '(@dataInicio IS NULL OR d.criado_em >= @dataInicio) AND (@dataFim IS NULL OR d.criado_em < DATEADD(day, 1, @dataFim))';
 
-function novoRequestComEstado(pool, estadoId) {
-  return pool.request().input('estadoId', sql.Int, estadoId ?? null);
+function novoRequestComFiltros(pool, { estadoId, dataInicio, dataFim } = {}) {
+  return pool.request()
+    .input('estadoId', sql.Int, estadoId ?? null)
+    .input('dataInicio', sql.Date, dataInicio ?? null)
+    .input('dataFim', sql.Date, dataFim ?? null);
 }
 
-async function getTotalDisparos(pool, estadoId) {
-  const result = await novoRequestComEstado(pool, estadoId).query(`
+async function getTotalDisparos(pool, { estadoId, dataInicio, dataFim } = {}) {
+  const result = await novoRequestComFiltros(pool, { estadoId, dataInicio, dataFim }).query(`
     SELECT COUNT(dc.id) AS total
     FROM DisparoContatos dc
     JOIN Disparos d ON dc.disparo_id = d.id
-    WHERE ${FILTRO_ESTADO}
+    WHERE ${FILTRO_ESTADO} AND ${FILTRO_PERIODO}
   `);
 
   return result.recordset[0]?.total ?? 0;
 }
 
-async function getTaxas(pool, estadoId) {
-  const result = await novoRequestComEstado(pool, estadoId).query(`
+async function getTaxas(pool, { estadoId, dataInicio, dataFim } = {}) {
+  const result = await novoRequestComFiltros(pool, { estadoId, dataInicio, dataFim }).query(`
     SELECT
       ROUND(COUNT(CASE WHEN cs.status = 'atendeu' THEN 1 END) * 100.0 / NULLIF(COUNT(dc.id), 0), 1) AS atendeu,
       ROUND(COUNT(CASE WHEN cs.status = 'agendou' THEN 1 END) * 100.0 / NULLIF(COUNT(dc.id), 0), 1) AS agendou,
@@ -29,7 +33,7 @@ async function getTaxas(pool, estadoId) {
     JOIN Disparos d ON dc.disparo_id = d.id
     LEFT JOIN ConversasStatus cs
       ON cs.contato_id = dc.contato_id AND cs.numero_remetente_id = d.numero_remetente_id
-    WHERE ${FILTRO_ESTADO}
+    WHERE ${FILTRO_ESTADO} AND ${FILTRO_PERIODO}
   `);
 
   const linha = result.recordset[0] || {};
@@ -43,13 +47,13 @@ async function getTaxas(pool, estadoId) {
   };
 }
 
-async function getDisparosPorRegiao(pool, estadoId) {
-  const result = await novoRequestComEstado(pool, estadoId).query(`
+async function getDisparosPorRegiao(pool, { estadoId, dataInicio, dataFim } = {}) {
+  const result = await novoRequestComFiltros(pool, { estadoId, dataInicio, dataFim }).query(`
     SELECT d.estado_id, e.nome, e.uf, COUNT(dc.id) AS total
     FROM DisparoContatos dc
     JOIN Disparos d ON dc.disparo_id = d.id
     JOIN Estados e ON e.id = d.estado_id
-    WHERE ${FILTRO_ESTADO}
+    WHERE ${FILTRO_ESTADO} AND ${FILTRO_PERIODO}
     GROUP BY d.estado_id, e.nome, e.uf
     ORDER BY total DESC
   `);
@@ -62,14 +66,14 @@ async function getDisparosPorRegiao(pool, estadoId) {
   }));
 }
 
-async function getStatusGeral(pool, estadoId) {
-  const result = await novoRequestComEstado(pool, estadoId).query(`
+async function getStatusGeral(pool, { estadoId, dataInicio, dataFim } = {}) {
+  const result = await novoRequestComFiltros(pool, { estadoId, dataInicio, dataFim }).query(`
     SELECT cs.status, COUNT(*) AS total
     FROM DisparoContatos dc
     JOIN Disparos d ON dc.disparo_id = d.id
     JOIN ConversasStatus cs
       ON cs.contato_id = dc.contato_id AND cs.numero_remetente_id = d.numero_remetente_id
-    WHERE ${FILTRO_ESTADO} AND cs.status IS NOT NULL
+    WHERE ${FILTRO_ESTADO} AND ${FILTRO_PERIODO} AND cs.status IS NOT NULL
     GROUP BY cs.status
   `);
 
@@ -79,8 +83,8 @@ async function getStatusGeral(pool, estadoId) {
   }));
 }
 
-async function getRankingAtendentes(pool, estadoId) {
-  const result = await novoRequestComEstado(pool, estadoId).query(`
+async function getRankingAtendentes(pool, { estadoId, dataInicio, dataFim } = {}) {
+  const result = await novoRequestComFiltros(pool, { estadoId, dataInicio, dataFim }).query(`
     SELECT
       n.id AS numero_remetente_id,
       n.apelido,
@@ -95,7 +99,7 @@ async function getRankingAtendentes(pool, estadoId) {
     JOIN NumerosRemetentes n ON n.id = d.numero_remetente_id
     LEFT JOIN ConversasStatus cs
       ON cs.contato_id = dc.contato_id AND cs.numero_remetente_id = d.numero_remetente_id
-    WHERE ${FILTRO_ESTADO}
+    WHERE ${FILTRO_ESTADO} AND ${FILTRO_PERIODO}
     GROUP BY n.id, n.apelido
     ORDER BY total DESC
   `);
@@ -112,8 +116,8 @@ async function getRankingAtendentes(pool, estadoId) {
   }));
 }
 
-async function getFunilConversao(pool, estadoId) {
-  const result = await novoRequestComEstado(pool, estadoId).query(`
+async function getFunilConversao(pool, { estadoId, dataInicio, dataFim } = {}) {
+  const result = await novoRequestComFiltros(pool, { estadoId, dataInicio, dataFim }).query(`
     SELECT
       ROUND(
         COUNT(CASE WHEN cs.status = 'venda' THEN 1 END) * 100.0
@@ -123,7 +127,7 @@ async function getFunilConversao(pool, estadoId) {
     JOIN Disparos d ON dc.disparo_id = d.id
     LEFT JOIN ConversasStatus cs
       ON cs.contato_id = dc.contato_id AND cs.numero_remetente_id = d.numero_remetente_id
-    WHERE ${FILTRO_ESTADO}
+    WHERE ${FILTRO_ESTADO} AND ${FILTRO_PERIODO}
   `);
 
   const linha = result.recordset[0] || {};
@@ -131,13 +135,14 @@ async function getFunilConversao(pool, estadoId) {
   return { taxaConversaoEngajados: linha.taxaConversaoEngajados ?? 0 };
 }
 
-async function getTendenciaDiaria(pool, estadoId) {
-  const result = await novoRequestComEstado(pool, estadoId).query(`
+async function getTendenciaDiaria(pool, { estadoId, dataInicio, dataFim } = {}) {
+  const result = await novoRequestComFiltros(pool, { estadoId, dataInicio, dataFim }).query(`
     SELECT CONVERT(VARCHAR(10), CAST(d.criado_em AS DATE), 23) AS dia, COUNT(dc.id) AS total
     FROM DisparoContatos dc
     JOIN Disparos d ON dc.disparo_id = d.id
     WHERE d.criado_em >= DATEADD(DAY, -30, SYSUTCDATETIME())
       AND ${FILTRO_ESTADO}
+      AND ${FILTRO_PERIODO}
     GROUP BY CAST(d.criado_em AS DATE)
   `);
 
@@ -153,9 +158,11 @@ async function getTendenciaDiaria(pool, estadoId) {
   return dias;
 }
 
-async function getTaxasEmPeriodo(pool, estadoId, inicio, fimExclusivo) {
+async function getTaxasEmPeriodo(pool, { estadoId, dataInicio, dataFim, inicio, fimExclusivo } = {}) {
   const result = await pool.request()
     .input('estadoId', sql.Int, estadoId ?? null)
+    .input('dataInicio', sql.Date, dataInicio ?? null)
+    .input('dataFim', sql.Date, dataFim ?? null)
     .input('inicio', sql.DateTime2, inicio)
     .input('fim', sql.DateTime2, fimExclusivo)
     .query(`
@@ -170,6 +177,7 @@ async function getTaxasEmPeriodo(pool, estadoId, inicio, fimExclusivo) {
       LEFT JOIN ConversasStatus cs ON cs.contato_id = dc.contato_id AND cs.numero_remetente_id = d.numero_remetente_id
       WHERE d.criado_em >= @inicio AND d.criado_em < @fim
         AND (@estadoId IS NULL OR d.estado_id = @estadoId)
+        AND ${FILTRO_PERIODO}
     `);
 
   const linha = result.recordset[0] || {};
@@ -183,20 +191,20 @@ async function getTaxasEmPeriodo(pool, estadoId, inicio, fimExclusivo) {
   };
 }
 
-async function getComparativoSemanal(pool, estadoId) {
+async function getComparativoSemanal(pool, { estadoId, dataInicio, dataFim } = {}) {
   const agora = new Date();
   const seteDiasAtras = new Date(agora.getTime() - 7 * 24 * 60 * 60 * 1000);
   const catorzeDiasAtras = new Date(agora.getTime() - 14 * 24 * 60 * 60 * 1000);
 
   const [atual, anterior] = await Promise.all([
-    getTaxasEmPeriodo(pool, estadoId, seteDiasAtras, agora),
-    getTaxasEmPeriodo(pool, estadoId, catorzeDiasAtras, seteDiasAtras),
+    getTaxasEmPeriodo(pool, { estadoId, dataInicio, dataFim, inicio: seteDiasAtras, fimExclusivo: agora }),
+    getTaxasEmPeriodo(pool, { estadoId, dataInicio, dataFim, inicio: catorzeDiasAtras, fimExclusivo: seteDiasAtras }),
   ]);
 
   return { atual, anterior };
 }
 
-async function getDashboard(estadoId) {
+async function getDashboard({ estadoId, dataInicio, dataFim } = {}) {
   const pool = await getPool();
 
   const [
@@ -209,14 +217,14 @@ async function getDashboard(estadoId) {
     tendenciaDiaria,
     comparativoSemanal,
   ] = await Promise.all([
-    getTotalDisparos(pool, estadoId),
-    getTaxas(pool, estadoId),
-    getDisparosPorRegiao(pool, estadoId),
-    getStatusGeral(pool, estadoId),
-    getRankingAtendentes(pool, estadoId),
-    getFunilConversao(pool, estadoId),
-    getTendenciaDiaria(pool, estadoId),
-    getComparativoSemanal(pool, estadoId),
+    getTotalDisparos(pool, { estadoId, dataInicio, dataFim }),
+    getTaxas(pool, { estadoId, dataInicio, dataFim }),
+    getDisparosPorRegiao(pool, { estadoId, dataInicio, dataFim }),
+    getStatusGeral(pool, { estadoId, dataInicio, dataFim }),
+    getRankingAtendentes(pool, { estadoId, dataInicio, dataFim }),
+    getFunilConversao(pool, { estadoId, dataInicio, dataFim }),
+    getTendenciaDiaria(pool, { estadoId, dataInicio, dataFim }),
+    getComparativoSemanal(pool, { estadoId, dataInicio, dataFim }),
   ]);
 
   return {

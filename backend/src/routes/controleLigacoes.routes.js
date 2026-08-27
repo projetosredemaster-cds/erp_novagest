@@ -51,5 +51,7 @@ router.get('/conversas/:contatoId/:numeroRemetenteId/mensagens', conversasContro
 router.post('/conversas/:contatoId/:numeroRemetenteId/mensagens', conversasController.responder);
 router.put('/conversas/:contatoId/:numeroRemetenteId/status', conversasController.atualizarStatus);
 router.get('/notificacoes', conversasController.notificacoes);
+router.get('/pipeline', conversasController.pipeline);
+router.get('/pipeline/:contatoId/:numeroRemetenteId/historico', conversasController.pipelineHistorico);
 
 module.exports = router;

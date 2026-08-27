@@ -1,8 +1,8 @@
 const mensagensModel = require('../models/mensagens.model');
 const baileysSessionService = require('../services/baileysSession.service');
 
-async function listarConversas({ busca, apenasNaoLidas } = {}) {
-  return mensagensModel.listConversas({ busca, apenasNaoLidas });
+async function listarConversas({ busca, apenasNaoLidas, numeroRemetenteId, status } = {}) {
+  return mensagensModel.listConversas({ busca, apenasNaoLidas, numeroRemetenteId, status });
 }
 
 async function contarNotificacoesNaoVistas() {
@@ -84,6 +84,14 @@ async function atualizarStatus(contatoId, numeroRemetenteId, status) {
   return mensagensModel.upsertStatusConversa(contatoId, numeroRemetenteId, status);
 }
 
+async function listarPipeline({ busca, numeroRemetenteId, statusInicio, statusFim, disparoInicio, disparoFim } = {}) {
+  return mensagensModel.listPipeline({ busca, numeroRemetenteId, statusInicio, statusFim, disparoInicio, disparoFim });
+}
+
+async function listarHistoricoStatus(contatoId, numeroRemetenteId) {
+  return mensagensModel.listHistoricoStatus(contatoId, numeroRemetenteId);
+}
+
 module.exports = {
   listarConversas,
   contarNotificacoesNaoVistas,
@@ -91,4 +99,6 @@ module.exports = {
   listarMensagens,
   responder,
   atualizarStatus,
+  listarPipeline,
+  listarHistoricoStatus,
 };

@@ -1,8 +1,8 @@
 const dashboardModel = require('../models/dashboard.model');
 const estadosModel = require('../models/estados.model');
 
-async function getDashboard(estadoId) {
-  return dashboardModel.getDashboard(estadoId);
+async function getDashboard({ estadoId, dataInicio, dataFim } = {}) {
+  return dashboardModel.getDashboard({ estadoId, dataInicio, dataFim });
 }
 
 async function existeEstado(estadoId) {

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500..700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=Figtree:wght@400;600;700;800&display=swap');
 @import "tailwindcss";
 :root {
   --bg: #0f1115;
@@ -46,9 +46,13 @@ body {
   --pd-success: #376B4F;
   --pd-success-bg: rgba(55, 107, 79, 0.12);
 
-  --pd-font-serif: 'Fraunces', Georgia, serif;
+  --pd-font-serif: 'Figtree', sans-serif;
 }
 
 .pd-font-serif {
-  font-family: var(--pd-font-serif, 'Fraunces', Georgia, serif);
+  font-family: var(--pd-font-serif, 'Figtree', sans-serif);
+}
+
+.cl-figtree {
+  font-family: 'Figtree', sans-serif;
 }
