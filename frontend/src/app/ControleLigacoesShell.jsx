@@ -23,15 +23,15 @@ const navItemClass = (colapsada) => ({ isActive }) =>
     colapsada ? 'lg:justify-center lg:px-0' : ''
   } ${
     isActive
-      ? 'bg-[var(--violet)] text-[#0b1010]'
-      : 'text-[var(--muted)] hover:bg-[var(--panel-alt)] hover:text-[var(--text)]'
+      ? 'bg-[var(--pd-accent)] text-white'
+      : 'text-[var(--pd-text-secondary)] hover:bg-[var(--pd-surface-alt)] hover:text-[var(--pd-text-primary)]'
   }`;
 
 const flyoutItemClass = ({ isActive }) =>
   `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
     isActive
-      ? 'bg-[var(--violet)] text-[#0b1010]'
-      : 'text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--text)]'
+      ? 'bg-[var(--pd-accent)] text-white'
+      : 'text-[var(--pd-text-secondary)] hover:bg-[var(--pd-card-bg)] hover:text-[var(--pd-text-primary)]'
   }`;
 
 function formatRelativoNotificacao(iso) {
@@ -274,13 +274,13 @@ export default function ControleLigacoesShell() {
   const badgeNotificacoes = notificacoesNaoVistas > 9 ? '9+' : String(notificacoesNaoVistas);
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] cl-figtree">
+    <div className="painel-disparo-light-theme cl-figtree min-h-screen bg-[var(--pd-bg)] text-[var(--pd-text-primary)]">
       <button
         type="button"
         onClick={() => setMobileOpen(true)}
         aria-label="Abrir menu"
         aria-expanded={mobileOpen}
-        className="fixed left-3 top-3 z-50 flex h-11 w-11 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--panel)] text-xl text-[var(--text)] shadow-lg lg:hidden"
+        className="fixed left-3 top-3 z-50 flex h-11 w-11 items-center justify-center rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] text-xl text-[var(--pd-text-primary)] shadow-lg lg:hidden"
       >
         ☰
       </button>
@@ -295,7 +295,7 @@ export default function ControleLigacoesShell() {
 
       {}
       <aside
-        className={`fixed left-0 top-0 z-40 flex h-screen w-72 flex-col border-r border-[var(--border)] bg-[var(--panel)] px-3 py-5 transition-transform duration-200 lg:translate-x-0 ${
+        className={`fixed left-0 top-0 z-40 flex h-screen w-72 flex-col border-r border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3 py-5 transition-transform duration-200 lg:translate-x-0 ${
           sidebarColapsada ? 'lg:w-16' : 'lg:w-56'
         } ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
       >
@@ -303,7 +303,7 @@ export default function ControleLigacoesShell() {
           type="button"
           onClick={() => setSidebarColapsada((colapsada) => !colapsada)}
           aria-label={sidebarColapsada ? 'Expandir menu' : 'Recolher menu'}
-          className="absolute -right-3 top-1/2 z-50 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel)] text-xs text-[var(--muted)] hover:text-[var(--text)] lg:flex"
+          className="absolute -right-3 top-1/2 z-50 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-[var(--pd-border)] bg-[var(--pd-card-bg)] text-xs text-[var(--pd-text-secondary)] hover:text-[var(--pd-text-primary)] lg:flex"
         >
           {sidebarColapsada ? '›' : '‹'}
         </button>
@@ -312,14 +312,14 @@ export default function ControleLigacoesShell() {
           type="button"
           onClick={() => setMobileOpen(false)}
           aria-label="Fechar menu"
-          className="mb-4 flex h-11 w-11 items-center justify-center self-end rounded-lg text-xl text-[var(--muted)] hover:bg-[var(--panel-alt)] hover:text-[var(--text)] lg:hidden"
+          className="mb-4 flex h-11 w-11 items-center justify-center self-end rounded-lg text-xl text-[var(--pd-text-secondary)] hover:bg-[var(--pd-surface-alt)] hover:text-[var(--pd-text-primary)] lg:hidden"
         >
           ✕
         </button>
 
         <div className={`mb-6 px-2 ${sidebarColapsada ? 'lg:hidden' : ''}`}>
-          <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--violet)]">NovaGest</div>
-          <div className="font-display mt-0.5 text-xl font-extrabold leading-none text-[var(--text)]">Controle de Ligações</div>
+          <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--pd-accent)]">NovaGest</div>
+          <div className="font-display mt-0.5 text-xl font-extrabold leading-none text-[var(--pd-text-primary)]">Controle de Ligações</div>
         </div>
 
         <nav className="flex min-h-0 flex-1 flex-col gap-1">
@@ -398,8 +398,8 @@ export default function ControleLigacoesShell() {
                 sidebarColapsada ? 'lg:justify-center lg:px-0' : ''
               } ${
                 emSubrotaConfiguracoes || configuracoesFlyoutAberto
-                  ? 'bg-[var(--panel-alt)] text-[var(--text)]'
-                  : 'text-[var(--muted)] hover:bg-[var(--panel-alt)] hover:text-[var(--text)]'
+                  ? 'bg-[var(--pd-surface-alt)] text-[var(--pd-text-primary)]'
+                  : 'text-[var(--pd-text-secondary)] hover:bg-[var(--pd-surface-alt)] hover:text-[var(--pd-text-primary)]'
               }`}
             >
               <IconSettings size={20} className="shrink-0" />
@@ -408,7 +408,7 @@ export default function ControleLigacoesShell() {
             </button>
 
             {configuracoesFlyoutAberto ? (
-              <div className="absolute bottom-0 left-full z-50 ml-1 w-56 rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] p-1 shadow-lg">
+              <div className="absolute bottom-0 left-full z-50 ml-1 w-56 rounded-lg border border-[var(--pd-border)] bg-[var(--pd-surface-alt)] p-1 shadow-lg">
                 {isAdmin ? (
                   <NavLink to="/controle-ligacoes/usuarios" onClick={fecharConfiguracoesEMobile} className={flyoutItemClass}>
                     <span className="text-sm leading-none">👥</span>
@@ -442,7 +442,7 @@ export default function ControleLigacoesShell() {
           }
           aria-expanded={notificacoesAberto}
           aria-haspopup="true"
-          className="relative flex h-11 w-11 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--panel)] text-lg text-[var(--muted)] shadow-lg transition-colors hover:bg-[var(--panel-alt)] hover:text-[var(--text)]"
+          className="relative flex h-11 w-11 items-center justify-center rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] text-lg text-[var(--pd-text-secondary)] shadow-lg transition-colors hover:bg-[var(--pd-surface-alt)] hover:text-[var(--pd-text-primary)]"
         >
           <IconBell size={20} />
           {notificacoesNaoVistas > 0 ? (
@@ -453,13 +453,13 @@ export default function ControleLigacoesShell() {
         </button>
 
         {notificacoesAberto ? (
-          <div className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] p-1 shadow-lg">
+          <div className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--pd-border)] bg-[var(--pd-surface-alt)] p-1 shadow-lg">
             {notificacoesItens === null ? (
-              <div className="px-3 py-4 text-center text-[12.5px] text-[var(--muted)]">
+              <div className="px-3 py-4 text-center text-[12.5px] text-[var(--pd-text-secondary)]">
                 Carregando...
               </div>
             ) : notificacoesItens.length === 0 ? (
-              <div className="px-3 py-4 text-center text-[12.5px] text-[var(--muted)]">
+              <div className="px-3 py-4 text-center text-[12.5px] text-[var(--pd-text-secondary)]">
                 Nenhuma notificação.
               </div>
             ) : (
@@ -469,23 +469,23 @@ export default function ControleLigacoesShell() {
                     <button
                       type="button"
                       onClick={() => selecionarNotificacao(item)}
-                      className="flex w-full flex-col items-start gap-0.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--panel)]"
+                      className="flex w-full flex-col items-start gap-0.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--pd-card-bg)]"
                     >
                       <div className="flex w-full items-center justify-between gap-2">
-                        <span className="truncate text-[13px] font-semibold text-[var(--text)]">{item.nomeContato}</span>
-                        <span className="shrink-0 text-[10.5px] text-[var(--muted)]">{formatRelativoNotificacao(item.criado_em)}</span>
+                        <span className="truncate text-[13px] font-semibold text-[var(--pd-text-primary)]">{item.nomeContato}</span>
+                        <span className="shrink-0 text-[10.5px] text-[var(--pd-text-secondary)]">{formatRelativoNotificacao(item.criado_em)}</span>
                       </div>
-                      <span className="w-full truncate text-[12px] text-[var(--muted)]">{item.preview}</span>
+                      <span className="w-full truncate text-[12px] text-[var(--pd-text-secondary)]">{item.preview}</span>
                     </button>
                   </li>
                 ))}
               </ul>
             )}
-            <div className="border-t border-[var(--border)] p-1">
+            <div className="border-t border-[var(--pd-border)] p-1">
               <button
                 type="button"
                 onClick={verTodasAsConversas}
-                className="block w-full rounded-md px-3 py-2 text-center text-[12px] font-semibold text-[var(--violet)] transition-colors hover:bg-[var(--panel)]"
+                className="block w-full rounded-md px-3 py-2 text-center text-[12px] font-semibold text-[var(--pd-accent)] transition-colors hover:bg-[var(--pd-card-bg)]"
               >
                 Ver todas as conversas
               </button>
