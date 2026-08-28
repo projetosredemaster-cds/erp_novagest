@@ -403,7 +403,7 @@ Sem corpo, mesma convenção usada em `DELETE /api/ranking/redes/:id` e
 | Método | Rota | Auth | Body/Params | Sucesso | Principais erros |
 |---|---|---|---|---|---|
 | POST | `/api/auth/login` | pública | body `email`, `senha` | `200` `{ token, usuario }` | `400`, `401`, `500` |
-| GET | `/api/auth/me` | logado | — | `200` `{ id, email, isAdmin }` | `401`, `500` |
+| GET | `/api/auth/me` | logado | — | `200` `{ id, email, isAdmin, role }` | `401`, `500` |
 | GET | `/api/admin/usuarios` | admin | — | `200` array de usuários (sem hash) | `401`, `403`, `500` |
 | POST | `/api/admin/usuarios` | admin | body `email`, `senha` | `201` usuário criado (`isAdmin: false`) | `400`, `401`, `403`, `409`, `500` |
 | DELETE | `/api/admin/usuarios/:id` | admin | — | `204` | `400`, `401`, `403`, `404`, `409`, `500` |
