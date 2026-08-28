@@ -489,4 +489,27 @@ async function getAguardandoAcao({ horasSemResposta = 24, diasAgendadoParado = 3
 module.exports = {
   getDashboard,
   getAguardandoAcao,
+  // Helpers individuais exportados só para teste unitário isolado (mesmo padrão já usado em
+  // baileysSession.service.js para funções puras como desembrulharMensagem/gerarVariantesTelefoneBr)
+  // — getDashboard roda todas via Promise.all e não dá pra testar cada branch de forma isolada e
+  // legível através dele sem encadear ~17 chamadas de pool.request() em ordem exata.
+  _internal: {
+    getTotalDisparos,
+    getTaxas,
+    getDisparosPorRegiao,
+    getStatusGeral,
+    getRankingAtendentes,
+    getFunilConversao,
+    getTendenciaDiaria,
+    getTaxasEmPeriodo,
+    getComparativoSemanal,
+    getTempoMedioPorEtapa,
+    getTempoMedioConversao,
+    getVelocidadeRespostaAtendente,
+    getTaxaRecuo,
+    getCaminhosComuns,
+    getStatusPulados,
+    getOrigemPorDia,
+    getMotivosPerdido,
+  },
 };

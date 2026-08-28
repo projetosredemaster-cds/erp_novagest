@@ -1,7 +1,7 @@
 // style-system: Tailwind
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
-import { useAuth } from '../../../app/AuthContext.jsx';
+import { useAuth } from '../../../app/useAuth.js';
 import { fetchConversas, fetchMensagens, enviarMensagem, atualizarStatusConversa, abrirStreamConversas } from './conversasApi.js';
 import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
 import ModalMotivoPerdido from '../components/ModalMotivoPerdido.jsx';

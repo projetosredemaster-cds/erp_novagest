@@ -9,7 +9,7 @@ vi.mock('./conversasApi.js', () => ({
   abrirStreamConversas: vi.fn(),
 }));
 
-vi.mock('../../../app/AuthContext.jsx', () => ({
+vi.mock('../../../app/useAuth.js', () => ({
   useAuth: vi.fn(),
 }));
 
@@ -20,7 +20,7 @@ vi.mock('react-router-dom', () => ({
 }));
 
 import * as api from './conversasApi.js';
-import { useAuth } from '../../../app/AuthContext.jsx';
+import { useAuth } from '../../../app/useAuth.js';
 import { useOutletContext, useLocation, useNavigate } from 'react-router-dom';
 
 function conversa({

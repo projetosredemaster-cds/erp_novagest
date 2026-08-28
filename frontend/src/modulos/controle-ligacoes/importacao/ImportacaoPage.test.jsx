@@ -8,12 +8,12 @@ vi.mock('./importacaoApi.js', () => ({
   fetchDetalheImportacao: vi.fn(),
 }));
 
-vi.mock('../../../app/AuthContext.jsx', () => ({
+vi.mock('../../../app/useAuth.js', () => ({
   useAuth: vi.fn(),
 }));
 
 import * as importacaoApi from './importacaoApi.js';
-import { useAuth } from '../../../app/AuthContext.jsx';
+import { useAuth } from '../../../app/useAuth.js';
 
 function loteHistorico(overrides = {}) {
   return {

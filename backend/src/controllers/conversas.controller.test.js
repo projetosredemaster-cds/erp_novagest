@@ -584,3 +584,278 @@ describe('GET /api/controle-ligacoes/conversas/stream', () => {
     );
   });
 });
+
+describe('PUT /api/controle-ligacoes/conversas/:contatoId/:numeroRemetenteId/status', () => {
+  it('401 sem token', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .send({ status: 'atendeu' });
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário não é operador_cobranca', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .set('Authorization', `Bearer ${tokenFor({ role: 'admin' })}`)
+      .send({ status: 'atendeu' });
+    expect(res.status).toBe(403);
+  });
+
+  it('400 quando ":contatoId" não é um inteiro positivo', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/abc/2/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'atendeu' });
+    expect(res.status).toBe(400);
+    expect(conversasService.atualizarStatus).not.toHaveBeenCalled();
+  });
+
+  it('400 quando ":numeroRemetenteId" não é um inteiro positivo', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/0/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'atendeu' });
+    expect(res.status).toBe(400);
+    expect(conversasService.atualizarStatus).not.toHaveBeenCalled();
+  });
+
+  it('400 quando "status" está ausente', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Campo "status" inválido ou ausente.' });
+    expect(conversasService.atualizarStatus).not.toHaveBeenCalled();
+  });
+
+  it('400 quando "status" não pertence ao enum válido', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'ganhou' });
+    expect(res.status).toBe(400);
+    expect(conversasService.atualizarStatus).not.toHaveBeenCalled();
+  });
+
+  it('400 quando "motivo" não pertence ao enum MOTIVOS_PERDIDO_VALIDOS', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'perdido', motivo: 'motivo_inventado' });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Campo "motivo" inválido.' });
+    expect(conversasService.atualizarStatus).not.toHaveBeenCalled();
+  });
+
+  it('400 quando o service devolve o sentinel "motivo_obrigatorio" (status=perdido sem motivo)', async () => {
+    conversasService.atualizarStatus.mockResolvedValue('motivo_obrigatorio');
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'perdido' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Campo "motivo" é obrigatório quando o status é "perdido".' });
+    expect(conversasService.atualizarStatus).toHaveBeenCalledWith(1, 2, 'perdido', null, null);
+  });
+
+  it('200 — status=perdido com motivo/motivoDetalhe válidos', async () => {
+    conversasService.atualizarStatus.mockResolvedValue(undefined);
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'perdido', motivo: 'preco_condicao', motivoDetalhe: 'Achou caro' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ contatoId: 1, numeroRemetenteId: 2, status: 'perdido' });
+    expect(conversasService.atualizarStatus).toHaveBeenCalledWith(1, 2, 'perdido', 'preco_condicao', 'Achou caro');
+  });
+
+  it('400 — o controller valida "motivo" contra o enum sempre que presente, mesmo fora de status=perdido (comportamento real, não o "deveria")', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'venda', motivo: 'nao_faz_sentido_aqui' });
+
+    expect(res.status).toBe(400);
+    expect(conversasService.atualizarStatus).not.toHaveBeenCalled();
+  });
+
+  it('200 — status="venda" sem motivo nenhum grava motivo/motivoDetalhe como null', async () => {
+    conversasService.atualizarStatus.mockResolvedValue(undefined);
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'venda' });
+
+    expect(res.status).toBe(200);
+    expect(conversasService.atualizarStatus).toHaveBeenCalledWith(1, 2, 'venda', null, null);
+  });
+
+  it('400 — status="atendeu" definido manualmente via PUT é bloqueado pelo backend com a mensagem exata', async () => {
+    conversasService.atualizarStatus.mockResolvedValue('atendeu_nao_permitido');
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'atendeu' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: "O status 'Atendeu' é definido automaticamente pelo sistema e não pode ser selecionado manualmente.",
+    });
+    expect(conversasService.atualizarStatus).toHaveBeenCalledWith(1, 2, 'atendeu', null, null);
+  });
+
+  it('400 — o bloqueio de status="atendeu" é incondicional, valendo tanto para thread sem status (null) quanto para thread que já tem outro status', async () => {
+    conversasService.atualizarStatus.mockResolvedValue('atendeu_nao_permitido');
+
+    const resSemStatusAnterior = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'atendeu' });
+
+    const resComStatusAnterior = await request(app)
+      .put('/api/controle-ligacoes/conversas/3/4/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'atendeu' });
+
+    expect(resSemStatusAnterior.status).toBe(400);
+    expect(resComStatusAnterior.status).toBe(400);
+    expect(resSemStatusAnterior.body).toEqual({
+      error: "O status 'Atendeu' é definido automaticamente pelo sistema e não pode ser selecionado manualmente.",
+    });
+    expect(resComStatusAnterior.body).toEqual({
+      error: "O status 'Atendeu' é definido automaticamente pelo sistema e não pode ser selecionado manualmente.",
+    });
+    expect(conversasService.atualizarStatus).toHaveBeenCalledWith(1, 2, 'atendeu', null, null);
+    expect(conversasService.atualizarStatus).toHaveBeenCalledWith(3, 4, 'atendeu', null, null);
+  });
+
+  it('500 quando o service lança erro', async () => {
+    conversasService.atualizarStatus.mockRejectedValue(new Error('boom'));
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/conversas/1/2/status')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ status: 'atendeu' });
+
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('GET /api/controle-ligacoes/pipeline', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).get('/api/controle-ligacoes/pipeline');
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário não é operador_cobranca', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/pipeline')
+      .set('Authorization', `Bearer ${tokenFor({ role: 'admin' })}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('400 quando "numeroRemetenteId" está em formato inválido', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/pipeline?numeroRemetenteId=abc')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+    expect(res.status).toBe(400);
+    expect(conversasService.listarPipeline).not.toHaveBeenCalled();
+  });
+
+  it('200 — repassa busca/numeroRemetenteId/statusInicio/statusFim/disparoInicio/disparoFim para o service', async () => {
+    conversasService.listarPipeline.mockResolvedValue([
+      { contato_id: 1, nome: 'Ana', telefone: '5598900000000', numero_remetente_id: 2, apelido: 'Bruno', status: 'perdido', atualizado_em: '2026-08-01T00:00:00.000Z', motivo: 'preco_condicao', motivoDetalhe: null },
+    ]);
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/pipeline?busca=Ana&numeroRemetenteId=2&statusInicio=2026-08-01&statusFim=2026-08-31&disparoInicio=2026-07-01&disparoFim=2026-07-31')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(conversasService.listarPipeline).toHaveBeenCalledWith({
+      busca: 'Ana',
+      numeroRemetenteId: 2,
+      statusInicio: '2026-08-01',
+      statusFim: '2026-08-31',
+      disparoInicio: '2026-07-01',
+      disparoFim: '2026-07-31',
+    });
+    expect(res.body[0].motivoDetalhe).toBeNull();
+  });
+
+  it('200 — lista vazia quando nada tem status atribuído', async () => {
+    conversasService.listarPipeline.mockResolvedValue([]);
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/pipeline')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('500 quando o service lança erro', async () => {
+    conversasService.listarPipeline.mockRejectedValue(new Error('boom'));
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/pipeline')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('GET /api/controle-ligacoes/pipeline/:contatoId/:numeroRemetenteId/historico', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).get('/api/controle-ligacoes/pipeline/1/2/historico');
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário não é operador_cobranca', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/pipeline/1/2/historico')
+      .set('Authorization', `Bearer ${tokenFor({ role: 'admin' })}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('400 quando ":contatoId" ou ":numeroRemetenteId" não é um inteiro positivo', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/pipeline/abc/2/historico')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+    expect(res.status).toBe(400);
+    expect(conversasService.listarHistoricoStatus).not.toHaveBeenCalled();
+  });
+
+  it('200 — devolve o histórico ordenado como o service devolve (mais recente primeiro)', async () => {
+    conversasService.listarHistoricoStatus.mockResolvedValue([
+      { status_anterior: 'atendeu', status_novo: 'perdido', origem: 'atendente', motivo: 'preco_condicao', motivo_detalhe: null, alterado_em: '2026-08-02T00:00:00.000Z' },
+      { status_anterior: null, status_novo: 'atendeu', origem: 'sistema', motivo: null, motivo_detalhe: null, alterado_em: '2026-08-01T00:00:00.000Z' },
+    ]);
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/pipeline/1/2/historico')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(conversasService.listarHistoricoStatus).toHaveBeenCalledWith(1, 2);
+    expect(res.body).toHaveLength(2);
+    expect(res.body[0].status_novo).toBe('perdido');
+  });
+
+  it('500 quando o service lança erro', async () => {
+    conversasService.listarHistoricoStatus.mockRejectedValue(new Error('boom'));
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/pipeline/1/2/historico')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(500);
+  });
+});

@@ -19,7 +19,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { useAuth } from '../../../app/AuthContext.jsx';
+import { useAuth } from '../../../app/useAuth.js';
 import { fetchDashboard, fetchAguardandoAcao } from './dashboardApi.js';
 import { fetchEstados } from '../configuracoes/controleLigacoesConfigApi.js';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';

@@ -13,13 +13,13 @@ vi.mock('../configuracoes/controleLigacoesConfigApi.js', () => ({
   fetchNumerosRemetentes: vi.fn(),
 }));
 
-vi.mock('../../../app/AuthContext.jsx', () => ({
+vi.mock('../../../app/useAuth.js', () => ({
   useAuth: vi.fn(),
 }));
 
 import * as api from './painelDisparoApi.js';
 import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
-import { useAuth } from '../../../app/AuthContext.jsx';
+import { useAuth } from '../../../app/useAuth.js';
 
 function numeroRemetenteDetalhado({ id = 3, statusConexao = 'conectado', nomeColaboradora = 'Ana Souza' } = {}) {
   return { id, apelido: 'CDC Cohatrac', numero: '5598900000000', statusConexao, nomeColaboradora, ativo: true, estado: { id: 6, nome: 'Maranhão', uf: 'MA' } };

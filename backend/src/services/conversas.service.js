@@ -81,6 +81,10 @@ async function responder(contatoId, numeroRemetenteId, corpo) {
 }
 
 async function atualizarStatus(contatoId, numeroRemetenteId, status, motivo = null, motivoDetalhe = null) {
+  if (status === 'atendeu') {
+    return 'atendeu_nao_permitido';
+  }
+
   if (status === 'perdido' && (motivo === undefined || motivo === null || motivo === '')) {
     return 'motivo_obrigatorio';
   }

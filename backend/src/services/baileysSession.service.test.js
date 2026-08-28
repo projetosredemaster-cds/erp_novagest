@@ -61,6 +61,13 @@ beforeEach(() => {
   }
 
   mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
+  // Default seguro: handleMessagesUpsert chama marcarAtendeuSeVazio(contatoId, numeroRemetenteId)
+  // sempre que uma mensagem de cliente é inserida com sucesso (ver baileysSession.service.js),
+  // antes de emitir 'mensagem-recebida'. Sem este mock default, a guarda acima lança e o erro é
+  // engolido pelo try/catch por mensagem — fazendo o emit nunca ser chamado, mesmo quando o
+  // restante do fluxo está correto. Testes que querem exercitar uma falha desse model específico
+  // devem sobrescrever este mock explicitamente.
+  mensagensModel.marcarAtendeuSeVazio.mockResolvedValue(undefined);
 
   vi.spyOn(fs, 'existsSync').mockReturnValue(true);
   vi.spyOn(fs, 'mkdirSync').mockImplementation(() => {});

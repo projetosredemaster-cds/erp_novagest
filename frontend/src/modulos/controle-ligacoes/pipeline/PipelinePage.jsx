@@ -1,6 +1,6 @@
 // style-system: Tailwind
 import { useCallback, useEffect, useState } from 'react';
-import { useAuth } from '../../../app/AuthContext.jsx';
+import { useAuth } from '../../../app/useAuth.js';
 import { fetchPipeline, fetchHistoricoStatus, atualizarStatusConversa } from './pipelineApi.js';
 import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';

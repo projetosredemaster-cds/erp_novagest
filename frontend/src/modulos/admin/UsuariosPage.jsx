@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useAuth } from '../../app/AuthContext.jsx';
+import { useAuth } from '../../app/useAuth.js';
 import { listarUsuarios, criarUsuario, removerUsuario } from '../auth/authApi.js';
 
 const btn = "bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";

@@ -1,7 +1,7 @@
 // style-system: Tailwind
 import { useEffect, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { useAuth } from '../../../app/AuthContext.jsx';
+import { useAuth } from '../../../app/useAuth.js';
 import {
   fetchEstados, criarEstado,
   fetchNumerosRemetentes, criarNumeroRemetente, atualizarNumeroRemetente, removerNumeroRemetente,

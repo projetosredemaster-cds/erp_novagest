@@ -1,6 +1,6 @@
 // style-system: Tailwind
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useAuth } from '../../../app/AuthContext.jsx';
+import { useAuth } from '../../../app/useAuth.js';
 import { importarContatos, fetchHistoricoImportacoes, fetchDetalheImportacao } from './importacaoApi.js';
 
 const btn = "bg-[var(--pd-accent)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";

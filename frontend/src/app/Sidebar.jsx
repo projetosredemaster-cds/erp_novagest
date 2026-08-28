@@ -1,7 +1,7 @@
 import { NavLink, Link } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { moduleRegistry } from './moduleRegistry.js';
-import { useAuth } from './AuthContext.jsx';
+import { useAuth } from './useAuth.js';
 import UserFooterMenu from './UserFooterMenu.jsx';
 
 export default function Sidebar() {

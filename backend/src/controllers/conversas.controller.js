@@ -164,6 +164,12 @@ async function atualizarStatus(req, res) {
       motivoDetalhe
     );
 
+    if (resultado === 'atendeu_nao_permitido') {
+      return res.status(400).json({
+        error: "O status 'Atendeu' é definido automaticamente pelo sistema e não pode ser selecionado manualmente.",
+      });
+    }
+
     if (resultado === 'motivo_obrigatorio') {
       return res.status(400).json({ error: 'Campo "motivo" é obrigatório quando o status é "perdido".' });
     }

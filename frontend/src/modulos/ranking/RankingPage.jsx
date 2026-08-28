@@ -10,7 +10,7 @@ import {
   criarDiretor, atualizarDiretor, removerDiretor,
   criarRede, atualizarRede, removerRede,
 } from '../../lib/cadastrosApi';
-import { useAuth } from '../../app/AuthContext.jsx';
+import { useAuth } from '../../app/useAuth.js';
 import ConfigView from './ConfigView.jsx';
 
 const emptyState = () => ({ diretores: [], categorias: [] });

@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import ControleLigacoesShell from './ControleLigacoesShell.jsx';
 
-vi.mock('./AuthContext.jsx', () => ({
+vi.mock('./useAuth.js', () => ({
   useAuth: vi.fn(),
 }));
 
@@ -14,7 +14,7 @@ vi.mock('../modulos/controle-ligacoes/conversas/conversasApi.js', () => ({
   abrirStreamConversas: vi.fn(),
 }));
 
-import { useAuth } from './AuthContext.jsx';
+import { useAuth } from './useAuth.js';
 import * as conversasApi from '../modulos/controle-ligacoes/conversas/conversasApi.js';
 
 function ConversasRouteProbe() {

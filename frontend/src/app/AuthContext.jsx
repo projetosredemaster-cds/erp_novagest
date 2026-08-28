@@ -1,11 +1,10 @@
 
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login as loginRequest, loginReativacao as loginReativacaoRequest, getMe } from '../modulos/auth/authApi.js';
 import { loadAuth, saveAuth, clearAuth } from './authStorage.js';
 import { onUnauthorized } from './authEvents.js';
-
-const AuthContext = createContext(null);
+import { AuthContext } from './useAuth.js';
 
 export function AuthProvider({ children }) {
   const navigate = useNavigate();
@@ -82,12 +81,4 @@ export function AuthProvider({ children }) {
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error('useAuth precisa ser usado dentro de <AuthProvider>.');
-  }
-  return ctx;
 }

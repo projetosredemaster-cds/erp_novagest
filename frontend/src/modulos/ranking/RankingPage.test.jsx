@@ -23,13 +23,13 @@ vi.mock('../../lib/cadastrosApi', () => ({
   removerResponsavel: vi.fn(),
 }));
 
-vi.mock('../../app/AuthContext.jsx', () => ({
+vi.mock('../../app/useAuth.js', () => ({
   useAuth: vi.fn(),
 }));
 
 import * as rankingApi from './rankingApi';
 import * as cadastrosApi from '../../lib/cadastrosApi';
-import { useAuth } from '../../app/AuthContext.jsx';
+import { useAuth } from '../../app/useAuth.js';
 
 const CATEGORIA_PRINCIPAL = { id: 1, nome: 'Vendas', principal: true };
 

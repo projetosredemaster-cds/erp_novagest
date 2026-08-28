@@ -1,6 +1,6 @@
 // style-system: Tailwind
 import { useEffect, useRef, useState } from 'react';
-import { useAuth } from './AuthContext.jsx';
+import { useAuth } from './useAuth.js';
 
 export default function UserFooterMenu({ colapsada = false }) {
   const { usuario, logout } = useAuth();

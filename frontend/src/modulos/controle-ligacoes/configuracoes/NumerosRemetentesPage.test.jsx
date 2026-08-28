@@ -21,12 +21,12 @@ vi.mock('qrcode.react', () => ({
   QRCodeSVG: ({ value }) => <div data-testid="qr-value">{value}</div>,
 }));
 
-vi.mock('../../../app/AuthContext.jsx', () => ({
+vi.mock('../../../app/useAuth.js', () => ({
   useAuth: vi.fn(),
 }));
 
 import * as api from './controleLigacoesConfigApi.js';
-import { useAuth } from '../../../app/AuthContext.jsx';
+import { useAuth } from '../../../app/useAuth.js';
 
 function numero({
   id = 3,

@@ -266,3 +266,120 @@ describe('conversas.service.responder', () => {
     });
   });
 });
+
+describe('conversas.service.atualizarStatus', () => {
+  it('retorna o sentinel "motivo_obrigatorio" e NÃO chama o model quando status="perdido" sem motivo', async () => {
+    const resultado = await conversasService.atualizarStatus(1, 2, 'perdido');
+
+    expect(resultado).toBe('motivo_obrigatorio');
+    expect(mensagensModel.upsertStatusConversa).not.toHaveBeenCalled();
+  });
+
+  it('retorna o sentinel "motivo_obrigatorio" quando motivo é string vazia', async () => {
+    const resultado = await conversasService.atualizarStatus(1, 2, 'perdido', '');
+
+    expect(resultado).toBe('motivo_obrigatorio');
+    expect(mensagensModel.upsertStatusConversa).not.toHaveBeenCalled();
+  });
+
+  it('retorna o sentinel "motivo_obrigatorio" quando motivo é explicitamente null', async () => {
+    const resultado = await conversasService.atualizarStatus(1, 2, 'perdido', null);
+
+    expect(resultado).toBe('motivo_obrigatorio');
+    expect(mensagensModel.upsertStatusConversa).not.toHaveBeenCalled();
+  });
+
+  it('delega para o model quando status="perdido" com motivo presente', async () => {
+    mensagensModel.upsertStatusConversa.mockResolvedValue(undefined);
+
+    const resultado = await conversasService.atualizarStatus(1, 2, 'perdido', 'preco_condicao', 'Achou caro');
+
+    expect(resultado).toBeUndefined();
+    expect(mensagensModel.upsertStatusConversa).toHaveBeenCalledWith(1, 2, 'perdido', 'preco_condicao', 'Achou caro');
+  });
+
+  it('retorna o sentinel "atendeu_nao_permitido" mesmo se motivo/motivoDetalhe forem informados por engano', async () => {
+    const resultado = await conversasService.atualizarStatus(1, 2, 'atendeu', 'preco_condicao', 'Achou caro');
+
+    expect(resultado).toBe('atendeu_nao_permitido');
+    expect(mensagensModel.upsertStatusConversa).not.toHaveBeenCalled();
+  });
+
+  it('delega para o model sem exigir motivo quando status é qualquer outro valor', async () => {
+    mensagensModel.upsertStatusConversa.mockResolvedValue(undefined);
+
+    await conversasService.atualizarStatus(1, 2, 'venda');
+
+    expect(mensagensModel.upsertStatusConversa).toHaveBeenCalledWith(1, 2, 'venda', null, null);
+  });
+
+  it('retorna o sentinel "atendeu_nao_permitido" e NÃO chama o model quando status="atendeu" é setado manualmente', async () => {
+    const resultado = await conversasService.atualizarStatus(1, 2, 'atendeu');
+
+    expect(resultado).toBe('atendeu_nao_permitido');
+    expect(mensagensModel.upsertStatusConversa).not.toHaveBeenCalled();
+  });
+});
+
+describe('conversas.service.listarPipeline', () => {
+  it('repassa todos os filtros para o model', async () => {
+    mensagensModel.listPipeline.mockResolvedValue([{ contato_id: 1, status: 'perdido' }]);
+
+    const resultado = await conversasService.listarPipeline({
+      busca: 'Ana',
+      numeroRemetenteId: 3,
+      statusInicio: '2026-08-01',
+      statusFim: '2026-08-31',
+      disparoInicio: '2026-07-01',
+      disparoFim: '2026-07-31',
+    });
+
+    expect(resultado).toEqual([{ contato_id: 1, status: 'perdido' }]);
+    expect(mensagensModel.listPipeline).toHaveBeenCalledWith({
+      busca: 'Ana',
+      numeroRemetenteId: 3,
+      statusInicio: '2026-08-01',
+      statusFim: '2026-08-31',
+      disparoInicio: '2026-07-01',
+      disparoFim: '2026-07-31',
+    });
+  });
+
+  it('funciona sem nenhum filtro (todos undefined)', async () => {
+    mensagensModel.listPipeline.mockResolvedValue([]);
+
+    const resultado = await conversasService.listarPipeline();
+
+    expect(resultado).toEqual([]);
+    expect(mensagensModel.listPipeline).toHaveBeenCalledWith({
+      busca: undefined,
+      numeroRemetenteId: undefined,
+      statusInicio: undefined,
+      statusFim: undefined,
+      disparoInicio: undefined,
+      disparoFim: undefined,
+    });
+  });
+});
+
+describe('conversas.service.listarHistoricoStatus', () => {
+  it('repassa contatoId/numeroRemetenteId para o model e devolve a lista tal como veio', async () => {
+    const historico = [
+      { status_anterior: 'atendeu', status_novo: 'perdido', origem: 'atendente', alterado_em: '2026-08-02T00:00:00.000Z' },
+    ];
+    mensagensModel.listHistoricoStatus.mockResolvedValue(historico);
+
+    const resultado = await conversasService.listarHistoricoStatus(1, 2);
+
+    expect(resultado).toBe(historico);
+    expect(mensagensModel.listHistoricoStatus).toHaveBeenCalledWith(1, 2);
+  });
+
+  it('devolve array vazio quando a thread nunca teve mudança de status registrada', async () => {
+    mensagensModel.listHistoricoStatus.mockResolvedValue([]);
+
+    const resultado = await conversasService.listarHistoricoStatus(99, 99);
+
+    expect(resultado).toEqual([]);
+  });
+});

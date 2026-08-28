@@ -2698,6 +2698,27 @@ No frontend, os 6 valores/rótulos vivem em UM SÓ lugar,
 (`export const MOTIVOS_PERDIDO`), reaproveitado por `ConversasPage.jsx`,
 `PipelinePage.jsx` e `InicioPage.jsx` — nunca duplicado.
 
+### Bloqueio de `status: "atendeu"` manual (adendo posterior)
+
+Antes desta leva, `PUT .../status` aceitava `{ "status": "atendeu" }`
+vindo de qualquer chamada manual sem checagem nenhuma no backend — só
+existia trava de UI (`<option disabled>` em `ConversasPage.jsx`/
+`PipelinePage.jsx`). Uma auditoria de QA confirmou isso e o backend
+passou a bloquear de verdade:
+
+- `status === "atendeu"` no corpo da requisição sempre retorna
+  `400 { "error": "O status 'Atendeu' é definido automaticamente pelo sistema e não pode ser selecionado manualmente." }`
+  — checado em `conversas.service.js: atualizarStatus` (sentinel
+  `'atendeu_nao_permitido'`, mesmo padrão de sentinel-string já usado
+  por `'motivo_obrigatorio'`), **antes** de qualquer chamada ao model.
+- O bloqueio é **incondicional**: vale tanto pra uma thread que ainda
+  não tem status (`null`) quanto pra uma que já tem outro status —
+  não depende do estado atual da thread.
+- `'atendeu'` continua sendo atribuído normalmente pelo sistema, via
+  `marcarAtendeuSeVazio` (na primeira mensagem de cliente numa thread
+  sem status) — só a atribuição MANUAL via esta rota é que ficou
+  bloqueada.
+
 ### `GET /api/controle-ligacoes/dashboard` — 7 blocos novos
 
 Adicionados ao mesmo `Promise.all`/mesmo filtro `estadoId`/`dataInicio`/

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../app/AuthContext.jsx';
+import { useAuth } from '../../app/useAuth.js';
 import { moduleRegistry } from '../../app/moduleRegistry.js';
 
 const btn = "flex h-11 w-full items-center justify-center bg-[var(--teal)] text-[#0b1010] border-none rounded-lg px-3.5 text-sm font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";

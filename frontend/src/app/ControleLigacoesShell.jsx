@@ -1,7 +1,7 @@
 // style-system: Tailwind
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from './AuthContext.jsx';
+import { useAuth } from './useAuth.js';
 import UserFooterMenu from './UserFooterMenu.jsx';
 import { fetchNotificacoes, abrirStreamConversas } from '../modulos/controle-ligacoes/conversas/conversasApi.js';
 

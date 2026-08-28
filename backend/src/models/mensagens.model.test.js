@@ -145,3 +145,178 @@ describe('mensagens.model.atualizarStatusEntrega', () => {
     expect(resultado).toBeNull();
   });
 });
+
+describe('mensagens.model.registrarHistoricoStatus', () => {
+  it('grava contatoId/numeroRemetenteId/statusAnterior/statusNovo/origem/motivo/motivoDetalhe via INSERT parametrizado', async () => {
+    const { request } = criarPoolMock();
+    request.query.mockResolvedValue({ recordset: [] });
+
+    await mensagensModel.registrarHistoricoStatus(1, 2, 'atendeu', 'perdido', 'atendente', 'preco_condicao', 'Achou caro');
+
+    expect(request.input).toHaveBeenCalledWith('contatoId', sql.Int, 1);
+    expect(request.input).toHaveBeenCalledWith('numeroRemetenteId', sql.Int, 2);
+    expect(request.input).toHaveBeenCalledWith('statusAnterior', sql.VarChar(20), 'atendeu');
+    expect(request.input).toHaveBeenCalledWith('statusNovo', sql.VarChar(20), 'perdido');
+    expect(request.input).toHaveBeenCalledWith('origem', sql.VarChar(20), 'atendente');
+    expect(request.input).toHaveBeenCalledWith('motivo', sql.VarChar(30), 'preco_condicao');
+    expect(request.input).toHaveBeenCalledWith('motivoDetalhe', sql.NVarChar(255), 'Achou caro');
+    expect(request.query.mock.calls[0][0]).toContain('INSERT INTO StatusHistorico');
+  });
+
+  it('grava statusAnterior/motivo/motivoDetalhe como NULL quando ausentes (defaults)', async () => {
+    const { request } = criarPoolMock();
+    request.query.mockResolvedValue({ recordset: [] });
+
+    await mensagensModel.registrarHistoricoStatus(1, 2, null, 'atendeu', 'sistema');
+
+    expect(request.input).toHaveBeenCalledWith('statusAnterior', sql.VarChar(20), null);
+    expect(request.input).toHaveBeenCalledWith('motivo', sql.VarChar(30), null);
+    expect(request.input).toHaveBeenCalledWith('motivoDetalhe', sql.NVarChar(255), null);
+  });
+});
+
+describe('mensagens.model.upsertStatusConversa', () => {
+  it('lê o status ANTERIOR antes do MERGE e registra o histórico com origem="atendente"', async () => {
+    const { request } = criarPoolMock();
+    request.query
+      .mockResolvedValueOnce({ recordset: [{ status: 'atendeu' }] }) // SELECT status atual
+      .mockResolvedValueOnce({ recordset: [] }) // MERGE
+      .mockResolvedValueOnce({ recordset: [] }); // INSERT StatusHistorico (via registrarHistoricoStatus)
+
+    await mensagensModel.upsertStatusConversa(1, 2, 'perdido', 'preco_condicao', 'Achou caro');
+
+    expect(request.query).toHaveBeenCalledTimes(3);
+    expect(request.query.mock.calls[0][0]).toContain('SELECT status');
+    expect(request.query.mock.calls[1][0]).toContain('MERGE ConversasStatus');
+    expect(request.query.mock.calls[2][0]).toContain('INSERT INTO StatusHistorico');
+    expect(request.input).toHaveBeenCalledWith('statusAnterior', sql.VarChar(20), 'atendeu');
+    expect(request.input).toHaveBeenCalledWith('statusNovo', sql.VarChar(20), 'perdido');
+    expect(request.input).toHaveBeenCalledWith('origem', sql.VarChar(20), 'atendente');
+  });
+
+  it('quando a thread ainda não tem status (nova), grava statusAnterior=null no histórico', async () => {
+    const { request } = criarPoolMock();
+    request.query
+      .mockResolvedValueOnce({ recordset: [] }) // SELECT status atual — thread nova
+      .mockResolvedValueOnce({ recordset: [] }) // MERGE
+      .mockResolvedValueOnce({ recordset: [] }); // INSERT StatusHistorico
+
+    await mensagensModel.upsertStatusConversa(9, 9, 'atendeu');
+
+    expect(request.input).toHaveBeenCalledWith('statusAnterior', sql.VarChar(20), null);
+    expect(request.input).toHaveBeenCalledWith('statusNovo', sql.VarChar(20), 'atendeu');
+  });
+});
+
+describe('mensagens.model.marcarAtendeuSeVazio', () => {
+  it('quando a thread NÃO tem status ainda, insere status="atendeu" e registra histórico com origem="sistema"/statusAnterior=null', async () => {
+    const { request } = criarPoolMock();
+    request.query
+      .mockResolvedValueOnce({ recordset: [{ id: 55 }] }) // INSERT condicional efetivou (OUTPUT inserted.id)
+      .mockResolvedValueOnce({ recordset: [] }); // INSERT StatusHistorico
+
+    await mensagensModel.marcarAtendeuSeVazio(1, 2);
+
+    expect(request.query).toHaveBeenCalledTimes(2);
+    expect(request.query.mock.calls[1][0]).toContain('INSERT INTO StatusHistorico');
+    expect(request.input).toHaveBeenCalledWith('statusAnterior', sql.VarChar(20), null);
+    expect(request.input).toHaveBeenCalledWith('statusNovo', sql.VarChar(20), 'atendeu');
+    expect(request.input).toHaveBeenCalledWith('origem', sql.VarChar(20), 'sistema');
+  });
+
+  it('quando a thread JÁ tem status, o INSERT condicional não insere nada e NÃO registra histórico', async () => {
+    const { request } = criarPoolMock();
+    request.query.mockResolvedValueOnce({ recordset: [] }); // IF NOT EXISTS falso — nada inserido
+
+    await mensagensModel.marcarAtendeuSeVazio(1, 2);
+
+    expect(request.query).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('mensagens.model.listPipeline', () => {
+  it('mapeia motivo_detalhe -> motivoDetalhe e preserva os demais campos tal como o banco devolve', async () => {
+    const { request } = criarPoolMock();
+    request.query.mockResolvedValue({
+      recordset: [
+        {
+          contato_id: 1,
+          nome: 'Ana',
+          telefone: '5598900000000',
+          numero_remetente_id: 2,
+          apelido: 'Bruno',
+          status: 'perdido',
+          atualizado_em: '2026-08-02T00:00:00.000Z',
+          motivo: 'preco_condicao',
+          motivo_detalhe: 'Achou caro',
+        },
+      ],
+    });
+
+    const resultado = await mensagensModel.listPipeline({});
+
+    expect(resultado).toEqual([
+      {
+        contato_id: 1,
+        nome: 'Ana',
+        telefone: '5598900000000',
+        numero_remetente_id: 2,
+        apelido: 'Bruno',
+        status: 'perdido',
+        atualizado_em: '2026-08-02T00:00:00.000Z',
+        motivo: 'preco_condicao',
+        motivoDetalhe: 'Achou caro',
+      },
+    ]);
+  });
+
+  it('grava busca como LIKE com wildcards (%busca%) e os demais filtros como null quando ausentes', async () => {
+    const { request } = criarPoolMock();
+    request.query.mockResolvedValue({ recordset: [] });
+
+    await mensagensModel.listPipeline({ busca: 'Ana' });
+
+    expect(request.input).toHaveBeenCalledWith('busca', sql.NVarChar, '%Ana%');
+    expect(request.input).toHaveBeenCalledWith('numeroRemetenteId', sql.Int, null);
+    expect(request.input).toHaveBeenCalledWith('statusInicio', sql.Date, null);
+    expect(request.input).toHaveBeenCalledWith('statusFim', sql.Date, null);
+    expect(request.input).toHaveBeenCalledWith('disparoInicio', sql.Date, null);
+    expect(request.input).toHaveBeenCalledWith('disparoFim', sql.Date, null);
+  });
+
+  it('devolve array vazio quando nenhuma thread tem status atribuído', async () => {
+    const { request } = criarPoolMock();
+    request.query.mockResolvedValue({ recordset: [] });
+
+    const resultado = await mensagensModel.listPipeline();
+
+    expect(resultado).toEqual([]);
+  });
+});
+
+describe('mensagens.model.listHistoricoStatus', () => {
+  it('busca por contatoId/numeroRemetenteId e ordena por alterado_em DESC (mais recente primeiro)', async () => {
+    const { request } = criarPoolMock();
+    const linhas = [
+      { status_anterior: 'atendeu', status_novo: 'perdido', origem: 'atendente', motivo: 'preco_condicao', motivo_detalhe: null, alterado_em: '2026-08-02T00:00:00.000Z' },
+      { status_anterior: null, status_novo: 'atendeu', origem: 'sistema', motivo: null, motivo_detalhe: null, alterado_em: '2026-08-01T00:00:00.000Z' },
+    ];
+    request.query.mockResolvedValue({ recordset: linhas });
+
+    const resultado = await mensagensModel.listHistoricoStatus(1, 2);
+
+    expect(request.input).toHaveBeenCalledWith('contatoId', sql.Int, 1);
+    expect(request.input).toHaveBeenCalledWith('numeroRemetenteId', sql.Int, 2);
+    expect(request.query.mock.calls[0][0]).toContain('ORDER BY alterado_em DESC');
+    expect(resultado).toEqual(linhas);
+  });
+
+  it('devolve array vazio quando a thread nunca teve mudança de status registrada', async () => {
+    const { request } = criarPoolMock();
+    request.query.mockResolvedValue({ recordset: [] });
+
+    const resultado = await mensagensModel.listHistoricoStatus(99, 99);
+
+    expect(resultado).toEqual([]);
+  });
+});
