@@ -211,6 +211,30 @@ describe('ControleLigacoesShell - sino de notificações', () => {
     expect(screen.getByText('Maria Silva')).toBeInTheDocument();
   });
 
+  it('quando o stream termina sem erro (fim "limpo"), reconecta automaticamente após RECONEXAO_SSE_MS', async () => {
+    conversasApi.fetchNotificacoes.mockResolvedValue({ naoVistas: 1, itens: [] });
+    let resolveStream;
+    conversasApi.abrirStreamConversas
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveStream = resolve; }))
+      .mockImplementationOnce(() => new Promise(() => {}));
+
+    renderShell();
+
+    await screen.findByText('1');
+    expect(conversasApi.abrirStreamConversas).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    try {
+      resolveStream();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(5000);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(conversasApi.abrirStreamConversas).toHaveBeenCalledTimes(2);
+  });
+
   it('evento SSE com primeiraResposta ausente/false é ignorado pelo sino (sem refetch)', async () => {
     conversasApi.fetchNotificacoes.mockResolvedValue({ naoVistas: 1, itens: [] });
     let onEvent;

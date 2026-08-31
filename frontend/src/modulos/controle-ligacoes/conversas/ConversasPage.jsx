@@ -1,13 +1,17 @@
 // style-system: Tailwind
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../../app/useAuth.js';
-import { fetchConversas, fetchMensagens, enviarMensagem, atualizarStatusConversa, abrirStreamConversas } from './conversasApi.js';
+import { fetchConversas, fetchMensagens, enviarMensagem, atualizarStatusConversa, abrirStreamConversas, fetchAudioMensagemUrl } from './conversasApi.js';
 import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
 import ModalMotivoPerdido from '../components/ModalMotivoPerdido.jsx';
 
 
 const RECONEXAO_SSE_MS = 5000;
+// Tolerância (em px) usada para considerar o painel de mensagens "perto do fim": o operador
+// raramente para o scroll exatamente no último pixel, então uma pequena folga evita que o
+// auto-scroll pare de funcionar por causa de 1-2px de diferença de arredondamento/layout.
+const TOLERANCIA_SCROLL_FIM_PX = 80;
 const btn = "bg-[var(--pd-accent)] text-[#0b1010] border-none rounded-lg px-4 py-3 sm:px-3.5 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
 const btnGhost = "bg-transparent border border-[var(--pd-border)] text-[var(--pd-text-primary)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--pd-card-bg)] disabled:cursor-not-allowed disabled:opacity-50";
 const inputCls = "w-full rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-3 py-2.5 sm:py-2 text-sm text-[var(--pd-text-primary)] focus:outline-none focus:border-[var(--pd-accent)]";
@@ -182,7 +186,48 @@ function StatusEntregaIcone({ status }) {
   }
 }
 
-function ChatBubble({ mensagem }) {
+function AudioMensagem({ mensagemId, token }) {
+  const [audioUrl, setAudioUrl] = useState(null);
+  const [erro, setErro] = useState(null);
+
+  useEffect(() => {
+    let ativo = true;
+    let urlCriada = null;
+
+    fetchAudioMensagemUrl(token, mensagemId)
+      .then((url) => {
+        if (!ativo) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        urlCriada = url;
+        setAudioUrl(url);
+        setErro(null);
+      })
+      .catch((err) => {
+        if (!ativo) return;
+        setErro(err.message || 'Não foi possível carregar o áudio.');
+        setAudioUrl(null);
+      });
+
+    return () => {
+      ativo = false;
+      if (urlCriada) URL.revokeObjectURL(urlCriada);
+    };
+  }, [mensagemId, token]);
+
+  if (erro) {
+    return <div className="text-[12.5px] text-[var(--danger)]">Não foi possível carregar o áudio.</div>;
+  }
+
+  if (!audioUrl) {
+    return <div className="text-[12.5px] text-[var(--pd-text-secondary)]">Carregando áudio...</div>;
+  }
+
+  return <audio controls src={audioUrl} className="max-w-full" />;
+}
+
+function ChatBubble({ mensagem, token }) {
   const ehEnviada = mensagem.remetente !== 'cliente';
   const alinhamento = ehEnviada ? 'justify-end' : 'justify-start';
   const cantoCauda = ehEnviada ? 'rounded-br-sm' : 'rounded-bl-sm';
@@ -190,11 +235,16 @@ function ChatBubble({ mensagem }) {
     ? 'bg-[#D9F2E3] text-[var(--pd-text-primary)]'
     : 'bg-[var(--pd-card-bg)] border border-[var(--pd-border)] text-[var(--pd-text-primary)]';
   const horaColor = ehEnviada ? 'text-[var(--pd-text-primary)]/60' : 'text-[var(--pd-text-secondary)]';
+  const ehAudio = mensagem.tipo_mensagem === 'audio' && mensagem.corpo !== '[Áudio indisponível]';
 
   return (
     <div className={`flex ${alinhamento}`}>
       <div className={`max-w-[75%] rounded-2xl ${cantoCauda} px-3.5 py-2 text-[13.5px] ${bubbleColor}`}>
-        <div className="whitespace-pre-wrap break-words">{mensagem.corpo}</div>
+        {ehAudio ? (
+          <AudioMensagem mensagemId={mensagem.id} token={token} />
+        ) : (
+          <div className="whitespace-pre-wrap break-words">{mensagem.corpo}</div>
+        )}
         <div className={`mt-1 flex items-center justify-end gap-1 text-[10.5px] ${horaColor}`}>
           <span>{formatHoraMensagem(mensagem.criado_em)}</span>
           {mensagem.remetente !== 'cliente' ? <StatusEntregaIcone status={mensagem.status_entrega} /> : null}
@@ -306,7 +356,32 @@ export default function ConversasPage() {
     contatoSelecionadoRef.current = contatoSelecionado;
   }, [contatoSelecionado]);
 
-  function carregarMensagens(contatoId, numeroRemetenteId) {
+  // Auto-scroll do painel de mensagens: `mensagensContainerRef` aponta pro container
+  // `overflow-y-auto` do chat; `scrollProximaAtualizacaoRef` decide, pra cada atualização de
+  // `mensagens`, se o efeito abaixo deve rolar pro fim ou deixar a posição de scroll como está.
+  const mensagensContainerRef = useRef(null);
+  const scrollProximaAtualizacaoRef = useRef(true);
+
+  function estaPertoDoFimDasMensagens() {
+    const el = mensagensContainerRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= TOLERANCIA_SCROLL_FIM_PX;
+  }
+
+  function rolarMensagensParaFim() {
+    const el = mensagensContainerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  useLayoutEffect(() => {
+    if (scrollProximaAtualizacaoRef.current) {
+      rolarMensagensParaFim();
+    }
+  }, [mensagens]);
+
+  function carregarMensagens(contatoId, numeroRemetenteId, { forcarScroll = true } = {}) {
+    scrollProximaAtualizacaoRef.current = forcarScroll;
     setLoadingMensagens(true);
     setMensagensError(null);
     return fetchMensagens(token, contatoId, numeroRemetenteId)
@@ -326,6 +401,7 @@ export default function ConversasPage() {
 
   function selecionarConversaContato(contato) {
     setContatoSelecionado(contato);
+    scrollProximaAtualizacaoRef.current = true;
     setMensagens([]);
     setMensagensError(null);
     setEnvioError(null);
@@ -359,6 +435,13 @@ export default function ConversasPage() {
     let controller = null;
     let reconnectTimer = null;
 
+    function agendarReconexao() {
+      if (!montado) return;
+      reconnectTimer = setTimeout(() => {
+        if (montado) conectar();
+      }, RECONEXAO_SSE_MS);
+    }
+
     function conectar() {
       controller = new AbortController();
       abrirStreamConversas(token, {
@@ -372,7 +455,11 @@ export default function ConversasPage() {
               contatoSelecionadoRef.current?.id === data.contatoId &&
               contatoSelecionadoRef.current?.numeroRemetenteId === data.numeroRemetenteId
             ) {
-              carregarMensagens(data.contatoId, data.numeroRemetenteId);
+              // Mede a posição de scroll ANTES do refetch: só rola pro fim automaticamente se o
+              // operador já estava perto do fim; se ele estava lendo mensagens antigas mais
+              // acima, a posição de scroll é preservada.
+              const pertoDoFim = estaPertoDoFimDasMensagens();
+              carregarMensagens(data.contatoId, data.numeroRemetenteId, { forcarScroll: pertoDoFim });
             }
             return;
           }
@@ -384,6 +471,9 @@ export default function ConversasPage() {
             ) {
               return;
             }
+            // Só atualiza o ícone de status de entrega de uma mensagem já existente — não é
+            // chegada de mensagem nova, então não deve forçar scroll.
+            scrollProximaAtualizacaoRef.current = false;
             setMensagens((atual) => atual.map((m) => (
               m.baileys_message_id === data.baileysMessageId
                 ? { ...m, status_entrega: data.status }
@@ -391,13 +481,12 @@ export default function ConversasPage() {
             )));
           }
         },
-      }).catch((err) => {
-        if (err?.name === 'AbortError') return;
-        if (!montado) return;
-        reconnectTimer = setTimeout(() => {
-          if (montado) conectar();
-        }, RECONEXAO_SSE_MS);
-      });
+      })
+        .then(agendarReconexao)
+        .catch((err) => {
+          if (err?.name === 'AbortError') return;
+          agendarReconexao();
+        });
     }
 
     conectar();
@@ -418,6 +507,7 @@ export default function ConversasPage() {
     setEnvioError(null);
     enviarMensagem(token, contatoSelecionado.id, contatoSelecionado.numeroRemetenteId, corpo)
       .then((mensagemSalva) => {
+        scrollProximaAtualizacaoRef.current = true;
         setMensagens((prev) => [...prev, mensagemSalva]);
         setTextoEnvio('');
       })
@@ -612,6 +702,8 @@ export default function ConversasPage() {
               </div>
 
               <div
+                ref={mensagensContainerRef}
+                data-testid="painel-mensagens"
                 className="min-h-0 flex-1 overflow-y-auto bg-[var(--pd-bg)] px-4 py-3"
                 style={{ backgroundImage: 'radial-gradient(var(--pd-border) 0.5px, transparent 0.5px)', backgroundSize: '16px 16px' }}
               >
@@ -634,7 +726,7 @@ export default function ConversasPage() {
                           <div className="h-px flex-1 bg-[var(--pd-border)]" />
                         </div>
                       ) : (
-                        <ChatBubble key={item.key} mensagem={item.mensagem} />
+                        <ChatBubble key={item.key} mensagem={item.mensagem} token={token} />
                       )
                     ))}
                   </div>

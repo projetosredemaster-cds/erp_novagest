@@ -518,6 +518,24 @@ describe('GET /api/controle-ligacoes/conversas/stream', () => {
     );
   });
 
+  it('repassa "tipoMensagem" quando presente no payload do emit (player de áudio em tempo real)', async () => {
+    const resultado = await conectarStream({
+      aoConectar: () => {
+        mensagensEventsService.emit('mensagem-recebida', {
+          contatoId: 42,
+          numeroRemetenteId: 17,
+          primeiraResposta: true,
+          tipoMensagem: 'audio',
+        });
+      },
+      deveEncerrar: (body) => body.includes('\n\n'),
+    });
+
+    expect(resultado.body).toBe(
+      'event: nova-mensagem\ndata: {"contatoId":42,"numeroRemetenteId":17,"primeiraResposta":true,"tipoMensagem":"audio"}\n\n'
+    );
+  });
+
   it('não emite nada quando nenhum evento "mensagem-recebida" acontece (canal fica em silêncio)', async () => {
     const resultado = await conectarStream({
       aoConectar: () => {
@@ -582,6 +600,73 @@ describe('GET /api/controle-ligacoes/conversas/stream', () => {
     expect(resultado.body).toBe(
       'event: status-atualizado\ndata: {"contatoId":1,"numeroRemetenteId":2,"baileysMessageId":"X","status":"lido"}\n\n'
     );
+  });
+});
+
+describe('GET /api/controle-ligacoes/conversas/mensagens/:mensagemId/audio', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).get('/api/controle-ligacoes/conversas/mensagens/10/audio');
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário não é operador_cobranca', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/conversas/mensagens/10/audio')
+      .set('Authorization', `Bearer ${tokenFor({ role: 'admin' })}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('400 quando ":mensagemId" não é um inteiro positivo', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/conversas/mensagens/abc/audio')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Parâmetro "mensagemId" deve ser um número inteiro positivo.' });
+    expect(conversasService.buscarAudio).not.toHaveBeenCalled();
+  });
+
+  it('404 quando o áudio não é encontrado', async () => {
+    conversasService.buscarAudio.mockResolvedValue(null);
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/conversas/mensagens/999/audio')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Áudio não encontrado.' });
+  });
+
+  it('200 — devolve o áudio binário com o Content-Type salvo', async () => {
+    const buffer = Buffer.from('fake-audio-bytes');
+    conversasService.buscarAudio.mockResolvedValue({ audioDados: buffer, mimetype: 'audio/ogg' });
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/conversas/mensagens/10/audio')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .buffer(true)
+      .parse((res, callback) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => callback(null, Buffer.concat(chunks)));
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('audio/ogg');
+    expect(Buffer.compare(res.body, buffer)).toBe(0);
+    expect(conversasService.buscarAudio).toHaveBeenCalledWith(10);
+  });
+
+  it('500 quando o service lança erro', async () => {
+    conversasService.buscarAudio.mockRejectedValue(new Error('boom'));
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/conversas/mensagens/10/audio')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao buscar áudio da mensagem.' });
   });
 });
 

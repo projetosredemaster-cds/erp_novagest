@@ -6,6 +6,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   jidDecode,
+  downloadMediaMessage,
 } = require('@whiskeysockets/baileys');
 
 const numerosRemetentesModel = require('../models/numerosRemetentes.model');
@@ -15,6 +16,7 @@ const mensagensEventsService = require('./mensagensEvents.service');
 const baileysLib = {
   makeWASocket: (...args) => makeWASocket(...args),
   useMultiFileAuthState: (...args) => useMultiFileAuthState(...args),
+  downloadMediaMessage: (...args) => downloadMediaMessage(...args),
 };
 
 const SESSIONS_DIR = path.join(__dirname, '..', '..', 'sessions', 'baileys');
@@ -231,6 +233,8 @@ async function handleConnectionUpdate(numeroRemetenteId, sessao, update) {
 }
 
 const MENSAGEM_MIDIA_PLACEHOLDER = '[Mensagem de mídia não suportada nesta versão]';
+const MENSAGEM_AUDIO_CORPO = '[Áudio]';
+const MENSAGEM_AUDIO_INDISPONIVEL = '[Áudio indisponível]';
 
 function normalizarTelefoneDeJid(jid) {
   if (!jid) return null;
@@ -431,7 +435,26 @@ async function handleMessagesUpsert(numeroRemetenteId, sock, upsert) {
         continue;
       }
 
-      const corpo = extrairTextoDaMensagem(mensagemDesembrulhada, numeroRemetenteId);
+      const ehAudio = Boolean(mensagemDesembrulhada?.audioMessage);
+      let corpo;
+      let audioBuffer = null;
+      let audioMimetype = null;
+
+      if (ehAudio) {
+        try {
+          audioBuffer = await baileysLib.downloadMediaMessage(msg, 'buffer', {});
+          audioMimetype = mensagemDesembrulhada.audioMessage.mimetype || 'application/octet-stream';
+          corpo = MENSAGEM_AUDIO_CORPO;
+        } catch (err) {
+          console.error(
+            `[baileysSession] falha ao baixar áudio (numeroRemetenteId=${numeroRemetenteId}, contatoId=${contatoId}, baileysMessageId=${msg?.key?.id ?? 'null'}):`,
+            err
+          );
+          corpo = MENSAGEM_AUDIO_INDISPONIVEL;
+        }
+      } else {
+        corpo = extrairTextoDaMensagem(mensagemDesembrulhada, numeroRemetenteId);
+      }
 
       let ePrimeiraRespostaCliente;
       if (ehDoAtendente) {
@@ -449,9 +472,25 @@ async function handleMessagesUpsert(numeroRemetenteId, sock, upsert) {
         ePrimeiraRespostaCliente,
         remetente: ehDoAtendente ? 'atendente' : 'cliente',
         statusEntrega: ehDoAtendente ? 'enviado' : null,
+        tipoMensagem: ehAudio ? 'audio' : 'texto',
       });
 
       if (mensagemInserida) {
+        if (ehAudio && audioBuffer) {
+          try {
+            await mensagensModel.inserirAudioMensagem({
+              mensagemId: mensagemInserida.id,
+              audioDados: audioBuffer,
+              mimetype: audioMimetype,
+            });
+          } catch (err) {
+            console.error(
+              `[baileysSession] falha ao gravar áudio em MensagensAudios (mensagemId=${mensagemInserida.id}):`,
+              err
+            );
+          }
+        }
+
         if (!ehDoAtendente) {
           await mensagensModel.marcarAtendeuSeVazio(contatoId, numeroRemetenteId);
         }
@@ -460,6 +499,7 @@ async function handleMessagesUpsert(numeroRemetenteId, sock, upsert) {
           contatoId,
           numeroRemetenteId,
           primeiraResposta: Boolean(mensagemInserida.e_primeira_resposta_cliente),
+          tipoMensagem: mensagemInserida.tipo_mensagem,
         });
       }
     } catch (err) {

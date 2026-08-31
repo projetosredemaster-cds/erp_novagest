@@ -228,6 +228,27 @@ async function pipelineHistorico(req, res) {
   }
 }
 
+async function audio(req, res) {
+  const mensagemIdNum = Number(req.params.mensagemId);
+  if (!isPositiveInteger(mensagemIdNum)) {
+    return res.status(400).json({ error: 'Parâmetro "mensagemId" deve ser um número inteiro positivo.' });
+  }
+
+  try {
+    const resultado = await conversasService.buscarAudio(mensagemIdNum);
+
+    if (resultado === null) {
+      return res.status(404).json({ error: 'Áudio não encontrado.' });
+    }
+
+    res.set('Content-Type', resultado.mimetype);
+    return res.status(200).send(resultado.audioDados);
+  } catch (err) {
+    console.error('[conversas.controller] Erro ao buscar áudio da mensagem:', err);
+    return res.status(500).json({ error: 'Erro interno ao buscar áudio da mensagem.' });
+  }
+}
+
 function stream(req, res) {
   res.set({
     'Content-Type': 'text/event-stream',
@@ -236,9 +257,9 @@ function stream(req, res) {
   });
   res.flushHeaders?.();
 
-  const onNovaMensagem = ({ contatoId, numeroRemetenteId, primeiraResposta } = {}) => {
+  const onNovaMensagem = ({ contatoId, numeroRemetenteId, primeiraResposta, tipoMensagem } = {}) => {
     res.write('event: nova-mensagem\n');
-    res.write(`data: ${JSON.stringify({ contatoId, numeroRemetenteId, primeiraResposta })}\n\n`);
+    res.write(`data: ${JSON.stringify({ contatoId, numeroRemetenteId, primeiraResposta, tipoMensagem })}\n\n`);
   };
 
   const onStatusAtualizado = ({ contatoId, numeroRemetenteId, baileysMessageId, status } = {}) => {
@@ -265,4 +286,5 @@ module.exports = {
   pipeline,
   pipelineHistorico,
   stream,
+  audio,
 };

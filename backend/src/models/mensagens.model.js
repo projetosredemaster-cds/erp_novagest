@@ -4,7 +4,7 @@ function isViolacaoDeUnique(err) {
   return err && (err.number === 2627 || err.number === 2601);
 }
 
-async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, baileysMessageId, ePrimeiraRespostaCliente, remetente = 'cliente', statusEntrega = null }) {
+async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, baileysMessageId, ePrimeiraRespostaCliente, remetente = 'cliente', statusEntrega = null, tipoMensagem = 'texto' }) {
   const pool = await getPool();
 
   try {
@@ -17,10 +17,11 @@ async function inserirMensagemRecebida({ contatoId, numeroRemetenteId, corpo, ba
       .input('ePrimeiraRespostaCliente', sql.Bit, Boolean(ePrimeiraRespostaCliente))
       .input('remetente', sql.VarChar(20), remetente)
       .input('statusEntrega', sql.VarChar(20), statusEntrega)
+      .input('tipoMensagem', sql.VarChar(20), tipoMensagem)
       .query(`
-        INSERT INTO Mensagens (contato_id, numero_remetente_id, remetente, corpo, baileys_message_id, status_entrega, lida, e_primeira_resposta_cliente, criado_em)
-        OUTPUT inserted.id, inserted.remetente, inserted.corpo, inserted.criado_em, inserted.e_primeira_resposta_cliente
-        VALUES (@contatoId, @numeroRemetenteId, @remetente, @corpo, @baileysMessageId, @statusEntrega, 0, @ePrimeiraRespostaCliente, SYSUTCDATETIME())
+        INSERT INTO Mensagens (contato_id, numero_remetente_id, remetente, corpo, baileys_message_id, status_entrega, tipo_mensagem, lida, e_primeira_resposta_cliente, criado_em)
+        OUTPUT inserted.id, inserted.remetente, inserted.corpo, inserted.criado_em, inserted.e_primeira_resposta_cliente, inserted.tipo_mensagem
+        VALUES (@contatoId, @numeroRemetenteId, @remetente, @corpo, @baileysMessageId, @statusEntrega, @tipoMensagem, 0, @ePrimeiraRespostaCliente, SYSUTCDATETIME())
       `);
     return result.recordset[0];
   } catch (err) {
@@ -247,7 +248,7 @@ async function listMensagensEMarcarLidas(contatoId, numeroRemetenteId) {
     .input('contatoId', sql.Int, contatoId)
     .input('numeroRemetenteId', sql.Int, numeroRemetenteId)
     .query(`
-      SELECT id, remetente, corpo, criado_em, baileys_message_id, status_entrega
+      SELECT id, remetente, corpo, criado_em, baileys_message_id, status_entrega, tipo_mensagem
       FROM Mensagens
       WHERE contato_id = @contatoId AND numero_remetente_id = @numeroRemetenteId
       ORDER BY criado_em ASC
@@ -363,7 +364,7 @@ async function marcarAtendeuSeVazio(contatoId, numeroRemetenteId) {
       END
     `);
 
-  if (result.recordset.length > 0) {
+  if (result.recordset?.length > 0) {
     await registrarHistoricoStatus(contatoId, numeroRemetenteId, null, 'atendeu', 'sistema');
   }
 }
@@ -430,6 +431,30 @@ async function findPrimeiroNumeroRemetenteDaConversa(contatoId) {
   return row ? { id: row.numero_remetente_id, apelido: row.apelido } : null;
 }
 
+async function inserirAudioMensagem({ mensagemId, audioDados, mimetype }) {
+  const pool = await getPool();
+  await pool
+    .request()
+    .input('mensagemId', sql.Int, mensagemId)
+    .input('audioDados', sql.VarBinary(sql.MAX), audioDados)
+    .input('mimetype', sql.VarChar(50), mimetype)
+    .query(`
+      INSERT INTO MensagensAudios (mensagem_id, audio_dados, mimetype, criado_em)
+      VALUES (@mensagemId, @audioDados, @mimetype, SYSUTCDATETIME())
+    `);
+}
+
+async function findAudioPorMensagemId(mensagemId) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('mensagemId', sql.Int, mensagemId)
+    .query(`SELECT audio_dados, mimetype FROM MensagensAudios WHERE mensagem_id = @mensagemId`);
+
+  const row = result.recordset[0];
+  return row ? { audioDados: row.audio_dados, mimetype: row.mimetype } : null;
+}
+
 async function listHistoricoStatus(contatoId, numeroRemetenteId) {
   const pool = await getPool();
   const result = await pool
@@ -465,4 +490,6 @@ module.exports = {
   registrarHistoricoStatus,
   listPipeline,
   listHistoricoStatus,
+  inserirAudioMensagem,
+  findAudioPorMensagemId,
 };

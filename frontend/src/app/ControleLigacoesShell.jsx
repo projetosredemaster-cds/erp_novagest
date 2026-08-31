@@ -220,6 +220,13 @@ export default function ControleLigacoesShell() {
     let controller = null;
     let reconnectTimer = null;
 
+    function agendarReconexao() {
+      if (!montado) return;
+      reconnectTimer = setTimeout(() => {
+        if (montado) conectar();
+      }, RECONEXAO_SSE_MS);
+    }
+
     function conectar() {
       controller = new AbortController();
       abrirStreamConversas(token, {
@@ -229,13 +236,12 @@ export default function ControleLigacoesShell() {
           refetchNotificacoes();
           tocarSomNotificacao();
         },
-      }).catch((err) => {
-        if (err?.name === 'AbortError') return;
-        if (!montado) return;
-        reconnectTimer = setTimeout(() => {
-          if (montado) conectar();
-        }, RECONEXAO_SSE_MS);
-      });
+      })
+        .then(agendarReconexao)
+        .catch((err) => {
+          if (err?.name === 'AbortError') return;
+          agendarReconexao();
+        });
     }
 
     conectar();

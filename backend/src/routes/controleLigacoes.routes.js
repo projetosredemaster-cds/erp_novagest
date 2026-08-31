@@ -48,6 +48,7 @@ router.get('/disparos/:id', disparosController.detalhe);
 
 router.get('/conversas', conversasController.listar);
 router.get('/conversas/stream', conversasController.stream);
+router.get('/conversas/mensagens/:mensagemId/audio', conversasController.audio);
 router.get('/conversas/:contatoId/:numeroRemetenteId/mensagens', conversasController.mensagens);
 router.post('/conversas/:contatoId/:numeroRemetenteId/mensagens', conversasController.responder);
 router.put('/conversas/:contatoId/:numeroRemetenteId/status', conversasController.atualizarStatus);

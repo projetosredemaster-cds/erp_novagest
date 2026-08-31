@@ -74,6 +74,7 @@ beforeEach(() => {
   vi.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
 
   vi.spyOn(baileysLib, 'useMultiFileAuthState').mockResolvedValue({ state: {}, saveCreds: vi.fn() });
+  vi.spyOn(baileysLib, 'downloadMediaMessage').mockResolvedValue(Buffer.from('audio-fake'));
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(mensagensEventsService, 'emit');
@@ -218,7 +219,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
     configurarMakeWASocket(socksCriados);
     mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(42);
     mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
-    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 1, e_primeira_resposta_cliente: true });
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 1, e_primeira_resposta_cliente: true, tipo_mensagem: 'texto' });
 
     await baileysSessionService.abrirConexao(100, {});
     expect(socksCriados).toHaveLength(1);
@@ -244,11 +245,13 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
       statusEntrega: null,
+      tipoMensagem: 'texto',
     });
     expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-recebida', {
       contatoId: 42,
       numeroRemetenteId: 100,
       primeiraResposta: true,
+      tipoMensagem: 'texto',
     });
   });
 
@@ -257,7 +260,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
     configurarMakeWASocket(socksCriados);
     mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(44);
     mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(true);
-    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 4, e_primeira_resposta_cliente: false });
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 4, e_primeira_resposta_cliente: false, tipo_mensagem: 'texto' });
 
     await baileysSessionService.abrirConexao(108, {});
 
@@ -281,11 +284,13 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       ePrimeiraRespostaCliente: false,
       remetente: 'cliente',
       statusEntrega: null,
+      tipoMensagem: 'texto',
     });
     expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-recebida', {
       contatoId: 44,
       numeroRemetenteId: 108,
       primeiraResposta: false,
+      tipoMensagem: 'texto',
     });
   });
 
@@ -335,7 +340,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
     configurarMakeWASocket(socksCriados);
 
     mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(90);
-    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 40, e_primeira_resposta_cliente: false });
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 40, e_primeira_resposta_cliente: false, tipo_mensagem: 'texto' });
 
     await baileysSessionService.abrirConexao(102, {});
 
@@ -356,11 +361,13 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       ePrimeiraRespostaCliente: false,
       remetente: 'atendente',
       statusEntrega: 'enviado',
+      tipoMensagem: 'texto',
     });
     expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-recebida', {
       contatoId: 90,
       numeroRemetenteId: 102,
       primeiraResposta: false,
+      tipoMensagem: 'texto',
     });
   });
 
@@ -394,7 +401,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
     socksCriados[0].emit('messages.upsert', {
       type: 'notify',
       messages: [
-        { key: { remoteJid: '5598900000000@s.whatsapp.net', fromMe: false, id: 'M1' }, message: { audioMessage: {} } },
+        { key: { remoteJid: '5598900000000@s.whatsapp.net', fromMe: false, id: 'M1' }, message: { stickerMessage: {} } },
       ],
     });
     await flush();
@@ -407,6 +414,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
       statusEntrega: null,
+      tipoMensagem: 'texto',
     });
   });
 
@@ -437,6 +445,7 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
       statusEntrega: null,
+      tipoMensagem: 'texto',
     });
   });
 
@@ -458,6 +467,158 @@ describe('baileysSession messages.upsert listener (Central de Mensagens)', () =>
 
     await flush();
     expect(console.error).toHaveBeenCalled();
+  });
+});
+
+describe('baileysSession messages.upsert — mensagens de áudio', () => {
+  it('baixa o áudio com sucesso, grava corpo="[Áudio]"/tipoMensagem="audio" e chama inserirAudioMensagem com o buffer/mimetype', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(64);
+    mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 200, e_primeira_resposta_cliente: true, tipo_mensagem: 'audio' });
+    mensagensModel.inserirAudioMensagem.mockResolvedValue(undefined);
+    const buffer = Buffer.from('audio-fake');
+    baileysLib.downloadMediaMessage.mockResolvedValue(buffer);
+
+    await baileysSessionService.abrirConexao(700, {});
+
+    const msgOriginal = {
+      key: { remoteJid: '5598977777777@s.whatsapp.net', fromMe: false, id: 'AUD1' },
+      message: { audioMessage: { mimetype: 'audio/ogg; codecs=opus' } },
+    };
+
+    socksCriados[0].emit('messages.upsert', { type: 'notify', messages: [msgOriginal] });
+    await flush();
+
+    expect(baileysLib.downloadMediaMessage).toHaveBeenCalledWith(msgOriginal, 'buffer', {});
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith({
+      contatoId: 64,
+      numeroRemetenteId: 700,
+      corpo: '[Áudio]',
+      baileysMessageId: 'AUD1',
+      ePrimeiraRespostaCliente: true,
+      remetente: 'cliente',
+      statusEntrega: null,
+      tipoMensagem: 'audio',
+    });
+    expect(mensagensModel.inserirAudioMensagem).toHaveBeenCalledWith({
+      mensagemId: 200,
+      audioDados: buffer,
+      mimetype: 'audio/ogg; codecs=opus',
+    });
+    expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-recebida', {
+      contatoId: 64,
+      numeroRemetenteId: 700,
+      primeiraResposta: true,
+      tipoMensagem: 'audio',
+    });
+  });
+
+  it('quando o download falha, grava corpo="[Áudio indisponível]"/tipoMensagem="audio", NÃO chama inserirAudioMensagem e loga o erro', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(65);
+    mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 201, e_primeira_resposta_cliente: true });
+    baileysLib.downloadMediaMessage.mockRejectedValueOnce(new Error('falha ao baixar mídia'));
+
+    await baileysSessionService.abrirConexao(701, {});
+
+    socksCriados[0].emit('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '5598977777778@s.whatsapp.net', fromMe: false, id: 'AUD2' },
+          message: { audioMessage: { mimetype: 'audio/ogg' } },
+        },
+      ],
+    });
+    await flush();
+
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith({
+      contatoId: 65,
+      numeroRemetenteId: 701,
+      corpo: '[Áudio indisponível]',
+      baileysMessageId: 'AUD2',
+      ePrimeiraRespostaCliente: true,
+      remetente: 'cliente',
+      statusEntrega: null,
+      tipoMensagem: 'audio',
+    });
+    expect(mensagensModel.inserirAudioMensagem).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it('áudio vindo de key.fromMe=true (atendente) segue o mesmo fluxo de download/gravação, com remetente="atendente"/ePrimeiraRespostaCliente=false', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(66);
+    mensagensModel.inserirMensagemRecebida.mockResolvedValue({ id: 202, e_primeira_resposta_cliente: false, tipo_mensagem: 'audio' });
+    mensagensModel.inserirAudioMensagem.mockResolvedValue(undefined);
+    const buffer = Buffer.from('audio-fake-atendente');
+    baileysLib.downloadMediaMessage.mockResolvedValue(buffer);
+
+    await baileysSessionService.abrirConexao(702, {});
+
+    socksCriados[0].emit('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '5598977777779@s.whatsapp.net', fromMe: true, id: 'AUD3' },
+          message: { audioMessage: { mimetype: 'audio/ogg' } },
+        },
+      ],
+    });
+    await flush();
+
+    expect(mensagensModel.existeMensagemClienteAnterior).not.toHaveBeenCalled();
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalledWith({
+      contatoId: 66,
+      numeroRemetenteId: 702,
+      corpo: '[Áudio]',
+      baileysMessageId: 'AUD3',
+      ePrimeiraRespostaCliente: false,
+      remetente: 'atendente',
+      statusEntrega: 'enviado',
+      tipoMensagem: 'audio',
+    });
+    expect(mensagensModel.inserirAudioMensagem).toHaveBeenCalledWith({
+      mensagemId: 202,
+      audioDados: buffer,
+      mimetype: 'audio/ogg',
+    });
+    expect(mensagensEventsService.emit).toHaveBeenCalledWith('mensagem-recebida', {
+      contatoId: 66,
+      numeroRemetenteId: 702,
+      primeiraResposta: false,
+      tipoMensagem: 'audio',
+    });
+  });
+
+  it('quando inserirMensagemRecebida retorna null (dedup), NÃO chama inserirAudioMensagem mesmo com download bem-sucedido', async () => {
+    const socksCriados = [];
+    configurarMakeWASocket(socksCriados);
+    mensagensModel.findContatoIdPorTelefoneComVariantes.mockResolvedValue(67);
+    mensagensModel.existeMensagemClienteAnterior.mockResolvedValue(false);
+    mensagensModel.inserirMensagemRecebida.mockResolvedValueOnce(null);
+    baileysLib.downloadMediaMessage.mockResolvedValue(Buffer.from('audio-fake-dup'));
+
+    await baileysSessionService.abrirConexao(703, {});
+
+    socksCriados[0].emit('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '5598977777780@s.whatsapp.net', fromMe: false, id: 'AUD4' },
+          message: { audioMessage: { mimetype: 'audio/ogg' } },
+        },
+      ],
+    });
+    await flush();
+
+    expect(mensagensModel.inserirMensagemRecebida).toHaveBeenCalled();
+    expect(mensagensModel.inserirAudioMensagem).not.toHaveBeenCalled();
   });
 });
 
@@ -513,6 +674,7 @@ describe('baileysSession messages.upsert — bug do 9º dígito do celular brasi
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
       statusEntrega: null,
+      tipoMensagem: 'texto',
     });
   });
 
@@ -544,6 +706,7 @@ describe('baileysSession messages.upsert — bug do 9º dígito do celular brasi
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
       statusEntrega: null,
+      tipoMensagem: 'texto',
     });
   });
 
@@ -575,6 +738,7 @@ describe('baileysSession messages.upsert — bug do 9º dígito do celular brasi
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
       statusEntrega: null,
+      tipoMensagem: 'texto',
     });
   });
 
@@ -636,6 +800,7 @@ describe('baileysSession messages.upsert com remoteJid endereçado por LID (@lid
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
       statusEntrega: null,
+      tipoMensagem: 'texto',
     });
   });
 
@@ -669,6 +834,7 @@ describe('baileysSession messages.upsert com remoteJid endereçado por LID (@lid
       ePrimeiraRespostaCliente: true,
       remetente: 'cliente',
       statusEntrega: null,
+      tipoMensagem: 'texto',
     });
   });
 

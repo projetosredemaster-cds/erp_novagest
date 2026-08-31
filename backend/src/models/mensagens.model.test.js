@@ -92,6 +92,42 @@ describe('mensagens.model.inserirMensagemRecebida', () => {
     expect(request.input).toHaveBeenCalledWith('statusEntrega', sql.VarChar(20), 'enviado');
     expect(request.input).toHaveBeenCalledWith('remetente', sql.VarChar(20), 'atendente');
   });
+
+  it('grava tipo_mensagem="audio" quando tipoMensagem é informado explicitamente', async () => {
+    const { request } = criarPoolMock();
+    request.query.mockResolvedValue({
+      recordset: [{ id: 5, remetente: 'cliente', corpo: '[Áudio]', criado_em: '2026-08-26T00:00:00.000Z', e_primeira_resposta_cliente: false, tipo_mensagem: 'audio' }],
+    });
+
+    await mensagensModel.inserirMensagemRecebida({
+      contatoId: 42,
+      numeroRemetenteId: 7,
+      corpo: '[Áudio]',
+      baileysMessageId: 'A1',
+      ePrimeiraRespostaCliente: false,
+      tipoMensagem: 'audio',
+    });
+
+    expect(request.input).toHaveBeenCalledWith('tipoMensagem', sql.VarChar(20), 'audio');
+    expect(request.query.mock.calls[0][0]).toContain('tipo_mensagem');
+  });
+
+  it('grava tipo_mensagem="texto" por padrão quando tipoMensagem não é informado', async () => {
+    const { request } = criarPoolMock();
+    request.query.mockResolvedValue({
+      recordset: [{ id: 6, remetente: 'cliente', corpo: 'oi', criado_em: '2026-08-26T00:00:00.000Z', e_primeira_resposta_cliente: false, tipo_mensagem: 'texto' }],
+    });
+
+    await mensagensModel.inserirMensagemRecebida({
+      contatoId: 42,
+      numeroRemetenteId: 7,
+      corpo: 'oi',
+      baileysMessageId: 'X3',
+      ePrimeiraRespostaCliente: false,
+    });
+
+    expect(request.input).toHaveBeenCalledWith('tipoMensagem', sql.VarChar(20), 'texto');
+  });
 });
 
 describe('mensagens.model.listMensagensEMarcarLidas', () => {
@@ -110,6 +146,44 @@ describe('mensagens.model.listMensagensEMarcarLidas', () => {
     expect(resultado).toEqual(linhas);
     expect(request.query.mock.calls[0][0]).toContain('baileys_message_id');
     expect(request.query.mock.calls[0][0]).toContain('status_entrega');
+    expect(request.query.mock.calls[0][0]).toContain('tipo_mensagem');
+  });
+});
+
+describe('mensagens.model.inserirAudioMensagem', () => {
+  it('grava mensagemId/audioDados/mimetype via INSERT parametrizado', async () => {
+    const { request } = criarPoolMock();
+    request.query.mockResolvedValue({ recordset: [] });
+    const buffer = Buffer.from('fake-audio-bytes');
+
+    await mensagensModel.inserirAudioMensagem({ mensagemId: 10, audioDados: buffer, mimetype: 'audio/ogg' });
+
+    expect(request.input).toHaveBeenCalledWith('mensagemId', sql.Int, 10);
+    expect(request.input).toHaveBeenCalledWith('audioDados', sql.VarBinary(sql.MAX), buffer);
+    expect(request.input).toHaveBeenCalledWith('mimetype', sql.VarChar(50), 'audio/ogg');
+    expect(request.query.mock.calls[0][0]).toContain('INSERT INTO MensagensAudios');
+  });
+});
+
+describe('mensagens.model.findAudioPorMensagemId', () => {
+  it('devolve { audioDados, mimetype } quando a linha existe', async () => {
+    const { request } = criarPoolMock();
+    const buffer = Buffer.from('fake-audio-bytes');
+    request.query.mockResolvedValue({ recordset: [{ audio_dados: buffer, mimetype: 'audio/ogg' }] });
+
+    const resultado = await mensagensModel.findAudioPorMensagemId(10);
+
+    expect(request.input).toHaveBeenCalledWith('mensagemId', sql.Int, 10);
+    expect(resultado).toEqual({ audioDados: buffer, mimetype: 'audio/ogg' });
+  });
+
+  it('devolve null quando não há linha correspondente', async () => {
+    const { request } = criarPoolMock();
+    request.query.mockResolvedValue({ recordset: [] });
+
+    const resultado = await mensagensModel.findAudioPorMensagemId(999);
+
+    expect(resultado).toBeNull();
   });
 });
 
@@ -226,9 +300,9 @@ describe('mensagens.model.marcarAtendeuSeVazio', () => {
 
   it('quando a thread JÁ tem status, o INSERT condicional não insere nada e NÃO registra histórico', async () => {
     const { request } = criarPoolMock();
-    request.query.mockResolvedValueOnce({ recordset: [] }); // IF NOT EXISTS falso — nada inserido
+    request.query.mockResolvedValueOnce({ recordset: undefined });
 
-    await mensagensModel.marcarAtendeuSeVazio(1, 2);
+    await expect(mensagensModel.marcarAtendeuSeVazio(1, 2)).resolves.toBeUndefined();
 
     expect(request.query).toHaveBeenCalledTimes(1);
   });

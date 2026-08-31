@@ -40,6 +40,22 @@ export function atualizarStatusConversa(token, contatoId, numeroRemetenteId, sta
   });
 }
 
+export async function fetchAudioMensagemUrl(token, mensagemId) {
+  const baseUrl = import.meta.env.VITE_API_URL;
+  const response = await fetch(`${baseUrl}/api/controle-ligacoes/conversas/mensagens/${mensagemId}/audio`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null);
+    throw new Error(errorBody?.error || `Erro ao carregar áudio (${response.status}).`);
+  }
+
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
 
 export async function abrirStreamConversas(token, { onEvent, signal } = {}) {
   const baseUrl = import.meta.env.VITE_API_URL;

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import ConversasPage from './ConversasPage.jsx';
 
@@ -7,6 +7,7 @@ vi.mock('./conversasApi.js', () => ({
   fetchMensagens: vi.fn(),
   enviarMensagem: vi.fn(),
   abrirStreamConversas: vi.fn(),
+  fetchAudioMensagemUrl: vi.fn(),
 }));
 
 vi.mock('../../../app/useAuth.js', () => ({
@@ -61,6 +62,9 @@ beforeEach(() => {
   useLocation.mockReturnValue({ pathname: '/controle-ligacoes/conversas', state: null });
   useNavigate.mockReturnValue(navigateMock);
   api.abrirStreamConversas.mockImplementation(() => new Promise(() => {}));
+  api.fetchAudioMensagemUrl.mockResolvedValue('blob:fake-url');
+  globalThis.URL.createObjectURL = vi.fn(() => 'blob:fake-url');
+  globalThis.URL.revokeObjectURL = vi.fn();
 });
 
 describe('ConversasPage — lista de conversas', () => {
@@ -211,6 +215,56 @@ describe('ConversasPage — painel de chat', () => {
   });
 });
 
+describe('ConversasPage — mensagens de áudio', () => {
+  it('mensagem com tipo_mensagem "audio" e corpo normal renderiza um player de áudio', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValue(mensagensResposta({
+      mensagens: [
+        { id: 3, remetente: 'cliente', corpo: '[Áudio]', criado_em: '2026-08-25T12:02:00.000Z', tipo_mensagem: 'audio' },
+      ],
+    }));
+
+    const { container } = await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+
+    await waitFor(() => expect(api.fetchAudioMensagemUrl).toHaveBeenCalledWith('token-teste', 3));
+    await waitFor(() => expect(container.querySelector('audio')).toBeInTheDocument());
+    expect(screen.queryByText('[Áudio]')).not.toBeInTheDocument();
+  });
+
+  it('mensagem de áudio indisponível renderiza o texto normalmente, sem player', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValue(mensagensResposta({
+      mensagens: [
+        { id: 4, remetente: 'cliente', corpo: '[Áudio indisponível]', criado_em: '2026-08-25T12:02:00.000Z', tipo_mensagem: 'audio' },
+      ],
+    }));
+
+    const { container } = await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+
+    expect(await screen.findByText('[Áudio indisponível]')).toBeInTheDocument();
+    expect(container.querySelector('audio')).not.toBeInTheDocument();
+    expect(api.fetchAudioMensagemUrl).not.toHaveBeenCalled();
+  });
+
+  it('mensagem de texto (sem tipo_mensagem) continua sem player de áudio', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValue(mensagensResposta({
+      mensagens: [
+        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+      ],
+    }));
+
+    const { container } = await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+
+    await screen.findByText('Oi, tudo bem?');
+    expect(container.querySelector('audio')).not.toBeInTheDocument();
+    expect(api.fetchAudioMensagemUrl).not.toHaveBeenCalled();
+  });
+});
+
 describe('ConversasPage — tempo real (SSE)', () => {
   it('abre a conexão SSE uma única vez ao montar', async () => {
     api.fetchConversas.mockResolvedValue([conversa()]);
@@ -222,6 +276,28 @@ describe('ConversasPage — tempo real (SSE)', () => {
       onEvent: expect.any(Function),
       signal: expect.any(AbortSignal),
     }));
+  });
+
+  it('quando o stream termina sem erro (fim "limpo"), reconecta automaticamente após RECONEXAO_SSE_MS', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    let resolveStream;
+    api.abrirStreamConversas
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveStream = resolve; }))
+      .mockImplementationOnce(() => new Promise(() => {}));
+
+    await renderPage();
+    expect(api.abrirStreamConversas).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    try {
+      resolveStream();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(5000);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(api.abrirStreamConversas).toHaveBeenCalledTimes(2);
   });
 
   it('evento "nova-mensagem" sempre rebusca a lista de conversas', async () => {
@@ -483,5 +559,155 @@ describe('ConversasPage — pré-seleção via location.state (dropdown de notif
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(
       '/controle-ligacoes/conversas', { replace: true, state: null }
     ));
+  });
+});
+
+describe('ConversasPage — auto-scroll do painel de mensagens', () => {
+  // jsdom não faz layout de verdade: scrollHeight/clientHeight de qualquer elemento são sempre 0
+  // por padrão. Para testar a lógica de "perto do fim" precisamos simular esses valores via
+  // spies nos getters do protótipo — scrollTop, ao contrário, já é uma propriedade
+  // get/set funcional em jsdom (armazena o valor atribuído), então não precisa de mock.
+  let mockScrollHeight;
+  let mockClientHeight;
+
+  beforeEach(() => {
+    mockScrollHeight = 0;
+    mockClientHeight = 0;
+    vi.spyOn(window.HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => mockScrollHeight);
+    vi.spyOn(window.HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => mockClientHeight);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('abrir uma conversa pela primeira vez sempre rola o painel pro fim', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValue(mensagensResposta({
+      mensagens: [
+        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+      ],
+    }));
+    mockScrollHeight = 900;
+    mockClientHeight = 300;
+
+    await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+    await screen.findByText('Oi, tudo bem?');
+
+    const painel = screen.getByTestId('painel-mensagens');
+    await waitFor(() => expect(painel.scrollTop).toBe(900));
+  });
+
+  it('enviar uma mensagem manualmente sempre rola o painel pro fim', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValue(mensagensResposta({
+      mensagens: [
+        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+      ],
+    }));
+    api.enviarMensagem.mockResolvedValue({
+      id: 2, remetente: 'colaboradora', corpo: 'Oi Maria!', criado_em: '2026-08-25T12:05:00.000Z',
+    });
+
+    await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+    await screen.findByText('Oi, tudo bem?');
+
+    const painel = screen.getByTestId('painel-mensagens');
+    // Simula o operador tendo rolado pra cima antes de enviar a resposta.
+    mockScrollHeight = 900;
+    mockClientHeight = 300;
+    painel.scrollTop = 50;
+
+    const textarea = screen.getByLabelText('Mensagem para o contato');
+    fireEvent.change(textarea, { target: { value: 'Oi Maria!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar' }));
+
+    await screen.findByText('Oi Maria!');
+    await waitFor(() => expect(painel.scrollTop).toBe(900));
+  });
+
+  it('evento "nova-mensagem" com o operador já perto do fim rola o painel pro fim automaticamente', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValueOnce(mensagensResposta({
+      mensagens: [
+        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+      ],
+    }));
+    let onEvent;
+    api.abrirStreamConversas.mockImplementation((token, opts) => {
+      onEvent = opts.onEvent;
+      return new Promise(() => {});
+    });
+
+    await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+    await screen.findByText('Oi, tudo bem?');
+
+    const painel = screen.getByTestId('painel-mensagens');
+    // Operador está no fim do painel (dentro da tolerância).
+    mockScrollHeight = 900;
+    mockClientHeight = 300;
+    painel.scrollTop = 900;
+
+    // Quando a nova mensagem chega, o painel "cresce" (nova bolha ocupa espaço). A mudança de
+    // scrollHeight só deve acontecer DEPOIS que o componente já mediu "perto do fim" com o
+    // valor antigo (900) — por isso ela é feita dentro do mock de `fetchMensagens`, que só roda
+    // quando `carregarMensagens` de fato dispara o refetch (depois da medição).
+    api.fetchMensagens.mockImplementationOnce(() => {
+      mockScrollHeight = 1300;
+      return Promise.resolve(mensagensResposta({
+        mensagens: [
+          { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+          { id: 2, remetente: 'cliente', corpo: 'Nova mensagem!', criado_em: '2026-08-25T12:01:00.000Z' },
+        ],
+      }));
+    });
+
+    onEvent('nova-mensagem', { contatoId: 42, numeroRemetenteId: 3 });
+
+    await screen.findByText('Nova mensagem!');
+    await waitFor(() => expect(painel.scrollTop).toBe(1300));
+  });
+
+  it('evento "nova-mensagem" com o operador rolado pra cima NÃO força o painel pro fim', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValueOnce(mensagensResposta({
+      mensagens: [
+        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+      ],
+    }));
+    let onEvent;
+    api.abrirStreamConversas.mockImplementation((token, opts) => {
+      onEvent = opts.onEvent;
+      return new Promise(() => {});
+    });
+
+    await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+    await screen.findByText('Oi, tudo bem?');
+
+    const painel = screen.getByTestId('painel-mensagens');
+    // Operador rolou pra cima pra ler mensagens antigas (bem longe do fim).
+    mockScrollHeight = 900;
+    mockClientHeight = 300;
+    painel.scrollTop = 100;
+
+    api.fetchMensagens.mockImplementationOnce(() => {
+      mockScrollHeight = 1300;
+      return Promise.resolve(mensagensResposta({
+        mensagens: [
+          { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+          { id: 2, remetente: 'cliente', corpo: 'Nova mensagem!', criado_em: '2026-08-25T12:01:00.000Z' },
+        ],
+      }));
+    });
+
+    onEvent('nova-mensagem', { contatoId: 42, numeroRemetenteId: 3 });
+
+    await screen.findByText('Nova mensagem!');
+    // Posição de scroll do operador é preservada, não pula pro fim (1300).
+    expect(painel.scrollTop).toBe(100);
   });
 });

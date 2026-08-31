@@ -1556,10 +1556,14 @@ contatos daquele disparo com o status individual de envio de cada um
 > **Deliberadamente fora deste adendo**: qualquer tela/rota de "iniciar"
 > uma conversa nova (só é possível responder um contato que já tem pelo
 > menos 1 mensagem recebida — ver `POST .../mensagens`), handoff
-> automático IA→Lívia, indicador de "digitando", suporte a mídia (áudio,
-> imagem, documento — mensagens desse tipo viram um texto placeholder fixo,
-> ver "Contexto e decisões de design" abaixo), e paginação de
+> automático IA→Lívia, indicador de "digitando", e paginação de
 > `GET .../mensagens` (devolve o histórico inteiro do contato de uma vez).
+> **Suporte a mídia** (adendo posterior a esta seção): ÁUDIO é suportado —
+> baixado via Baileys, armazenado em `MensagensAudios` e servido por uma
+> rota própria (`GET .../conversas/mensagens/:mensagemId/audio`, ver seção
+> 6 abaixo); imagem/documento continuam fora de escopo, mensagens desse
+> tipo (ou de qualquer tipo ainda não reconhecido) continuam virando um
+> texto placeholder fixo, ver "Contexto e decisões de design" abaixo.
 
 ### Contexto e decisões de design
 
@@ -1619,13 +1623,48 @@ contatos daquele disparo com o status individual de envio de cada um
   unicidade, então mensagens nossas nunca colidem entre si nem com nada; a
   proteção original (não duplicar o mesmo evento `messages.upsert` recebido
   duas vezes) continua intacta.
-- **Mensagem de mídia (áudio, imagem, documento, etc.) — ou qualquer tipo
-  não reconhecido depois de desembrulhar os envelopes conhecidos (ver passo
-  4 abaixo) — vira um texto placeholder fixo**
+- **Mensagem de mídia (imagem, documento, etc.) — ou qualquer tipo não
+  reconhecido depois de desembrulhar os envelopes conhecidos (ver passo 4
+  abaixo) — vira um texto placeholder fixo**
   (`'[Mensagem de mídia não suportada nesta versão]'`); o listener só
   extrai texto real de `conversation`/`extendedTextMessage.text` na
   mensagem JÁ desembrulhada. Tratamento de mídia de verdade (download/
-  armazenamento do arquivo) é trabalho futuro.
+  armazenamento do arquivo) continua trabalho futuro **para imagem e
+  documento**.
+- **Áudio (adendo posterior) é a primeira mídia com suporte real** — a
+  detecção acontece ANTES de `extrairTextoDaMensagem` (checando
+  `mensagemDesembrulhada?.audioMessage`, na mensagem JÁ desembrulhada, para
+  não confundir com um `audioMessage` aninhado num envelope), então o
+  caminho genérico de "tipo não reconhecido" (com seu log de debug) nunca é
+  acionado para áudio. `handleMessagesUpsert` chama
+  `baileysLib.downloadMediaMessage(msg, 'buffer', {})` — o `msg` ORIGINAL
+  (ainda embrulhado, com `.key`/`.message`; a própria função da lib
+  desembrulha internamente), `type='buffer'`, sem `ctx` (4º argumento) por
+  não haver nenhum logger compatível instanciado hoje neste arquivo —
+  limitação conhecida, não bug. Sucesso grava `corpo='[Áudio]'` e
+  `tipo_mensagem='audio'`; falha no download (rede, mídia expirada, etc.)
+  grava `corpo='[Áudio indisponível]'` e `tipo_mensagem='audio'` mesmo
+  assim — a mensagem nunca é descartada só porque o download falhou, só o
+  áudio em si fica indisponível. **O download acontece ANTES do `INSERT`
+  em `Mensagens`**, de propósito: assim o `corpo` certo (`'[Áudio]'` ou
+  `'[Áudio indisponível]'`) já é gravado de uma vez, sem precisar de um
+  `UPDATE` posterior para corrigir o texto depois que o download resolve.
+  **Interação com o dedup do índice único filtrado**: o download pode
+  acontecer mesmo para um evento duplicado do Baileys (`downloadMediaMessage`
+  roda antes de se saber se o `INSERT` vai ser aceito ou descartado) — mas
+  `mensagensModel.inserirAudioMensagem` só é chamado dentro do
+  `if (mensagemInserida)`, ou seja, `MensagensAudios` só recebe uma linha
+  quando a inserção em `Mensagens` for de fato nova; um evento duplicado
+  baixa o áudio à toa (custo de rede desperdiçado) mas nunca duplica linha
+  em `MensagensAudios`, sem precisar de nenhuma lógica extra de dedup para
+  esse caso. `baileysLib.downloadMediaMessage` é um novo membro do wrapper
+  testável `baileysLib`/`_baileysLib` (ao lado de `makeWASocket`/
+  `useMultiFileAuthState`), para os testes conseguirem mocá-lo sem tocar o
+  pacote `@whiskeysockets/baileys` de verdade. `mensagemDesembrulhada.
+  audioMessage.mimetype` é gravado em `MensagensAudios.mimetype`
+  (`'application/octet-stream'` como fallback quando o Baileys não informar
+  um mimetype). Imagem/documento seguem 100% inalterados (placeholder fixo,
+  sem download, sem `tipo_mensagem` diferente de `'texto'`).
 - **Telefone não encontrado em `Contatos` (ex.: mensagem de um grupo, ou de
   um número fora da base) é ignorado silenciosamente** (log informativo) —
   a Central de Mensagens só existe para contatos já importados; não cria
@@ -1662,7 +1701,16 @@ CREATE TABLE Mensagens (
     baileys_message_id     VARCHAR(100) NULL,      -- preenchido em mensagens que chegam via listener ('cliente' ou 'atendente')
     lida                   BIT NOT NULL DEFAULT 0,
     e_primeira_resposta_cliente BIT NOT NULL DEFAULT 0, -- ver "Sino de notificações" abaixo
+    tipo_mensagem          VARCHAR(20) NOT NULL DEFAULT 'texto', -- 'texto' | 'audio' — ver "Mídia: Áudio" abaixo
     criado_em              DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE TABLE MensagensAudios (
+    id            INT IDENTITY(1,1) PRIMARY KEY,
+    mensagem_id   INT NOT NULL UNIQUE FOREIGN KEY REFERENCES Mensagens(id), -- 1:1 com Mensagens
+    audio_dados   VARBINARY(MAX) NOT NULL,
+    mimetype      VARCHAR(50) NOT NULL,
+    criado_em     DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
 -- Unicidade de baileys_message_id garantida por um ÍNDICE ÚNICO FILTRADO
@@ -1694,6 +1742,15 @@ propósito e a rota que a consome. **Este script também ainda não foi
 executado contra nenhum banco** — precisa rodar manualmente (local:
 `erp-novagest-dev`, depois de `MIGRATION-MENSAGENS.sql` já ter rodado)
 antes do listener/rota abaixo funcionarem de verdade.
+
+`Mensagens.tipo_mensagem` e a tabela `MensagensAudios` (ver "Mídia: Áudio"
+abaixo) são de um adendo posterior — **nota diferente do padrão usual desta
+seção**: essa migration **já foi executada manualmente** contra o banco
+alvo por fora deste repositório; não existe um script `MIGRATION-*.sql`
+novo aqui para ela (diferente de `MIGRATION-MENSAGENS.sql`/
+`MIGRATION-NOTIFICACOES.sql` acima, que existem no repo mas ainda não
+rodaram em banco nenhum). Não presuma "ainda não executada" para essas duas
+colunas/tabela só porque o padrão do resto desta seção é esse.
 
 ### O listener: `baileysSession.service.js` (`messages.upsert`)
 
@@ -1899,6 +1956,19 @@ em andamento.
   contato, lido do `OUTPUT` do próprio `INSERT` (`mensagemInserida.e_primeira_resposta_cliente`),
   não da variável calculada antes do insert — evita qualquer discrepância
   entre o booleano JS enviado e o `BIT` que o SQL Server de fato gravou.
+- O mesmo payload também ganhou o campo `tipoMensagem` (bugfix — mensagem
+  de áudio só ganhava player na tela de Conversas depois de recarregar via
+  `GET .../mensagens`; em tempo real, via SSE, o player não aparecia), no
+  mesmo princípio já usado por `primeiraResposta`: lido do `OUTPUT` do
+  próprio `INSERT` (`mensagemInserida.tipo_mensagem`), nunca de uma
+  variável calculada antes do insert. Essa correção exigiu tocar em DOIS
+  arquivos, não só `baileysSession.service.js`: o handler `onNovaMensagem`
+  em `conversas.controller.js` (`stream(req, res)`) reconstrói o payload
+  campo a campo via destructuring nomeado — não é um passthrough/spread do
+  objeto inteiro emitido —, então um campo novo adicionado só ao `emit`
+  fica descartado silenciosamente até ser adicionado explicitamente também
+  nesse destructuring. Qualquer campo novo futuro no payload de
+  `'mensagem-recebida'` precisa ser adicionado nos dois lugares.
 
 ### O worker de envio grava em `Mensagens`
 
@@ -1994,11 +2064,18 @@ como lida", como qualquer inbox. Protegida por `authMiddleware` +
 ```json
 {
   "mensagens": [
-    { "id": 1, "remetente": "cliente", "corpo": "Oi, tudo bem?", "criado_em": "2026-08-25T12:00:00.000Z" },
-    { "id": 2, "remetente": "ia", "corpo": "Olá! ...", "criado_em": "2026-08-25T12:01:00.000Z" }
+    { "id": 1, "remetente": "cliente", "corpo": "Oi, tudo bem?", "criado_em": "2026-08-25T12:00:00.000Z", "tipo_mensagem": "texto" },
+    { "id": 2, "remetente": "ia", "corpo": "Olá! ...", "criado_em": "2026-08-25T12:01:00.000Z", "tipo_mensagem": "texto" },
+    { "id": 3, "remetente": "cliente", "corpo": "[Áudio]", "criado_em": "2026-08-25T12:02:00.000Z", "tipo_mensagem": "audio" }
   ]
 }
 ```
+`tipo_mensagem` (campo novo, adendo posterior — aditivo, snake_case como o
+resto desta rota) é `'texto'` para toda mensagem exceto áudio; uma
+mensagem `tipo_mensagem: 'audio'` tem `corpo` sempre `'[Áudio]'` ou
+`'[Áudio indisponível]'` (nunca o texto de fato), e o cliente deve buscar o
+arquivo em si via `GET .../conversas/mensagens/:mensagemId/audio` (seção 6
+abaixo), usando o `id` da própria mensagem.
 Uma thread que existe (contato válido) mas nunca teve nenhuma mensagem
 nessa combinação específica devolve `200` com `{ "mensagens": [] }` —
 **não** `404` (só `:contatoId` inexistente em `Contatos` vira `404`, ver
@@ -2088,22 +2165,29 @@ Connection: keep-alive
 #### Evento emitido (único tipo, pode ocorrer 0..N vezes por conexão)
 ```
 event: nova-mensagem
-data: {"contatoId":42,"numeroRemetenteId":17}
+data: {"contatoId":42,"numeroRemetenteId":17,"primeiraResposta":false,"tipoMensagem":"texto"}
 ```
-Só esses 2 campos — **sem** o corpo da mensagem nem qualquer outro dado; o
+Só esses 4 campos — **sem** o corpo da mensagem nem qualquer outro dado; o
 cliente decide se recarrega a lista de conversas e/ou a conversa aberta
 (quando `contatoId` bate com a que está na tela) a partir desse sinal.
+`tipoMensagem` (`'texto'|'audio'`) é o que permite ao player de áudio
+aparecer em tempo real, sem esperar um `GET .../mensagens` recarregar a
+thread.
 
 #### Contexto e decisões de design
 - **Canal**: `backend/src/services/mensagensEvents.service.js` — um único
   `EventEmitter` (módulo nativo `events`) compartilhado por todo o
   processo, não um por número remetente/contato. Produtor:
   `baileysSession.service.js: handleMessagesUpsert`, que emite
-  `'mensagem-recebida'` (`{ contatoId, numeroRemetenteId }`) sempre que uma
-  mensagem de cliente é **efetivamente gravada** em `Mensagens` — nunca
-  quando a gravação é descartada por dedup de evento duplicado do Baileys
-  (`mensagens.model.js: inserirMensagemRecebida` retornando `null` nesse
-  caso). Consumidor: esta rota, que registra um listener por conexão SSE.
+  `'mensagem-recebida'` (`{ contatoId, numeroRemetenteId, primeiraResposta,
+  tipoMensagem }`) sempre que uma mensagem de cliente é **efetivamente
+  gravada** em `Mensagens` — nunca quando a gravação é descartada por dedup
+  de evento duplicado do Baileys (`mensagens.model.js:
+  inserirMensagemRecebida` retornando `null` nesse caso). Consumidor: esta
+  rota, que registra um listener por conexão SSE e reconstrói o payload
+  campo a campo via destructuring nomeado (não é um passthrough/spread do
+  objeto inteiro emitido) — ver bullet correspondente na seção "Central de
+  Mensagens (v7)" acima sobre a implicação disso para campos novos.
 - **Broadcast para múltiplos clientes**: cada `GET .../conversas/stream`
   aberto registra seu próprio listener no `EventEmitter` compartilhado —
   N abas/operadores conectados ao mesmo tempo recebem o mesmo evento,
@@ -2186,6 +2270,39 @@ inconsistência com o resto da API em camelCase).
 
 #### Erros
 - `500`: `{ "error": "Erro interno ao contar notificações não vistas." }`
+
+### 6. `GET /api/controle-ligacoes/conversas/mensagens/:mensagemId/audio`
+
+> Adendo posterior a esta seção — suporte real a mensagem de ÁUDIO (ver
+> "Mídia: Áudio" em "Contexto e decisões de design" acima). **Primeira rota
+> binária do projeto** — toda outra rota do backend responde JSON (ou, no
+> caso do stream de Conversas/Conexão Baileys, texto no formato SSE); esta
+> é a primeira a responder um corpo binário puro (`Buffer`) com um
+> `Content-Type` que não é `application/json`.
+
+Serve o arquivo de áudio de uma mensagem específica, armazenado em
+`MensagensAudios.audio_dados`. Protegida por `authMiddleware` +
+`operadorCobrancaMiddleware`, herdados do mount do módulo em `app.js` —
+nenhuma checagem própria na rota, mesmo padrão do resto de
+`/api/controle-ligacoes/*`.
+
+#### Parâmetros
+| Nome | Tipo | Obrigatório | Validação |
+|---|---|---|---|
+| `:mensagemId` | path, number | sim | inteiro positivo; `400` se não for |
+
+#### Resposta de sucesso — `200 OK`
+Corpo binário (o áudio em si), `Content-Type` igual ao `mimetype` salvo em
+`MensagensAudios` no momento do download (ex.: `audio/ogg; codecs=opus`) —
+não um valor fixo para todas as mensagens.
+
+#### Erros
+- `400`: `{ "error": "Parâmetro \"mensagemId\" deve ser um número inteiro positivo." }`
+- `404`: `{ "error": "Áudio não encontrado." }` — `:mensagemId` válido mas
+  sem linha correspondente em `MensagensAudios` (mensagem não é de áudio,
+  não existe, ou o download falhou na hora do recebimento — ver
+  `corpo='[Áudio indisponível]'` em "Mídia: Áudio" acima).
+- `500`: `{ "error": "Erro interno ao buscar áudio da mensagem." }`
 
 ---
 

@@ -100,6 +100,10 @@ async function listarHistoricoStatus(contatoId, numeroRemetenteId) {
   return mensagensModel.listHistoricoStatus(contatoId, numeroRemetenteId);
 }
 
+async function buscarAudio(mensagemId) {
+  return mensagensModel.findAudioPorMensagemId(mensagemId);
+}
+
 module.exports = {
   listarConversas,
   contarNotificacoesNaoVistas,
@@ -109,4 +113,5 @@ module.exports = {
   atualizarStatus,
   listarPipeline,
   listarHistoricoStatus,
+  buscarAudio,
 };
