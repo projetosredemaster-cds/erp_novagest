@@ -1,3 +1,4 @@
+process.env.TZ = 'UTC';
 process.env.ENVIO_DISPAROS_DELAY_ENTRE_MENSAGENS_MS = '0';
 process.env.ENVIO_DISPAROS_LOTE_TAMANHO = '5';
 
@@ -6,9 +7,17 @@ const mensagensTemplatesModel = require('../models/mensagensTemplates.model');
 const numerosRemetentesModel = require('../models/numerosRemetentes.model');
 const mensagensModel = require('../models/mensagens.model');
 const baileysSessionService = require('../services/baileysSession.service');
+const disparosEventsService = require('../services/disparosEvents.service');
 const worker = require('./envioDisparos.worker');
 
-const { processarCicloEnvio, _calcularProximoTemplate, _montarMensagem } = worker;
+const {
+  processarCicloEnvio,
+  iniciarWorkerEnvioDisparos,
+  pararWorkerEnvioDisparos,
+  _calcularProximoTemplate,
+  _montarMensagem,
+  _estaDentroDoHorarioComercial,
+} = worker;
 
 function itemPendente(overrides = {}) {
   return {
@@ -75,6 +84,14 @@ beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
+
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-09-01T15:00:00Z'));
+});
+
+afterEach(() => {
+  pararWorkerEnvioDisparos();
+  vi.useRealTimers();
 });
 
 describe('envioDisparos.worker._calcularProximoTemplate', () => {
@@ -114,7 +131,42 @@ describe('envioDisparos.worker._montarMensagem', () => {
   });
 });
 
+describe('envioDisparos.worker._estaDentroDoHorarioComercial (defaults 11h-22h UTC = 8h-19h Brasília)', () => {
+  it('true numa terça-feira dentro da janela (15h)', () => {
+    expect(_estaDentroDoHorarioComercial(new Date('2026-09-01T15:00:00Z'))).toBe(true);
+  });
+
+  it('false numa terça-feira antes da janela (10h)', () => {
+    expect(_estaDentroDoHorarioComercial(new Date('2026-09-01T10:00:00Z'))).toBe(false);
+  });
+
+  it('false numa terça-feira exatamente no limite superior (22h, exclusivo)', () => {
+    expect(_estaDentroDoHorarioComercial(new Date('2026-09-01T22:00:00Z'))).toBe(false);
+  });
+
+  it('true numa terça-feira exatamente no limite inferior (11h, inclusivo)', () => {
+    expect(_estaDentroDoHorarioComercial(new Date('2026-09-01T11:00:00Z'))).toBe(true);
+  });
+
+  it('false num sábado dentro do horário (15h)', () => {
+    expect(_estaDentroDoHorarioComercial(new Date('2026-09-05T15:00:00Z'))).toBe(false);
+  });
+
+  it('false num domingo dentro do horário (15h)', () => {
+    expect(_estaDentroDoHorarioComercial(new Date('2026-09-06T15:00:00Z'))).toBe(false);
+  });
+});
+
 describe('envioDisparos.worker.processarCicloEnvio', () => {
+  it('não consulta o banco fora do horário comercial (ex.: sábado)', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-05T15:00:00Z'));
+
+    await processarCicloEnvio();
+
+    expect(disparosModel.listContatosPendentesParaEnvio).not.toHaveBeenCalled();
+  });
+
   it('não faz nada quando não há itens pendentes', async () => {
     disparosModel.listContatosPendentesParaEnvio.mockResolvedValue([]);
 
@@ -175,7 +227,9 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
       return 'Ana';
     });
 
-    await processarCicloEnvio();
+    const cicloPromise = processarCicloEnvio();
+    await vi.advanceTimersByTimeAsync(10000);
+    await cicloPromise;
 
     expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(1, 'Número não está conectado.');
 
@@ -394,5 +448,47 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
     expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(item.disparoContatoId, 'conexão instável');
     expect(sendMessage).not.toHaveBeenCalled();
     expect(disparosModel.marcarContatoEnviado).not.toHaveBeenCalled();
+  });
+});
+
+describe('envioDisparos.worker: disparo por evento ("disparo-criado")', () => {
+  it('emitir "disparo-criado" dispara um ciclo imediatamente (dentro do horário comercial fixado no beforeEach)', async () => {
+    disparosModel.listContatosPendentesParaEnvio.mockResolvedValue([]);
+
+    iniciarWorkerEnvioDisparos();
+    disparosEventsService.emit('disparo-criado', { disparoId: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(disparosModel.listContatosPendentesParaEnvio).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignora um novo evento enquanto um ciclo já está em andamento (nunca roda em paralelo)', async () => {
+    let resolveLote;
+    disparosModel.listContatosPendentesParaEnvio.mockImplementation(
+      () => new Promise((resolve) => { resolveLote = resolve; })
+    );
+
+    iniciarWorkerEnvioDisparos();
+    disparosEventsService.emit('disparo-criado', { disparoId: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    disparosEventsService.emit('disparo-criado', { disparoId: 2 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(disparosModel.listContatosPendentesParaEnvio).toHaveBeenCalledTimes(1);
+
+    resolveLote([]);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  it('depois de pararWorkerEnvioDisparos, emitir o evento não dispara mais nenhum ciclo', async () => {
+    disparosModel.listContatosPendentesParaEnvio.mockResolvedValue([]);
+
+    iniciarWorkerEnvioDisparos();
+    pararWorkerEnvioDisparos();
+    disparosEventsService.emit('disparo-criado', { disparoId: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(disparosModel.listContatosPendentesParaEnvio).not.toHaveBeenCalled();
   });
 });

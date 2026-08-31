@@ -1354,6 +1354,27 @@ controller gravar `numero=NULL`/`status_conexao='aguardando_conexao'`
 - **Nenhum retry automático nesta fase**: um item que falha fica
   `status='falha'` e nunca é reprocessado sozinho — reenviar exigiria uma
   ação manual futura (fora de escopo deste adendo).
+- **Adendo posterior — horário comercial e disparo por evento**: motivado
+  por custo de Azure SQL **Serverless**, onde uma consulta constante ao
+  banco impede a pausa automática por ociosidade. Duas mudanças: (a) o
+  worker não processa nenhum ciclo fora do horário comercial (fins de
+  semana, e fora da janela `HORARIO_COMERCIAL_INICIO_HORA`–
+  `HORARIO_COMERCIAL_FIM_HORA`, default `11`–`22`, avaliada no fuso
+  horário local do processo Node — os defaults já assumem processo em UTC
+  a partir do expediente real do negócio, 8h–19h em horário de Brasília
+  [UTC-3]) — nenhuma query roda nesse caso; (b) o ciclo passou a ser
+  disparado majoritariamente por evento: `POST /disparos` (seção acima)
+  emite `disparo-criado` (via `backend/src/services/disparosEvents.service.js`,
+  mesmo padrão de `mensagensEvents.service.js` usado pela Central de
+  Mensagens, mas em domínio/arquivo separado) logo após o commit da
+  transação de criação; o worker assina esse evento e roda um ciclo
+  imediatamente ao recebê-lo, respeitando a mesma trava de "nunca em
+  paralelo" (`cicloEmAndamento`) já usada pelo timer. `ENVIO_DISPAROS_INTERVALO_MS`
+  (default agora `300000`, 5 min) deixou de ser o mecanismo principal —
+  continua existindo só como rede de segurança para itens deixados
+  pendentes por um restart do backend ou uma falha rara no emit. Nenhuma
+  mudança de contrato HTTP: `POST /disparos` continua com o mesmo
+  request/response, o emit é efeito colateral interno.
 
 ### Schema novo
 
@@ -1412,12 +1433,15 @@ Inicia junto com o processo backend (`server.js`, ao lado de
 
 | Variável | Default | O que controla |
 |---|---|---|
-| `ENVIO_DISPAROS_INTERVALO_MS` | `15000` | intervalo entre um ciclo do worker e o próximo |
+| `ENVIO_DISPAROS_INTERVALO_MS` | `300000` | intervalo entre um ciclo do worker e o próximo — só rede de segurança desde o adendo evento+fallback abaixo, não o mecanismo principal |
 | `ENVIO_DISPAROS_LOTE_TAMANHO` | `5` | quantos itens `status='pendente'` são buscados por ciclo |
 | `ENVIO_DISPAROS_DELAY_ENTRE_MENSAGENS_MS` | `4000` | delay aplicado entre tentativas de envio reais dentro do mesmo ciclo |
+| `HORARIO_COMERCIAL_INICIO_HORA` | `11` | hora de início do horário comercial em que o worker processa ciclos — lida no fuso horário local do processo Node; default já convertido para UTC (servidor roda em UTC) a partir de 8h em horário de Brasília |
+| `HORARIO_COMERCIAL_FIM_HORA` | `22` | hora de fim (exclusiva) do horário comercial — mesma ressalva de fuso acima; default convertido de 19h em horário de Brasília |
 
 #### A cada ciclo
 
+0. Primeiro checa se está dentro do horário comercial (`HORARIO_COMERCIAL_INICIO_HORA`–`HORARIO_COMERCIAL_FIM_HORA`, fim de semana sempre `false`) — se não estiver, o ciclo retorna imediatamente, sem nenhuma query ao banco.
 1. Busca até `ENVIO_DISPAROS_LOTE_TAMANHO` linhas de `DisparoContatos` com
    `status='pendente'` (mais antigas primeiro), via JOIN com `Disparos`
    (pega `numero_remetente_id`) e `Contatos` (pega `telefone`/`nome`).

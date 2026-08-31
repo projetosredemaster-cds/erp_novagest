@@ -1,4 +1,5 @@
 const disparosModel = require('../models/disparos.model');
+const disparosEventsService = require('./disparosEvents.service');
 const disparosService = require('./disparos.service');
 
 beforeEach(() => {
@@ -13,6 +14,8 @@ beforeEach(() => {
       });
     }
   }
+
+  vi.spyOn(disparosEventsService, 'emit').mockImplementation(() => {});
 });
 
 describe('disparos.service.listarPainelDisparo', () => {
@@ -259,6 +262,42 @@ describe('disparos.service.criarDisparo', () => {
     });
 
     expect(resultado).toEqual({ status: 'numero_sem_colaboradora' });
+  });
+
+  it('emite "disparo-criado" com o disparoId quando o model retorna status "criado"', async () => {
+    disparosModel.criarDisparo.mockResolvedValue({
+      status: 'criado',
+      disparoId: 42,
+      totalContatos: 1,
+    });
+
+    await disparosService.criarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      usuarioId: 1,
+      contatoIds: [10],
+    });
+
+    expect(disparosEventsService.emit).toHaveBeenCalledTimes(1);
+    expect(disparosEventsService.emit).toHaveBeenCalledWith('disparo-criado', { disparoId: 42 });
+  });
+
+  it.each([
+    'numero_invalido',
+    'contatos_invalidos',
+    'numero_desconectado',
+    'numero_sem_colaboradora',
+  ])('não emite "disparo-criado" quando o model retorna status "%s" (nada foi gravado)', async (status) => {
+    disparosModel.criarDisparo.mockResolvedValue({ status });
+
+    await disparosService.criarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      usuarioId: 1,
+      contatoIds: [10],
+    });
+
+    expect(disparosEventsService.emit).not.toHaveBeenCalled();
   });
 });
 

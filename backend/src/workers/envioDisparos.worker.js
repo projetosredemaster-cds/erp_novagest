@@ -3,13 +3,26 @@ const mensagensTemplatesModel = require('../models/mensagensTemplates.model');
 const numerosRemetentesModel = require('../models/numerosRemetentes.model');
 const mensagensModel = require('../models/mensagens.model');
 const baileysSessionService = require('../services/baileysSession.service');
+const disparosEventsService = require('../services/disparosEvents.service');
 
-const INTERVALO_MS = Number(process.env.ENVIO_DISPAROS_INTERVALO_MS) || 15000;
+const INTERVALO_MS = Number(process.env.ENVIO_DISPAROS_INTERVALO_MS) || 300000;
 const LOTE_TAMANHO = Number(process.env.ENVIO_DISPAROS_LOTE_TAMANHO) || 5;
 const DELAY_ENTRE_MENSAGENS_MS = Number(process.env.ENVIO_DISPAROS_DELAY_ENTRE_MENSAGENS_MS) || 4000;
+const HORARIO_COMERCIAL_INICIO_HORA = Number(process.env.HORARIO_COMERCIAL_INICIO_HORA) || 11;
+const HORARIO_COMERCIAL_FIM_HORA = Number(process.env.HORARIO_COMERCIAL_FIM_HORA) || 22;
 
 let intervalHandle = null;
 let cicloEmAndamento = false;
+
+function estaDentroDoHorarioComercial(agora = new Date()) {
+  const diaSemana = agora.getDay();
+  if (diaSemana === 0 || diaSemana === 6) {
+    return false;
+  }
+
+  const hora = agora.getHours();
+  return hora >= HORARIO_COMERCIAL_INICIO_HORA && hora < HORARIO_COMERCIAL_FIM_HORA;
+}
 
 function aguardar(ms) {
   if (!ms || ms <= 0) return Promise.resolve();
@@ -134,6 +147,10 @@ async function processarItem(item) {
 }
 
 async function processarCicloEnvio() {
+  if (!estaDentroDoHorarioComercial()) {
+    return;
+  }
+
   let itens;
   try {
     itens = await disparosModel.listContatosPendentesParaEnvio(LOTE_TAMANHO);
@@ -168,6 +185,26 @@ async function processarCicloEnvio() {
   }
 }
 
+function executarCicloComGuarda(origem) {
+  if (cicloEmAndamento) {
+    console.warn(`[envioDisparos.worker] ciclo anterior ainda em andamento — ignorando disparo (${origem}).`);
+    return;
+  }
+
+  cicloEmAndamento = true;
+  processarCicloEnvio()
+    .catch((err) => {
+      console.error('[envioDisparos.worker] erro inesperado no ciclo:', err);
+    })
+    .finally(() => {
+      cicloEmAndamento = false;
+    });
+}
+
+function onDisparoCriado() {
+  executarCicloComGuarda('evento');
+}
+
 function iniciarWorkerEnvioDisparos() {
   if (intervalHandle) {
     return;
@@ -175,24 +212,12 @@ function iniciarWorkerEnvioDisparos() {
 
   console.log(
     `[envioDisparos.worker] iniciado (intervalo=${INTERVALO_MS}ms, loteTamanho=${LOTE_TAMANHO}, ` +
-    `delayEntreMensagens=${DELAY_ENTRE_MENSAGENS_MS}ms).`
+    `delayEntreMensagens=${DELAY_ENTRE_MENSAGENS_MS}ms, horarioComercial=${HORARIO_COMERCIAL_INICIO_HORA}h-` +
+    `${HORARIO_COMERCIAL_FIM_HORA}h).`
   );
 
-  intervalHandle = setInterval(() => {
-    if (cicloEmAndamento) {
-      console.warn('[envioDisparos.worker] ciclo anterior ainda em andamento — pulando esta execução do timer.');
-      return;
-    }
-
-    cicloEmAndamento = true;
-    processarCicloEnvio()
-      .catch((err) => {
-        console.error('[envioDisparos.worker] erro inesperado no ciclo:', err);
-      })
-      .finally(() => {
-        cicloEmAndamento = false;
-      });
-  }, INTERVALO_MS);
+  intervalHandle = setInterval(() => executarCicloComGuarda('timer'), INTERVALO_MS);
+  disparosEventsService.on('disparo-criado', onDisparoCriado);
 }
 
 function pararWorkerEnvioDisparos() {
@@ -200,6 +225,7 @@ function pararWorkerEnvioDisparos() {
     clearInterval(intervalHandle);
     intervalHandle = null;
   }
+  disparosEventsService.off('disparo-criado', onDisparoCriado);
 }
 
 module.exports = {
@@ -209,4 +235,5 @@ module.exports = {
   _processarItem: processarItem,
   _calcularProximoTemplate: calcularProximoTemplate,
   _montarMensagem: montarMensagem,
+  _estaDentroDoHorarioComercial: estaDentroDoHorarioComercial,
 };

@@ -1,4 +1,5 @@
 const disparosModel = require('../models/disparos.model');
+const disparosEventsService = require('./disparosEvents.service');
 
 const ORDENS_VALIDAS = ['nome_asc', 'nome_desc', 'recentes'];
 
@@ -30,12 +31,18 @@ async function verificarDisparo({ estadoId, numeroRemetenteId, contatoIds }) {
 async function criarDisparo({ estadoId, numeroRemetenteId, usuarioId, contatoIds }) {
   const contatoIdsUnicos = [...new Set(contatoIds)];
 
-  return disparosModel.criarDisparo({
+  const resultado = await disparosModel.criarDisparo({
     estadoId,
     numeroRemetenteId,
     usuarioId,
     contatoIds: contatoIdsUnicos,
   });
+
+  if (resultado.status === 'criado') {
+    disparosEventsService.emit('disparo-criado', { disparoId: resultado.disparoId });
+  }
+
+  return resultado;
 }
 
 async function detalharDisparo(id) {
