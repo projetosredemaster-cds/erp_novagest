@@ -1,5 +1,9 @@
 const disparosService = require('../services/disparos.service');
 
+const TIPOS_MENSAGEM_VALIDOS = ['primeiro_contato', 'reativacao'];
+const DIAS_SEMANA_VALIDOS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+const REGEX_HORA_AGENDAMENTO = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 function isPositiveInteger(value) {
   return Number.isInteger(value) && value > 0;
 }
@@ -39,6 +43,51 @@ function validarCorpoDisparo(body) {
   }
 
   return { estadoIdNum, numeroRemetenteIdNum, contatoIdsNum };
+}
+
+function validarCamposTipoMensagem(body) {
+  const { tipoMensagem, diaSemana, horaAgendamento } = body;
+
+  if (!TIPOS_MENSAGEM_VALIDOS.includes(tipoMensagem)) {
+    return {
+      erro: {
+        status: 400,
+        body: {
+          error: 'Campo "tipoMensagem" é obrigatório e deve ser "primeiro_contato" ou "reativacao".',
+        },
+      },
+    };
+  }
+
+  if (tipoMensagem === 'reativacao') {
+    return { tipoMensagem, diaSemana: null, horaAgendamento: null };
+  }
+
+  if (!DIAS_SEMANA_VALIDOS.includes(diaSemana)) {
+    return {
+      erro: {
+        status: 400,
+        body: {
+          error:
+            'Campo "diaSemana" é obrigatório para o tipo "primeiro_contato" e deve ser um dia entre Segunda e Sábado.',
+        },
+      },
+    };
+  }
+
+  if (typeof horaAgendamento !== 'string' || !REGEX_HORA_AGENDAMENTO.test(horaAgendamento)) {
+    return {
+      erro: {
+        status: 400,
+        body: {
+          error:
+            'Campo "horaAgendamento" é obrigatório para o tipo "primeiro_contato" e deve estar no formato HH:mm.',
+        },
+      },
+    };
+  }
+
+  return { tipoMensagem, diaSemana, horaAgendamento };
 }
 
 async function painelDisparo(req, res) {
@@ -127,12 +176,22 @@ async function criar(req, res) {
 
   const { estadoIdNum, numeroRemetenteIdNum, contatoIdsNum } = validacao;
 
+  const validacaoTipo = validarCamposTipoMensagem(req.body || {});
+  if (validacaoTipo.erro) {
+    return res.status(validacaoTipo.erro.status).json(validacaoTipo.erro.body);
+  }
+
+  const { tipoMensagem, diaSemana, horaAgendamento } = validacaoTipo;
+
   try {
     const resultado = await disparosService.criarDisparo({
       estadoId: estadoIdNum,
       numeroRemetenteId: numeroRemetenteIdNum,
       usuarioId: req.usuario.id,
       contatoIds: contatoIdsNum,
+      tipoMensagem,
+      diaSemana,
+      horaAgendamento,
     });
 
     if (resultado.status === 'numero_invalido') {

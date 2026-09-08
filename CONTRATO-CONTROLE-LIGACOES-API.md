@@ -736,6 +736,14 @@ Todos os erros seguem `{ "error": "mensagem" }`.
   mesma transação que faz os `INSERT`s — qualquer um dos dois novos status
   dá rollback antes de gravar `Disparos`/`DisparoContatos`, igual já
   acontecia para `numero_invalido`/`contatos_invalidos`.
+- **Adendo posterior — dois tipos de disparo (`tipoMensagem`).** `POST
+  /disparos` (seção 14) ganhou suporte a um segundo tipo de mensagem,
+  `'primeiro_contato'` (ao lado do já existente, agora chamado
+  `'reativacao'`), com placeholders de dia/hora de agendamento na mensagem
+  e rotação de template independente por tipo (ver "Envio de Disparos
+  (v6)" abaixo). `POST /disparos/verificar` (seção 15) **não** foi alterada
+  — continua sem os 3 campos novos, servindo só para o aviso de "já
+  disparado nos últimos 3 dias", que independe do tipo de mensagem.
 
 ### Schema novo
 
@@ -838,38 +846,76 @@ payload) para efetivar — mas o backend não impõe essa ordem.
 
 #### Corpo da requisição
 ```json
-{ "estadoId": 6, "numeroRemetenteId": 3, "contatoIds": [10, 11] }
+{
+  "estadoId": 6,
+  "numeroRemetenteId": 3,
+  "contatoIds": [10, 11],
+  "tipoMensagem": "reativacao",
+  "diaSemana": "Segunda",
+  "horaAgendamento": "14:30"
+}
 ```
 | Campo | Tipo | Obrigatório | Validação |
 |---|---|---|---|
 | `estadoId` | number | sim | inteiro positivo |
 | `numeroRemetenteId` | number | sim | inteiro positivo; deve existir, estar `ativo` e pertencer a `estadoId` |
 | `contatoIds` | number[] | sim | não vazio, no máximo 10, cada item deve pertencer a `estadoId` |
+| `tipoMensagem` | string | sim (adendo posterior à v4) | `'primeiro_contato'` \| `'reativacao'` |
+| `diaSemana` | string | só quando `tipoMensagem==='primeiro_contato'` | `'Segunda'`\|`'Terça'`\|`'Quarta'`\|`'Quinta'`\|`'Sexta'`\|`'Sábado'` |
+| `horaAgendamento` | string | só quando `tipoMensagem==='primeiro_contato'` | formato `HH:mm` (`^([01]\d\|2[0-3]):[0-5]\d$`) |
 
 `usuario_id` do registro vem de `req.usuario.id` (populado pelo
-`authMiddleware`), não do corpo da requisição.
+`authMiddleware`), não do corpo da requisição. `tipoMensagem`/`diaSemana`/
+`horaAgendamento` são um adendo posterior à v4, exclusivo desta rota —
+`POST /disparos/verificar` (seção 15) **não** foi alterada e não recebe
+nem valida esses 3 campos.
 
 #### Validações — `400 Bad Request` (nesta ordem)
 1. `contatoIds` ausente/vazio: `{ "error": "Campo \"contatoIds\" é obrigatório." }`
 2. `contatoIds.length > 10`: `{ "error": "Máximo de 10 contatos por disparo." }`
-3. `numeroRemetenteId` (ou `estadoId`) em formato inválido, inexistente,
-   não `ativo`, ou de outro Estado:
+3. `estadoId`/`numeroRemetenteId` em formato inválido (checagem de formato,
+   controller, ainda sem tocar o banco):
    `{ "error": "Número remetente inválido para o estado informado." }`
-4. `numeroRemetenteId` existe/está `ativo`/pertence ao Estado, mas
+4. Algum item de `contatoIds` em formato inválido (checagem de formato):
+   `{ "error": "Todos os contatos devem pertencer ao estado informado." }`
+5. `tipoMensagem` ausente ou fora do enum `['primeiro_contato','reativacao']`:
+   `{ "error": "Campo \"tipoMensagem\" é obrigatório e deve ser \"primeiro_contato\" ou \"reativacao\"." }`
+6. Só quando `tipoMensagem==='primeiro_contato'`: `diaSemana` ausente ou fora
+   do enum `['Segunda','Terça','Quarta','Quinta','Sexta','Sábado']`:
+   `{ "error": "Campo \"diaSemana\" é obrigatório para o tipo \"primeiro_contato\" e deve ser um dia entre Segunda e Sábado." }`
+7. Só quando `tipoMensagem==='primeiro_contato'`: `horaAgendamento` ausente
+   ou fora do formato `HH:mm`:
+   `{ "error": "Campo \"horaAgendamento\" é obrigatório para o tipo \"primeiro_contato\" e deve estar no formato HH:mm." }`
+8. (contra o banco, dentro da transação) `numeroRemetenteId` inexistente,
+   não `ativo`, ou de outro Estado — **mesma mensagem do item 3**, agora
+   recalculada contra `NumerosRemetentes`:
+   `{ "error": "Número remetente inválido para o estado informado." }`
+9. `numeroRemetenteId` existe/está `ativo`/pertence ao Estado, mas
    `status_conexao != 'conectado'`:
    `{ "error": "Este número não está conectado ao WhatsApp. Conecte-o em Configurações antes de disparar." }`
-5. `numeroRemetenteId` conectado, mas `nome_colaboradora` é `NULL`, vazio ou
-   só espaços (checado com `trim()`):
-   `{ "error": "Este número não tem nome da colaboradora configurado. Preencha em Configurações antes de disparar." }`
-6. Algum item de `contatoIds` em formato inválido ou de um `Contato` que não
-   pertence a `estadoId`:
-   `{ "error": "Todos os contatos devem pertencer ao estado informado." }`
+10. `numeroRemetenteId` conectado, mas `nome_colaboradora` é `NULL`, vazio ou
+    só espaços (checado com `trim()`):
+    `{ "error": "Este número não tem nome da colaboradora configurado. Preencha em Configurações antes de disparar." }`
+11. (contra o banco) algum item de `contatoIds` de um `Contato` que não
+    pertence a `estadoId` — **mesma mensagem do item 4**, agora recalculada
+    contra `Contatos`:
+    `{ "error": "Todos os contatos devem pertencer ao estado informado." }`
 
-O backend sempre recalcula todas as checagens acima contra o banco no
-momento do `POST` — nunca confia em nenhum dado enviado pelo frontend além
-dos ids. As validações 4 e 5 (conexão/colaboradora) existem para o operador
-não descobrir só minutos depois, pelo worker de envio, que o disparo estava
-fadado a falhar (ver "Contexto e decisões de design" acima).
+As validações 1–4 (formato) e 8–11 (contra o banco) já existiam antes deste
+adendo (itens 3/8 e 4/11 sempre compartilharam a mesma mensagem de erro,
+uma vez em formato e outra vez recalculada contra o banco); 5–7
+(`tipoMensagem`/`diaSemana`/`horaAgendamento`) são novas e rodam logo depois
+da checagem de formato (itens 1–4) mas **antes** de qualquer validação
+contra o banco (itens 8–11) — o backend nunca abre transação/consulta
+`NumerosRemetentes`/`Contatos` sem que os 3 campos novos já estejam
+corretos. Quando `tipoMensagem==='reativacao'`, `diaSemana`/`horaAgendamento`
+são **ignorados mesmo se enviados no corpo** — sempre gravados como `NULL`,
+sem validação de formato deles nesse caso. O backend sempre recalcula todas
+as checagens contra o banco no momento do `POST` — nunca confia em nenhum
+dado enviado pelo frontend além dos ids. As validações 9 e 10
+(conexão/colaboradora) existem para o operador não descobrir só minutos
+depois, pelo worker de envio, que o disparo estava fadado a falhar (ver
+"Contexto e decisões de design" acima).
 
 #### Comportamento no banco (transação)
 1. Valida `numeroRemetenteId` (existe, `ativo = 1`, `estado_id = @estadoId`).
@@ -877,7 +923,9 @@ fadado a falhar (ver "Contexto e decisões de design" acima).
    (com conteúdo além de espaços) do mesmo `numeroRemetenteId`.
 3. Valida que todo `contatoId` de `contatoIds` existe e tem
    `estado_id = @estadoId`.
-4. Insere 1 linha em `Disparos` (`status = 'pendente_envio'`).
+4. Insere 1 linha em `Disparos` (`status = 'pendente_envio'`,
+   `tipo_mensagem`/`dia_semana`/`hora_agendamento` gravados a partir do
+   corpo já validado pelo controller).
 5. Insere 1 linha em `DisparoContatos` por `contatoId`.
 
 Qualquer falha nos passos 1–3 dá `ROLLBACK` da transação antes de qualquer
@@ -1409,6 +1457,36 @@ A migration também garante uma linha única em `ConfiguracoesEnvio`
 rodar manualmente (local: `erp-novagest-dev`) antes do worker/da rota
 funcionarem de verdade.
 
+**Adendo posterior — segundo tipo de disparo ("primeiro contato") com
+rotação de template independente por tipo.** Schema já rodado manualmente
+contra o banco-alvo (fora deste repositório, sem script de migration novo
+aqui — não recrie/rode nada, só documentado por completude):
+
+```sql
+ALTER TABLE MensagensTemplates ADD tipo VARCHAR(20) NOT NULL DEFAULT 'reativacao';
+-- 3 templates novos populados manualmente com tipo='primeiro_contato',
+-- usando os placeholders {nomeColaboradora}, {diaSemana}, {horaSemana} no corpo.
+
+ALTER TABLE Disparos ADD tipo_mensagem     VARCHAR(20) DEFAULT 'reativacao';
+ALTER TABLE Disparos ADD dia_semana        VARCHAR(20) NULL;
+ALTER TABLE Disparos ADD hora_agendamento  VARCHAR(5) NULL;
+
+-- ConfiguracoesEnvio passou a ter PK composta por `tipo` (1 linha por tipo,
+-- não mais uma linha única global) — já existem 2 linhas: 'reativacao' e
+-- 'primeiro_contato', cada uma com sua própria rotação/ultimo_template_usado_id.
+```
+
+`MensagensTemplates.listTemplatesAtivosOrdenados`/`getUltimoTemplateUsadoId`/
+`setUltimoTemplateUsadoId` (`backend/src/models/mensagensTemplates.model.js`)
+passaram a receber `tipo` como parâmetro e filtrar por
+`WHERE tipo = @tipo` (`MensagensTemplates`, junto de `ativo = 1`) ou
+`WHERE tipo = @tipo` (`ConfiguracoesEnvio`, no `SELECT`/`UPDATE`) — a
+rotação round-robin de templates é hoje **independente por `tipo`**: um
+disparo `'reativacao'` nunca consome/avança o ponteiro de
+`'primeiro_contato'`, e vice-versa. O placeholder `{horaSemana}` no corpo do
+template (não `{horaAgendamento}`) é intencional — ver "Placeholders de
+`primeiro_contato`" logo abaixo.
+
 ### Lacuna conhecida: sem CRUD para `MensagensTemplates` (`nome_colaboradora` já resolvido)
 
 Não existe, nesta fase, nenhuma rota para criar/editar templates de
@@ -1453,15 +1531,26 @@ Inicia junto com o processo backend (`server.js`, ao lado de
       configurado.'`) e **não** consome/avança a rotação de template — não
       houve nenhuma tentativa de envio de fato.
    2. Calcula (sem persistir ainda) o próximo template ativo na rotação
-      round-robin — lê `ConfiguracoesEnvio.ultimo_template_usado_id` e a
-      lista de `MensagensTemplates` ativos (por `ordem`); se
+      round-robin **daquele `tipo_mensagem`** (`'reativacao'` por default se
+      o item vier sem o campo, por segurança — a coluna já tem `DEFAULT` no
+      banco) — lê `ConfiguracoesEnvio.ultimo_template_usado_id` e a lista de
+      `MensagensTemplates` ativos filtrada por `tipo` (por `ordem`); se
       `ultimo_template_usado_id` for `NULL` ou não bater com nenhum template
-      ativo, começa do primeiro; cicla de volta ao primeiro depois do
-      último. Se não houver **nenhum** template ativo: `status='falha'`,
-      `erro='Nenhum template de mensagem ativo cadastrado.'`, sem consumir
-      rotação (não havia o que consumir).
+      ativo **daquele tipo**, começa do primeiro; cicla de volta ao primeiro
+      depois do último — a rotação de `'reativacao'` e a de
+      `'primeiro_contato'` são independentes, uma nunca avança o ponteiro da
+      outra. Se não houver **nenhum** template ativo daquele tipo:
+      `status='falha'`, `erro='Nenhum template de mensagem ativo
+      cadastrado.'`, sem consumir rotação (não havia o que consumir).
    3. Monta a mensagem substituindo `{nomeColaboradora}` no corpo do
-      template escolhido.
+      template escolhido; quando `tipo_mensagem==='primeiro_contato'`,
+      também substitui `{diaSemana}` (valor de `Disparos.dia_semana`) e
+      `{horaSemana}` (valor de `Disparos.hora_agendamento` — o nome da
+      coluna/campo é `hora_agendamento`/`horaAgendamento`, mas o placeholder
+      no corpo do template é `{horaSemana}`, não `{horaAgendamento}`;
+      mapeamento intencional, não é inconsistência). Para
+      `tipo_mensagem==='reativacao'`, nenhuma substituição extra acontece
+      (comportamento idêntico ao de antes deste adendo).
    4. Obtém o socket Baileys ativo e chama `sock.onWhatsApp(telefone)` para
       confirmar, contra os servidores do WhatsApp, que aquele número
       corresponde de fato a uma conta ativa — necessário porque
@@ -1482,8 +1571,9 @@ Inicia junto com o processo backend (`server.js`, ao lado de
       - **Sucesso**: grava, numa única transação,
         `DisparoContatos.status='enviado'` (+ `template_usado_id`,
         `mensagem_enviada`, `enviado_em`) **e**
-        `ConfiguracoesEnvio.ultimo_template_usado_id` — as duas gravações
-        nunca acontecem uma sem a outra.
+        `ConfiguracoesEnvio.ultimo_template_usado_id` **da linha daquele
+        `tipo`** — as duas gravações nunca acontecem uma sem a outra, e
+        nunca tocam a linha de `ConfiguracoesEnvio` do outro tipo.
       - **Falha** (exceção do `sendMessage`, ou o socket ter caído entre a
         checagem do passo 2.1 e agora): `status='falha'`, `erro=<mensagem
         do erro>`, **sem** tocar em `ConfiguracoesEnvio` (a rotação não
@@ -1516,6 +1606,9 @@ contatos daquele disparo com o status individual de envio de cada um
   "disparoId": 15,
   "estado": { "id": 6, "nome": "Maranhão", "uf": "MA" },
   "numeroRemetente": { "id": 3, "apelido": "CDC Cohatrac" },
+  "tipoMensagem": "primeiro_contato",
+  "diaSemana": "Segunda",
+  "horaAgendamento": "14:30",
   "contatos": [
     {
       "nome": "Maria Silva",
@@ -1528,6 +1621,10 @@ contatos daquele disparo com o status individual de envio de cada um
   ]
 }
 ```
+`tipoMensagem`/`diaSemana`/`horaAgendamento` (adendo posterior, ver seção
+14) são lidos direto de `Disparos.tipo_mensagem`/`dia_semana`/
+`hora_agendamento` — para um disparo `tipoMensagem==='reativacao'`,
+`diaSemana`/`horaAgendamento` vêm sempre `null`.
 
 #### Erros
 - `400`: `{ "error": "Parâmetro \"id\" deve ser um número inteiro positivo." }`

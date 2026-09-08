@@ -18,6 +18,13 @@ const ORDENS = [
 const DEBOUNCE_BUSCA_MS = 400;
 const MAX_CONTATOS_POR_DISPARO = 10;
 
+const TIPOS_MENSAGEM = [
+  { value: 'reativacao', label: 'Contato reativação' },
+  { value: 'primeiro_contato', label: 'Primeiro contato' },
+];
+
+const DIAS_SEMANA = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
 const STATUS_CONEXAO_INFO = {
   conectado: { label: 'Conectado', bg: 'bg-[var(--pd-success-bg)]', text: 'text-[var(--pd-success)]' },
   desconectado: { label: 'Desconectado', bg: 'bg-[var(--pd-danger-bg)]', text: 'text-[var(--pd-danger)]' },
@@ -77,6 +84,93 @@ function AvisosModal({ avisos, confirmando, erro, onCancelar, onConfirmar }) {
           <button type="button" className={btnGhost} onClick={onCancelar} disabled={confirmando}>Cancelar</button>
           <button type="button" className={btn} onClick={onConfirmar} disabled={confirmando}>
             {confirmando ? 'Disparando...' : 'Disparar mesmo assim'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmarTipoModal({
+  tipoMensagem,
+  diaSemana,
+  horaAgendamento,
+  podeConfirmar,
+  onChangeTipoMensagem,
+  onChangeDiaSemana,
+  onChangeHoraAgendamento,
+  onCancelar,
+  onConfirmar,
+}) {
+  const precisaAgendamento = tipoMensagem === 'primeiro_contato';
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirmar-tipo-modal-title"
+      onClick={onCancelar}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border border-[var(--pd-border)]/60 bg-[var(--pd-card-bg)] p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="confirmar-tipo-modal-title" className="pd-font-serif mb-3 text-[18px] font-bold text-[var(--pd-text-primary)]">
+          Confirmar disparo
+        </h2>
+
+        <div className="mb-3">
+          <label htmlFor="tipo-mensagem" className="mb-1 block text-[11.5px] font-semibold text-[var(--pd-text-secondary)]">
+            Tipo de mensagem
+          </label>
+          <select
+            id="tipo-mensagem"
+            className={selectCls}
+            value={tipoMensagem}
+            onChange={(e) => onChangeTipoMensagem(e.target.value)}
+          >
+            {TIPOS_MENSAGEM.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {precisaAgendamento ? (
+          <div className="mb-3 flex flex-col gap-3">
+            <div>
+              <label htmlFor="dia-semana" className="mb-1 block text-[11.5px] font-semibold text-[var(--pd-text-secondary)]">
+                Dia da semana
+              </label>
+              <select
+                id="dia-semana"
+                className={selectCls}
+                value={diaSemana}
+                onChange={(e) => onChangeDiaSemana(e.target.value)}
+              >
+                {DIAS_SEMANA.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="hora-agendamento" className="mb-1 block text-[11.5px] font-semibold text-[var(--pd-text-secondary)]">
+                Horário
+              </label>
+              <input
+                id="hora-agendamento"
+                type="time"
+                className={inputCls}
+                value={horaAgendamento}
+                onChange={(e) => onChangeHoraAgendamento(e.target.value)}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex justify-end gap-2">
+          <button type="button" className={btnGhost} onClick={onCancelar}>Cancelar</button>
+          <button type="button" className={btn} onClick={onConfirmar} disabled={!podeConfirmar}>
+            Continuar
           </button>
         </div>
       </div>
@@ -191,11 +285,22 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
   const [confirmandoAvisos, setConfirmandoAvisos] = useState(false);
   const [avisosError, setAvisosError] = useState(null);
 
+  const [confirmarTipoAberto, setConfirmarTipoAberto] = useState(false);
+  const [tipoMensagem, setTipoMensagem] = useState('reativacao');
+  const [diaSemana, setDiaSemana] = useState(DIAS_SEMANA[0]);
+  const [horaAgendamento, setHoraAgendamento] = useState('');
+
+  const precisaAgendamento = tipoMensagem === 'primeiro_contato';
+  const podeConfirmarTipo = !precisaAgendamento || (diaSemana.trim() !== '' && horaAgendamento.trim() !== '');
+
   function efetivarDisparo() {
     return criarDisparo(token, {
       estadoId: estado.id,
       numeroRemetenteId: Number(numeroRemetenteId),
       contatoIds: Array.from(selecionados),
+      tipoMensagem,
+      diaSemana: precisaAgendamento ? diaSemana : null,
+      horaAgendamento: precisaAgendamento ? horaAgendamento : null,
     }).then(() => {
       setSelecionados(new Set());
       setSelectionError(null);
@@ -226,6 +331,22 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
       .finally(() => setDisparando(false));
   }
 
+  function abrirConfirmarTipo() {
+    if (selecionados.size === 0 || !numeroRemetenteId) return;
+    setDisparoError(null);
+    setConfirmarTipoAberto(true);
+  }
+
+  function cancelarConfirmarTipo() {
+    setConfirmarTipoAberto(false);
+  }
+
+  function confirmarTipoEDisparar() {
+    if (!podeConfirmarTipo) return;
+    setConfirmarTipoAberto(false);
+    handleDisparar();
+  }
+
   function cancelarAvisos() {
     setAvisos(null);
     setAvisosError(null);
@@ -249,6 +370,20 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
 
   return (
     <div className={card}>
+      {confirmarTipoAberto ? (
+        <ConfirmarTipoModal
+          tipoMensagem={tipoMensagem}
+          diaSemana={diaSemana}
+          horaAgendamento={horaAgendamento}
+          podeConfirmar={podeConfirmarTipo}
+          onChangeTipoMensagem={setTipoMensagem}
+          onChangeDiaSemana={setDiaSemana}
+          onChangeHoraAgendamento={setHoraAgendamento}
+          onCancelar={cancelarConfirmarTipo}
+          onConfirmar={confirmarTipoEDisparar}
+        />
+      ) : null}
+
       {avisos ? (
         <AvisosModal
           avisos={avisos}
@@ -391,7 +526,7 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
         type="button"
         className={`${btn} mt-auto w-full`}
         disabled={disparoDesabilitado}
-        onClick={handleDisparar}
+        onClick={abrirConfirmarTipo}
       >
         {disparando ? 'Disparando...' : 'Disparar'}
       </button>

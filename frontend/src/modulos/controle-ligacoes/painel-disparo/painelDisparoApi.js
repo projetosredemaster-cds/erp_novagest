@@ -29,10 +29,15 @@ export function verificarDisparo(token, { estadoId, numeroRemetenteId, contatoId
   });
 }
 
-export function criarDisparo(token, { estadoId, numeroRemetenteId, contatoIds }) {
+export function criarDisparo(token, { estadoId, numeroRemetenteId, contatoIds, tipoMensagem, diaSemana, horaAgendamento }) {
+  const body = { estadoId, numeroRemetenteId, contatoIds, tipoMensagem };
+  if (tipoMensagem === 'primeiro_contato') {
+    body.diaSemana = diaSemana;
+    body.horaAgendamento = horaAgendamento;
+  }
   return apiRequest('/api/controle-ligacoes/disparos', {
     method: 'POST',
-    body: JSON.stringify({ estadoId, numeroRemetenteId, contatoIds }),
+    body: JSON.stringify(body),
     token,
   });
 }

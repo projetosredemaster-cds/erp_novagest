@@ -29,8 +29,18 @@ function aguardar(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function montarMensagem(corpoTemplate, nomeColaboradora) {
-  return corpoTemplate.replace(/\{nomeColaboradora\}/g, nomeColaboradora);
+function montarMensagem(corpoTemplate, nomeColaboradora, extras = {}) {
+  let mensagem = corpoTemplate.replace(/\{nomeColaboradora\}/g, nomeColaboradora);
+
+  const { diaSemana, horaSemana } = extras || {};
+  if (diaSemana !== undefined && diaSemana !== null) {
+    mensagem = mensagem.replace(/\{diaSemana\}/g, diaSemana);
+  }
+  if (horaSemana !== undefined && horaSemana !== null) {
+    mensagem = mensagem.replace(/\{horaSemana\}/g, horaSemana);
+  }
+
+  return mensagem;
 }
 
 function calcularProximoTemplate(templatesAtivos, ultimoTemplateUsadoId) {
@@ -48,7 +58,16 @@ function calcularProximoTemplate(templatesAtivos, ultimoTemplateUsadoId) {
 }
 
 async function processarItem(item) {
-  const { disparoContatoId, numeroRemetenteId, contatoId, contatoNome, contatoTelefone } = item;
+  const {
+    disparoContatoId,
+    numeroRemetenteId,
+    contatoId,
+    contatoNome,
+    contatoTelefone,
+    tipoMensagem = 'reativacao',
+    diaSemana,
+    horaAgendamento,
+  } = item;
   const logPrefix =
     `[envioDisparos.worker] disparoContatoId=${disparoContatoId} numeroRemetenteId=${numeroRemetenteId} ` +
     `contato="${contatoNome}" (${contatoTelefone})`;
@@ -70,8 +89,8 @@ async function processarItem(item) {
   }
 
   const [templatesAtivos, ultimoTemplateUsadoId] = await Promise.all([
-    mensagensTemplatesModel.listTemplatesAtivosOrdenados(),
-    mensagensTemplatesModel.getUltimoTemplateUsadoId(),
+    mensagensTemplatesModel.listTemplatesAtivosOrdenados(tipoMensagem),
+    mensagensTemplatesModel.getUltimoTemplateUsadoId(tipoMensagem),
   ]);
   const proximoTemplate = calcularProximoTemplate(templatesAtivos, ultimoTemplateUsadoId);
 
@@ -82,7 +101,9 @@ async function processarItem(item) {
     return { tentouEnviar: false };
   }
 
-  const mensagem = montarMensagem(proximoTemplate.corpo, nomeColaboradora);
+  const extras =
+    tipoMensagem === 'primeiro_contato' ? { diaSemana, horaSemana: horaAgendamento } : undefined;
+  const mensagem = montarMensagem(proximoTemplate.corpo, nomeColaboradora, extras);
 
   const sock = baileysSessionService.obterSocketConectado(numeroRemetenteId);
   if (!sock) {
@@ -127,6 +148,7 @@ async function processarItem(item) {
     disparoContatoId,
     templateUsadoId: proximoTemplate.id,
     mensagemEnviada: mensagem,
+    tipoMensagem,
   });
   console.log(`${logPrefix}: enviado com sucesso (templateUsadoId=${proximoTemplate.id}).`);
 

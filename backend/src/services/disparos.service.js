@@ -28,7 +28,15 @@ async function verificarDisparo({ estadoId, numeroRemetenteId, contatoIds }) {
   });
 }
 
-async function criarDisparo({ estadoId, numeroRemetenteId, usuarioId, contatoIds }) {
+async function criarDisparo({
+  estadoId,
+  numeroRemetenteId,
+  usuarioId,
+  contatoIds,
+  tipoMensagem,
+  diaSemana,
+  horaAgendamento,
+}) {
   const contatoIdsUnicos = [...new Set(contatoIds)];
 
   const resultado = await disparosModel.criarDisparo({
@@ -36,6 +44,9 @@ async function criarDisparo({ estadoId, numeroRemetenteId, usuarioId, contatoIds
     numeroRemetenteId,
     usuarioId,
     contatoIds: contatoIdsUnicos,
+    tipoMensagem,
+    diaSemana,
+    horaAgendamento,
   });
 
   if (resultado.status === 'criado') {

@@ -147,7 +147,15 @@ async function verificarDisparo({ estadoId, numeroRemetenteId, contatoIds }) {
   return validarNumeroEContatos({ estadoId, numeroRemetenteId, contatoIds }, pool);
 }
 
-async function criarDisparo({ estadoId, numeroRemetenteId, usuarioId, contatoIds }) {
+async function criarDisparo({
+  estadoId,
+  numeroRemetenteId,
+  usuarioId,
+  contatoIds,
+  tipoMensagem = 'reativacao',
+  diaSemana = null,
+  horaAgendamento = null,
+}) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
 
@@ -167,10 +175,13 @@ async function criarDisparo({ estadoId, numeroRemetenteId, usuarioId, contatoIds
     disparoRequest.input('estadoId', sql.Int, estadoId);
     disparoRequest.input('numeroId', sql.Int, numeroRemetenteId);
     disparoRequest.input('usuarioId', sql.Int, usuarioId);
+    disparoRequest.input('tipoMensagem', sql.VarChar(20), tipoMensagem);
+    disparoRequest.input('diaSemana', sql.VarChar(20), diaSemana);
+    disparoRequest.input('horaAgendamento', sql.VarChar(5), horaAgendamento);
     const disparoResult = await disparoRequest.query(`
-      INSERT INTO Disparos (estado_id, numero_remetente_id, usuario_id, status, criado_em)
+      INSERT INTO Disparos (estado_id, numero_remetente_id, usuario_id, status, tipo_mensagem, dia_semana, hora_agendamento, criado_em)
       OUTPUT inserted.id
-      VALUES (@estadoId, @numeroId, @usuarioId, 'pendente_envio', SYSUTCDATETIME())
+      VALUES (@estadoId, @numeroId, @usuarioId, 'pendente_envio', @tipoMensagem, @diaSemana, @horaAgendamento, SYSUTCDATETIME())
     `);
     const disparoId = disparoResult.recordset[0].id;
 
@@ -206,6 +217,9 @@ async function listContatosPendentesParaEnvio(loteTamanho) {
         dc.id AS disparo_contato_id,
         dc.disparo_id,
         d.numero_remetente_id,
+        d.tipo_mensagem,
+        d.dia_semana,
+        d.hora_agendamento,
         c.id AS contato_id,
         c.nome AS contato_nome,
         c.telefone AS contato_telefone
@@ -220,6 +234,9 @@ async function listContatosPendentesParaEnvio(loteTamanho) {
     disparoContatoId: row.disparo_contato_id,
     disparoId: row.disparo_id,
     numeroRemetenteId: row.numero_remetente_id,
+    tipoMensagem: row.tipo_mensagem,
+    diaSemana: row.dia_semana,
+    horaAgendamento: row.hora_agendamento,
     contatoId: row.contato_id,
     contatoNome: row.contato_nome,
     contatoTelefone: row.contato_telefone,
@@ -239,7 +256,7 @@ async function marcarContatoFalha(disparoContatoId, erro) {
     `);
 }
 
-async function marcarContatoEnviado({ disparoContatoId, templateUsadoId, mensagemEnviada }) {
+async function marcarContatoEnviado({ disparoContatoId, templateUsadoId, mensagemEnviada, tipoMensagem }) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
 
@@ -260,7 +277,7 @@ async function marcarContatoEnviado({ disparoContatoId, templateUsadoId, mensage
       WHERE id = @id
     `);
 
-    await mensagensTemplatesModel.setUltimoTemplateUsadoId(templateUsadoId, transaction);
+    await mensagensTemplatesModel.setUltimoTemplateUsadoId(templateUsadoId, tipoMensagem, transaction);
 
     await transaction.commit();
   } catch (err) {
@@ -282,7 +299,10 @@ async function findDisparoDetalhe(id) {
         e.nome AS estado_nome,
         e.uf AS estado_uf,
         n.id AS numero_id,
-        n.apelido AS numero_apelido
+        n.apelido AS numero_apelido,
+        d.tipo_mensagem,
+        d.dia_semana,
+        d.hora_agendamento
       FROM Disparos d
       JOIN Estados e ON e.id = d.estado_id
       JOIN NumerosRemetentes n ON n.id = d.numero_remetente_id
@@ -315,6 +335,9 @@ async function findDisparoDetalhe(id) {
     disparoId: disparoRow.disparo_id,
     estado: { id: disparoRow.estado_id, nome: disparoRow.estado_nome, uf: disparoRow.estado_uf },
     numeroRemetente: { id: disparoRow.numero_id, apelido: disparoRow.numero_apelido },
+    tipoMensagem: disparoRow.tipo_mensagem,
+    diaSemana: disparoRow.dia_semana,
+    horaAgendamento: disparoRow.hora_agendamento,
     contatos: contatosResult.recordset.map((row) => ({
       nome: row.nome,
       telefone: row.telefone,

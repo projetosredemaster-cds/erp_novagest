@@ -129,6 +129,29 @@ describe('envioDisparos.worker._montarMensagem', () => {
     const resultado = _montarMensagem('Oi {nomeColaboradora}, aqui é a {nomeColaboradora}!', 'Ana');
     expect(resultado).toBe('Oi Ana, aqui é a Ana!');
   });
+
+  it('substitui {diaSemana} e {horaSemana} quando o 3º parâmetro (extras) é informado', () => {
+    const resultado = _montarMensagem(
+      'Oi {nomeColaboradora}, te aguardamos {diaSemana} às {horaSemana}.',
+      'Ana',
+      { diaSemana: 'Quarta', horaSemana: '14:30' }
+    );
+    expect(resultado).toBe('Oi Ana, te aguardamos Quarta às 14:30.');
+  });
+
+  it('não altera {diaSemana}/{horaSemana} quando extras não é informado (placeholders ficam literais no corpo)', () => {
+    const resultado = _montarMensagem('Oi {nomeColaboradora}, {diaSemana} às {horaSemana}.', 'Ana');
+    expect(resultado).toBe('Oi Ana, {diaSemana} às {horaSemana}.');
+  });
+
+  it('não altera {diaSemana}/{horaSemana} quando extras é informado mas com os dois campos null', () => {
+    const resultado = _montarMensagem(
+      'Oi {nomeColaboradora}, {diaSemana} às {horaSemana}.',
+      'Ana',
+      { diaSemana: null, horaSemana: null }
+    );
+    expect(resultado).toBe('Oi Ana, {diaSemana} às {horaSemana}.');
+  });
 });
 
 describe('envioDisparos.worker._estaDentroDoHorarioComercial (defaults 11h-22h UTC = 8h-19h Brasília)', () => {
@@ -240,6 +263,7 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
       disparoContatoId: 3,
       templateUsadoId: 20, // próximo depois do id=10
       mensagemEnviada: 'E aí Ana!',
+      tipoMensagem: 'reativacao',
     });
 
     expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(4, 'timeout de rede');
@@ -297,8 +321,9 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
 
     expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledWith({
       disparoContatoId: item.disparoContatoId,
-      templateUsadoId: 10, 
+      templateUsadoId: 10,
       mensagemEnviada: 'Template 1 Ana',
+      tipoMensagem: 'reativacao',
     });
   });
 
@@ -448,6 +473,150 @@ describe('envioDisparos.worker.processarCicloEnvio', () => {
     expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(item.disparoContatoId, 'conexão instável');
     expect(sendMessage).not.toHaveBeenCalled();
     expect(disparosModel.marcarContatoEnviado).not.toHaveBeenCalled();
+  });
+
+  it('tipoMensagem="primeiro_contato": consulta os templates/ponteiro do tipo certo e substitui {diaSemana}/{horaSemana} na mensagem enviada de fato', async () => {
+    const item = itemPendente({
+      tipoMensagem: 'primeiro_contato',
+      diaSemana: 'Sexta',
+      horaAgendamento: '09:00',
+    });
+    disparosModel.listContatosPendentesParaEnvio.mockResolvedValue([item]);
+    disparosModel.marcarContatoEnviado.mockResolvedValue(undefined);
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue('conectado');
+    numerosRemetentesModel.findNomeColaboradoraById.mockResolvedValue('Ana');
+    mensagensTemplatesModel.listTemplatesAtivosOrdenados.mockResolvedValue([
+      { id: 1, corpo: 'Oi {nomeColaboradora}, agende para {diaSemana} às {horaSemana}.', ordem: 1 },
+    ]);
+    mensagensTemplatesModel.getUltimoTemplateUsadoId.mockResolvedValue(null);
+
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const onWhatsApp = vi.fn().mockImplementation(async (telefone) => [
+      { jid: `${telefone}@s.whatsapp.net`, exists: true },
+    ]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    await processarCicloEnvio();
+
+    expect(mensagensTemplatesModel.listTemplatesAtivosOrdenados).toHaveBeenCalledWith('primeiro_contato');
+    expect(mensagensTemplatesModel.getUltimoTemplateUsadoId).toHaveBeenCalledWith('primeiro_contato');
+    expect(sendMessage).toHaveBeenCalledWith(
+      `${item.contatoTelefone}@s.whatsapp.net`,
+      { text: 'Oi Ana, agende para Sexta às 09:00.' }
+    );
+    expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledWith({
+      disparoContatoId: item.disparoContatoId,
+      templateUsadoId: 1,
+      mensagemEnviada: 'Oi Ana, agende para Sexta às 09:00.',
+      tipoMensagem: 'primeiro_contato',
+    });
+  });
+
+  it('tipoMensagem="reativacao" (default do item): consulta os templates do tipo certo e NÃO substitui {diaSemana}/{horaSemana} mesmo que o template os contenha', async () => {
+    const item = itemPendente(); // sem tipoMensagem no item -> default 'reativacao' dentro do worker
+    disparosModel.listContatosPendentesParaEnvio.mockResolvedValue([item]);
+    disparosModel.marcarContatoEnviado.mockResolvedValue(undefined);
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue('conectado');
+    numerosRemetentesModel.findNomeColaboradoraById.mockResolvedValue('Ana');
+    mensagensTemplatesModel.listTemplatesAtivosOrdenados.mockResolvedValue([
+      { id: 1, corpo: 'Oi {nomeColaboradora}, {diaSemana} às {horaSemana}.', ordem: 1 },
+    ]);
+    mensagensTemplatesModel.getUltimoTemplateUsadoId.mockResolvedValue(null);
+
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const onWhatsApp = vi.fn().mockImplementation(async (telefone) => [
+      { jid: `${telefone}@s.whatsapp.net`, exists: true },
+    ]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    await processarCicloEnvio();
+
+    expect(mensagensTemplatesModel.listTemplatesAtivosOrdenados).toHaveBeenCalledWith('reativacao');
+    expect(mensagensTemplatesModel.getUltimoTemplateUsadoId).toHaveBeenCalledWith('reativacao');
+    expect(sendMessage).toHaveBeenCalledWith(
+      `${item.contatoTelefone}@s.whatsapp.net`,
+      { text: 'Oi Ana, {diaSemana} às {horaSemana}.' }
+    );
+    expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledWith({
+      disparoContatoId: item.disparoContatoId,
+      templateUsadoId: 1,
+      mensagemEnviada: 'Oi Ana, {diaSemana} às {horaSemana}.',
+      tipoMensagem: 'reativacao',
+    });
+  });
+
+  it('rotação de templates é independente por tipo: dois itens de tipos diferentes no mesmo lote não compartilham nem atropelam o ponteiro um do outro', async () => {
+    const itemReativacao = itemPendente({
+      disparoContatoId: 1,
+      numeroRemetenteId: 1,
+      contatoTelefone: '5598900000001',
+      tipoMensagem: 'reativacao',
+    });
+    const itemPrimeiroContato = itemPendente({
+      disparoContatoId: 2,
+      numeroRemetenteId: 2,
+      contatoTelefone: '5598900000002',
+      tipoMensagem: 'primeiro_contato',
+      diaSemana: 'Terça',
+      horaAgendamento: '11:00',
+    });
+
+    disparosModel.listContatosPendentesParaEnvio.mockResolvedValue([itemReativacao, itemPrimeiroContato]);
+    disparosModel.marcarContatoEnviado.mockResolvedValue(undefined);
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue('conectado');
+    numerosRemetentesModel.findNomeColaboradoraById.mockResolvedValue('Ana');
+
+    const templatesReativacao = [
+      { id: 100, corpo: 'Reativação A {nomeColaboradora}', ordem: 1 },
+      { id: 101, corpo: 'Reativação B {nomeColaboradora}', ordem: 2 },
+    ];
+    const templatesPrimeiroContato = [
+      { id: 200, corpo: 'Primeiro contato A {nomeColaboradora} {diaSemana} {horaSemana}', ordem: 1 },
+      { id: 201, corpo: 'Primeiro contato B {nomeColaboradora} {diaSemana} {horaSemana}', ordem: 2 },
+    ];
+
+    mensagensTemplatesModel.listTemplatesAtivosOrdenados.mockImplementation(async (tipo) => (
+      tipo === 'primeiro_contato' ? templatesPrimeiroContato : templatesReativacao
+    ));
+    mensagensTemplatesModel.getUltimoTemplateUsadoId.mockImplementation(async (tipo) => (
+      // reativação já tinha usado o último (id 101) -> deve ciclar pro primeiro (id 100)
+      // primeiro_contato nunca usou nenhum (null) -> deve começar pelo primeiro (id 200)
+      tipo === 'primeiro_contato' ? null : 101
+    ));
+
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const onWhatsApp = vi.fn().mockImplementation(async (telefone) => [
+      { jid: `${telefone}@s.whatsapp.net`, exists: true },
+    ]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    // ENVIO_DISPAROS_DELAY_ENTRE_MENSAGENS_MS='0' no topo do arquivo vira 4000ms de fato dentro do worker
+    // (o "0 || 4000" do código-fonte trata "0" como falsy) — mesmo padrão de advanceTimersByTimeAsync
+    // já usado no teste "lote misto" acima para não travar entre o 1º e o 2º item do lote.
+    const cicloPromise = processarCicloEnvio();
+    await vi.advanceTimersByTimeAsync(10000);
+    await cicloPromise;
+
+    expect(mensagensTemplatesModel.listTemplatesAtivosOrdenados).toHaveBeenCalledWith('reativacao');
+    expect(mensagensTemplatesModel.listTemplatesAtivosOrdenados).toHaveBeenCalledWith('primeiro_contato');
+    expect(mensagensTemplatesModel.getUltimoTemplateUsadoId).toHaveBeenCalledWith('reativacao');
+    expect(mensagensTemplatesModel.getUltimoTemplateUsadoId).toHaveBeenCalledWith('primeiro_contato');
+
+    expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledWith({
+      disparoContatoId: 1,
+      templateUsadoId: 100, // ciclou de volta ao primeiro da lista de reativação — não avançou pra 201/200
+      mensagemEnviada: 'Reativação A Ana',
+      tipoMensagem: 'reativacao',
+    });
+    expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledWith({
+      disparoContatoId: 2,
+      templateUsadoId: 200, // começou do primeiro da lista de primeiro_contato (nunca usado) — não herdou o 101 da reativação
+      mensagemEnviada: 'Primeiro contato A Ana Terça 11:00',
+      tipoMensagem: 'primeiro_contato',
+    });
   });
 });
 

@@ -350,6 +350,7 @@ describe('PainelDisparoPage — elegibilidade de número remetente para disparo'
 
     fireEvent.click(screen.getAllByRole('checkbox')[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
 
     expect(await screen.findByText(
       'Este número não está conectado ao WhatsApp. Conecte-o em Configurações antes de disparar.'
@@ -389,12 +390,13 @@ describe('PainelDisparoPage — disparo', () => {
     fireEvent.click(screen.getAllByRole('checkbox')[0]);
     api.fetchContatosDisponiveis.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
 
     await waitFor(() => expect(api.verificarDisparo).toHaveBeenCalledWith('token-teste', {
       estadoId: 6, numeroRemetenteId: 3, contatoIds: [10],
     }));
     await waitFor(() => expect(api.criarDisparo).toHaveBeenCalledWith('token-teste', {
-      estadoId: 6, numeroRemetenteId: 3, contatoIds: [10],
+      estadoId: 6, numeroRemetenteId: 3, contatoIds: [10], tipoMensagem: 'reativacao', diaSemana: null, horaAgendamento: null,
     }));
 
     expect(await screen.findByText('Disparo registrado.')).toBeInTheDocument();
@@ -414,6 +416,7 @@ describe('PainelDisparoPage — disparo', () => {
     const checkboxes = screen.getAllByRole('checkbox');
     fireEvent.click(checkboxes[1]); // João Souza (id 11)
     fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
 
     expect(await screen.findByText('Aviso antes de disparar')).toBeInTheDocument();
     expect(screen.getByText(/já foram contatados nos últimos 3 dias/)).toBeInTheDocument();
@@ -439,6 +442,7 @@ describe('PainelDisparoPage — disparo', () => {
 
     fireEvent.click(screen.getAllByRole('checkbox')[1]);
     fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
 
     expect(await screen.findByText('Aviso antes de disparar')).toBeInTheDocument();
 
@@ -446,7 +450,7 @@ describe('PainelDisparoPage — disparo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Disparar mesmo assim' }));
 
     await waitFor(() => expect(api.criarDisparo).toHaveBeenCalledWith('token-teste', {
-      estadoId: 6, numeroRemetenteId: 3, contatoIds: [11],
+      estadoId: 6, numeroRemetenteId: 3, contatoIds: [11], tipoMensagem: 'reativacao', diaSemana: null, horaAgendamento: null,
     }));
 
     await waitFor(() => expect(screen.queryByText('Aviso antes de disparar')).not.toBeInTheDocument());
@@ -463,6 +467,7 @@ describe('PainelDisparoPage — disparo', () => {
 
     fireEvent.click(screen.getAllByRole('checkbox')[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
 
     expect(await screen.findByText('Número remetente inválido para o estado informado.')).toBeInTheDocument();
     expect(api.criarDisparo).not.toHaveBeenCalled();
@@ -479,6 +484,7 @@ describe('PainelDisparoPage — disparo', () => {
 
     fireEvent.click(screen.getAllByRole('checkbox')[1]);
     fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
 
     expect(await screen.findByText('Aviso antes de disparar')).toBeInTheDocument();
 
@@ -487,5 +493,106 @@ describe('PainelDisparoPage — disparo', () => {
     expect(await screen.findByText('Erro ao registrar disparo.')).toBeInTheDocument();
     expect(screen.getByText('Aviso antes de disparar')).toBeInTheDocument();
     expect(screen.getByText('1/10 selecionados')).toBeInTheDocument();
+  });
+});
+
+describe('PainelDisparoPage — modal "Confirmar disparo" (tipo de mensagem: reativação x primeiro contato)', () => {
+  it('tipo padrão é "Contato reativação": não mostra campos de dia/hora e o botão "Continuar" já vem habilitado', async () => {
+    mockCargaBasica();
+    await renderPage();
+
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+
+    expect(await screen.findByText('Confirmar disparo')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tipo de mensagem')).toHaveValue('reativacao');
+    expect(screen.queryByLabelText('Dia da semana')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Horário')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeEnabled();
+  });
+
+  it('selecionar "Primeiro contato" exige preencher o horário antes de habilitar "Continuar" (dia já vem com um valor padrão)', async () => {
+    mockCargaBasica();
+    await renderPage();
+
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+    await screen.findByText('Confirmar disparo');
+
+    fireEvent.change(screen.getByLabelText('Tipo de mensagem'), { target: { value: 'primeiro_contato' } });
+
+    expect(screen.getByLabelText('Dia da semana')).toBeInTheDocument();
+    expect(screen.getByLabelText('Horário')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Horário'), { target: { value: '09:00' } });
+
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeEnabled();
+  });
+
+  it('voltar para "Contato reativação" depois de selecionar "Primeiro contato" reabilita "Continuar" mesmo sem horário preenchido', async () => {
+    mockCargaBasica();
+    await renderPage();
+
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+    await screen.findByText('Confirmar disparo');
+
+    fireEvent.change(screen.getByLabelText('Tipo de mensagem'), { target: { value: 'primeiro_contato' } });
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Tipo de mensagem'), { target: { value: 'reativacao' } });
+
+    expect(screen.queryByLabelText('Dia da semana')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeEnabled();
+  });
+
+  it('cancelar o modal "Confirmar disparo" não chama nenhuma API e mantém a seleção intacta', async () => {
+    mockCargaBasica();
+    await renderPage();
+
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+    await screen.findByText('Confirmar disparo');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+
+    await waitFor(() => expect(screen.queryByText('Confirmar disparo')).not.toBeInTheDocument());
+    expect(api.verificarDisparo).not.toHaveBeenCalled();
+    expect(api.criarDisparo).not.toHaveBeenCalled();
+    expect(screen.getByText('1/10 selecionados')).toBeInTheDocument();
+  });
+
+  it('fluxo completo "Primeiro contato": seleciona dia/hora, confirma, e criarDisparo é chamado com os 3 campos certos', async () => {
+    mockCargaBasica();
+    api.verificarDisparo.mockResolvedValue({ avisos: [] });
+    api.criarDisparo.mockResolvedValue({ disparoId: 77, totalContatos: 1 });
+
+    await renderPage();
+
+    fireEvent.click(screen.getAllByRole('checkbox')[0]); // Maria Silva, id 10
+    fireEvent.click(screen.getByRole('button', { name: 'Disparar' }));
+    await screen.findByText('Confirmar disparo');
+
+    fireEvent.change(screen.getByLabelText('Tipo de mensagem'), { target: { value: 'primeiro_contato' } });
+    fireEvent.change(screen.getByLabelText('Dia da semana'), { target: { value: 'Quinta' } });
+    fireEvent.change(screen.getByLabelText('Horário'), { target: { value: '15:45' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+
+    await waitFor(() => expect(api.verificarDisparo).toHaveBeenCalledWith('token-teste', {
+      estadoId: 6, numeroRemetenteId: 3, contatoIds: [10],
+    }));
+    await waitFor(() => expect(api.criarDisparo).toHaveBeenCalledWith('token-teste', {
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      contatoIds: [10],
+      tipoMensagem: 'primeiro_contato',
+      diaSemana: 'Quinta',
+      horaAgendamento: '15:45',
+    }));
+
+    expect(await screen.findByText('Disparo registrado.')).toBeInTheDocument();
+    expect(screen.getByText('0/10 selecionados')).toBeInTheDocument();
   });
 });

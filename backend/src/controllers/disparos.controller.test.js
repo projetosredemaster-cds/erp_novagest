@@ -137,7 +137,12 @@ describe('GET /api/controle-ligacoes/estados/:estadoId/contatos-disponiveis', ()
 });
 
 describe('POST /api/controle-ligacoes/disparos', () => {
-  const payloadValido = { estadoId: 6, numeroRemetenteId: 3, contatoIds: [10, 11] };
+  const payloadValido = {
+    estadoId: 6,
+    numeroRemetenteId: 3,
+    contatoIds: [10, 11],
+    tipoMensagem: 'reativacao',
+  };
 
   it('401 sem token', async () => {
     const res = await request(app).post('/api/controle-ligacoes/disparos').send(payloadValido);
@@ -300,6 +305,9 @@ describe('POST /api/controle-ligacoes/disparos', () => {
       numeroRemetenteId: 3,
       usuarioId: 7,
       contatoIds: [10, 11],
+      tipoMensagem: 'reativacao',
+      diaSemana: null,
+      horaAgendamento: null,
     });
   });
 
@@ -313,6 +321,170 @@ describe('POST /api/controle-ligacoes/disparos', () => {
 
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'Erro interno ao criar disparo.' });
+  });
+});
+
+describe('POST /api/controle-ligacoes/disparos — validação de tipoMensagem/diaSemana/horaAgendamento', () => {
+  it('400 quando "tipoMensagem" está ausente', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ estadoId: 6, numeroRemetenteId: 3, contatoIds: [10, 11] });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "tipoMensagem" é obrigatório e deve ser "primeiro_contato" ou "reativacao".',
+    });
+    expect(disparosModel.criarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('400 quando "tipoMensagem" tem valor fora do enum', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({ estadoId: 6, numeroRemetenteId: 3, contatoIds: [10, 11], tipoMensagem: 'promocional' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "tipoMensagem" é obrigatório e deve ser "primeiro_contato" ou "reativacao".',
+    });
+    expect(disparosModel.criarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('400 quando "primeiro_contato" está sem "diaSemana" (ausente)', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({
+        estadoId: 6,
+        numeroRemetenteId: 3,
+        contatoIds: [10, 11],
+        tipoMensagem: 'primeiro_contato',
+        horaAgendamento: '14:00',
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "diaSemana" é obrigatório para o tipo "primeiro_contato" e deve ser um dia entre Segunda e Sábado.',
+    });
+    expect(disparosModel.criarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('400 quando "primeiro_contato" tem "diaSemana" fora do enum (ex.: "Domingo")', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({
+        estadoId: 6,
+        numeroRemetenteId: 3,
+        contatoIds: [10, 11],
+        tipoMensagem: 'primeiro_contato',
+        diaSemana: 'Domingo',
+        horaAgendamento: '14:00',
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "diaSemana" é obrigatório para o tipo "primeiro_contato" e deve ser um dia entre Segunda e Sábado.',
+    });
+    expect(disparosModel.criarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('400 quando "primeiro_contato" está sem "horaAgendamento" (ausente)', async () => {
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({
+        estadoId: 6,
+        numeroRemetenteId: 3,
+        contatoIds: [10, 11],
+        tipoMensagem: 'primeiro_contato',
+        diaSemana: 'Segunda',
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Campo "horaAgendamento" é obrigatório para o tipo "primeiro_contato" e deve estar no formato HH:mm.',
+    });
+    expect(disparosModel.criarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('400 quando "primeiro_contato" tem "horaAgendamento" em formato inválido', async () => {
+    for (const horaInvalida of ['9:00', '25:00', '14:60', 'catorze:00', '']) {
+      const res = await request(app)
+        .post('/api/controle-ligacoes/disparos')
+        .set('Authorization', `Bearer ${tokenFor()}`)
+        .send({
+          estadoId: 6,
+          numeroRemetenteId: 3,
+          contatoIds: [10, 11],
+          tipoMensagem: 'primeiro_contato',
+          diaSemana: 'Segunda',
+          horaAgendamento: horaInvalida,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: 'Campo "horaAgendamento" é obrigatório para o tipo "primeiro_contato" e deve estar no formato HH:mm.',
+      });
+    }
+    expect(disparosModel.criarDisparo).not.toHaveBeenCalled();
+  });
+
+  it('201 — "primeiro_contato" com diaSemana/horaAgendamento válidos chega ao model exatamente como enviado', async () => {
+    disparosModel.criarDisparo.mockResolvedValue({ status: 'criado', disparoId: 50, totalContatos: 2 });
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos')
+      .set('Authorization', `Bearer ${tokenFor({ id: 7 })}`)
+      .send({
+        estadoId: 6,
+        numeroRemetenteId: 3,
+        contatoIds: [10, 11],
+        tipoMensagem: 'primeiro_contato',
+        diaSemana: 'Sexta',
+        horaAgendamento: '09:30',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ disparoId: 50, totalContatos: 2 });
+    expect(disparosModel.criarDisparo).toHaveBeenCalledWith({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      usuarioId: 7,
+      contatoIds: [10, 11],
+      tipoMensagem: 'primeiro_contato',
+      diaSemana: 'Sexta',
+      horaAgendamento: '09:30',
+    });
+  });
+
+  it('201 — "reativacao" com diaSemana/horaAgendamento "sujos" no body é aceito (não são validados) e ambos chegam forçados a null no model', async () => {
+    disparosModel.criarDisparo.mockResolvedValue({ status: 'criado', disparoId: 51, totalContatos: 2 });
+
+    const res = await request(app)
+      .post('/api/controle-ligacoes/disparos')
+      .set('Authorization', `Bearer ${tokenFor({ id: 7 })}`)
+      .send({
+        estadoId: 6,
+        numeroRemetenteId: 3,
+        contatoIds: [10, 11],
+        tipoMensagem: 'reativacao',
+        diaSemana: 'Domingo',
+        horaAgendamento: 'valor-invalido',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ disparoId: 51, totalContatos: 2 });
+    expect(disparosModel.criarDisparo).toHaveBeenCalledWith({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      usuarioId: 7,
+      contatoIds: [10, 11],
+      tipoMensagem: 'reativacao',
+      diaSemana: null,
+      horaAgendamento: null,
+    });
   });
 });
 

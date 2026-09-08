@@ -301,6 +301,56 @@ describe('disparos.service.criarDisparo', () => {
   });
 });
 
+describe('disparos.service.criarDisparo — tipoMensagem/diaSemana/horaAgendamento', () => {
+  it('repassa tipoMensagem "primeiro_contato" com diaSemana/horaAgendamento ao model sem alteração', async () => {
+    disparosModel.criarDisparo.mockResolvedValue({ status: 'criado', disparoId: 1, totalContatos: 1 });
+
+    await disparosService.criarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      usuarioId: 1,
+      contatoIds: [10],
+      tipoMensagem: 'primeiro_contato',
+      diaSemana: 'Quarta',
+      horaAgendamento: '10:15',
+    });
+
+    expect(disparosModel.criarDisparo).toHaveBeenCalledWith({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      usuarioId: 1,
+      contatoIds: [10],
+      tipoMensagem: 'primeiro_contato',
+      diaSemana: 'Quarta',
+      horaAgendamento: '10:15',
+    });
+  });
+
+  it('repassa tipoMensagem "reativacao" com diaSemana/horaAgendamento null ao model sem alteração', async () => {
+    disparosModel.criarDisparo.mockResolvedValue({ status: 'criado', disparoId: 2, totalContatos: 1 });
+
+    await disparosService.criarDisparo({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      usuarioId: 1,
+      contatoIds: [10],
+      tipoMensagem: 'reativacao',
+      diaSemana: null,
+      horaAgendamento: null,
+    });
+
+    expect(disparosModel.criarDisparo).toHaveBeenCalledWith({
+      estadoId: 6,
+      numeroRemetenteId: 3,
+      usuarioId: 1,
+      contatoIds: [10],
+      tipoMensagem: 'reativacao',
+      diaSemana: null,
+      horaAgendamento: null,
+    });
+  });
+});
+
 describe('disparos.service.detalharDisparo', () => {
   it('delega direto para o model e propaga o resultado', async () => {
     const detalhe = {
