@@ -29,15 +29,33 @@ function aguardar(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Mesma ressalva de HORARIO_COMERCIAL_*: usa o fuso horário LOCAL do processo Node
+// (hoje UTC no servidor) — os limites de hora abaixo já vêm calibrados a partir do
+// horário real de Brasília (UTC-3). Se o processo passar a rodar em outro fuso,
+// recalcule os limites.
+function calcularSaudacao(agora = new Date()) {
+  const hora = agora.getHours();
+  if (hora >= 5 && hora < 12) {
+    return 'Bom dia';
+  }
+  if (hora >= 12 && hora < 18) {
+    return 'Boa tarde';
+  }
+  return 'Boa noite';
+}
+
 function montarMensagem(corpoTemplate, nomeColaboradora, extras = {}) {
   let mensagem = corpoTemplate.replace(/\{nomeColaboradora\}/g, nomeColaboradora);
 
-  const { diaSemana, horaSemana } = extras || {};
+  const { diaSemana, horaSemana, saudacao } = extras || {};
   if (diaSemana !== undefined && diaSemana !== null) {
     mensagem = mensagem.replace(/\{diaSemana\}/g, diaSemana);
   }
   if (horaSemana !== undefined && horaSemana !== null) {
     mensagem = mensagem.replace(/\{horaSemana\}/g, horaSemana);
+  }
+  if (saudacao !== undefined && saudacao !== null) {
+    mensagem = mensagem.replace(/\{saudacao\}/g, saudacao);
   }
 
   return mensagem;
@@ -101,8 +119,10 @@ async function processarItem(item) {
     return { tentouEnviar: false };
   }
 
-  const extras =
-    tipoMensagem === 'primeiro_contato' ? { diaSemana, horaSemana: horaAgendamento } : undefined;
+  const extras = {
+    saudacao: calcularSaudacao(),
+    ...(tipoMensagem === 'primeiro_contato' ? { diaSemana, horaSemana: horaAgendamento } : {}),
+  };
   const mensagem = montarMensagem(proximoTemplate.corpo, nomeColaboradora, extras);
 
   const sock = baileysSessionService.obterSocketConectado(numeroRemetenteId);
@@ -258,4 +278,5 @@ module.exports = {
   _calcularProximoTemplate: calcularProximoTemplate,
   _montarMensagem: montarMensagem,
   _estaDentroDoHorarioComercial: estaDentroDoHorarioComercial,
+  _calcularSaudacao: calcularSaudacao,
 };

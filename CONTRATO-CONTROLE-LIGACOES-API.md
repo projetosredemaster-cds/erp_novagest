@@ -1423,6 +1423,26 @@ controller gravar `numero=NULL`/`status_conexao='aguardando_conexao'`
   pendentes por um restart do backend ou uma falha rara no emit. Nenhuma
   mudança de contrato HTTP: `POST /disparos` continua com o mesmo
   request/response, o emit é efeito colateral interno.
+- **Adendo posterior — saudação dinâmica (`{saudacao}`)**: os templates de
+  `MensagensTemplates` (populados manualmente via SQL direto, sem migration
+  nova neste repo) trocaram o texto fixo "Bom dia" por um placeholder novo,
+  `{saudacao}`. `envioDisparos.worker.js` calcula a saudação certa no
+  **momento real do envio** (`calcularSaudacao(agora = new Date())`, mesmo
+  padrão de parâmetro `Date` injetável já usado por
+  `estaDentroDoHorarioComercial`, e a mesma ressalva de fuso horário local do
+  processo — hoje UTC, calibrado a partir do horário real de Brasília):
+  `hora >= 5 && hora < 12` → `'Bom dia'`; `hora >= 12 && hora < 18` → `'Boa
+  tarde'`; caso contrário (`18h`–`4h59`) → `'Boa noite'`. Diferente de
+  `{diaSemana}`/`{horaSemana}` (só para `tipoMensagem==='primeiro_contato'`),
+  `{saudacao}` é substituído nos **dois tipos de disparo**
+  (`'reativacao'` e `'primeiro_contato'`) — `montarMensagem` sempre recebe
+  `saudacao` em `extras`, calculada sem argumento (usa a hora real do envio,
+  não a hora em que o item entrou na fila). Como o worker só processa ciclos
+  dentro do horário comercial (`HORARIO_COMERCIAL_INICIO_HORA`–
+  `HORARIO_COMERCIAL_FIM_HORA`, hoje `11`–`22` UTC = `8h`–`19h` Brasília), o
+  ramo `'Boa noite'` provavelmente nunca dispara em produção com a
+  configuração atual — implementado mesmo assim por completude, para uma
+  eventual mudança futura do horário comercial.
 
 ### Schema novo
 
@@ -1475,6 +1495,13 @@ ALTER TABLE Disparos ADD hora_agendamento  VARCHAR(5) NULL;
 -- não mais uma linha única global) — já existem 2 linhas: 'reativacao' e
 -- 'primeiro_contato', cada uma com sua própria rotação/ultimo_template_usado_id.
 ```
+
+**Adendo posterior — saudação dinâmica (`{saudacao}`).** Os corpos de
+`MensagensTemplates` (para os dois `tipo`) foram atualizados manualmente
+contra o banco-alvo, trocando o texto fixo "Bom dia" pelo placeholder
+`{saudacao}` — sem script de migration novo aqui (não é alteração de
+schema, só de conteúdo das linhas já existentes). Ver "saudação dinâmica"
+em "Contexto e decisões de design" acima para a regra de cálculo.
 
 `MensagensTemplates.listTemplatesAtivosOrdenados`/`getUltimoTemplateUsadoId`/
 `setUltimoTemplateUsadoId` (`backend/src/models/mensagensTemplates.model.js`)
@@ -1543,14 +1570,17 @@ Inicia junto com o processo backend (`server.js`, ao lado de
       `status='falha'`, `erro='Nenhum template de mensagem ativo
       cadastrado.'`, sem consumir rotação (não havia o que consumir).
    3. Monta a mensagem substituindo `{nomeColaboradora}` no corpo do
-      template escolhido; quando `tipo_mensagem==='primeiro_contato'`,
-      também substitui `{diaSemana}` (valor de `Disparos.dia_semana`) e
-      `{horaSemana}` (valor de `Disparos.hora_agendamento` — o nome da
-      coluna/campo é `hora_agendamento`/`horaAgendamento`, mas o placeholder
-      no corpo do template é `{horaSemana}`, não `{horaAgendamento}`;
-      mapeamento intencional, não é inconsistência). Para
-      `tipo_mensagem==='reativacao'`, nenhuma substituição extra acontece
-      (comportamento idêntico ao de antes deste adendo).
+      template escolhido, **mais `{saudacao}`** (`'Bom dia'`/`'Boa
+      tarde'`/`'Boa noite'`, calculado na hora real do envio — ver
+      "saudação dinâmica" acima) **para os dois tipos de disparo**; quando
+      `tipo_mensagem==='primeiro_contato'`, também substitui `{diaSemana}`
+      (valor de `Disparos.dia_semana`) e `{horaSemana}` (valor de
+      `Disparos.hora_agendamento` — o nome da coluna/campo é
+      `hora_agendamento`/`horaAgendamento`, mas o placeholder no corpo do
+      template é `{horaSemana}`, não `{horaAgendamento}`; mapeamento
+      intencional, não é inconsistência). Para `tipo_mensagem==='reativacao'`,
+      nenhuma substituição extra além de `{nomeColaboradora}`/`{saudacao}`
+      acontece.
    4. Obtém o socket Baileys ativo e chama `sock.onWhatsApp(telefone)` para
       confirmar, contra os servidores do WhatsApp, que aquele número
       corresponde de fato a uma conta ativa — necessário porque
