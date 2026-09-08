@@ -10,23 +10,32 @@ async function listEstadoDDDs() {
   return result.recordset;
 }
 
+const TAMANHO_LOTE_TELEFONES = 1900;
+
 async function listTelefonesExistentes(telefones) {
   if (!telefones || telefones.length === 0) {
     return [];
   }
 
   const pool = await getPool();
-  const request = pool.request();
-  const placeholders = telefones.map((telefone, index) => {
-    const paramName = `tel${index}`;
-    request.input(paramName, sql.VarChar, telefone);
-    return `@${paramName}`;
-  });
+  const registros = [];
 
-  const result = await request.query(`
-    SELECT id, telefone FROM Contatos WHERE telefone IN (${placeholders.join(', ')})
-  `);
-  return result.recordset;
+  for (let inicio = 0; inicio < telefones.length; inicio += TAMANHO_LOTE_TELEFONES) {
+    const lote = telefones.slice(inicio, inicio + TAMANHO_LOTE_TELEFONES);
+    const request = pool.request();
+    const placeholders = lote.map((telefone, index) => {
+      const paramName = `tel${index}`;
+      request.input(paramName, sql.VarChar, telefone);
+      return `@${paramName}`;
+    });
+
+    const result = await request.query(`
+      SELECT id, telefone FROM Contatos WHERE telefone IN (${placeholders.join(', ')})
+    `);
+    registros.push(...result.recordset);
+  }
+
+  return registros;
 }
 
 async function criarLoteEContatos({
