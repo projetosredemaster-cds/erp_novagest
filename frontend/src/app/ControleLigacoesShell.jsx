@@ -429,6 +429,14 @@ export default function ControleLigacoesShell() {
                   <span className="text-sm leading-none">📱</span>
                   Números Remetentes
                 </NavLink>
+                <NavLink
+                  to="/controle-ligacoes/configuracoes/respostas-rapidas"
+                  onClick={fecharConfiguracoesEMobile}
+                  className={flyoutItemClass}
+                >
+                  <span className="text-sm leading-none">⚡</span>
+                  Respostas Rápidas
+                </NavLink>
               </div>
             ) : null}
           </div>

@@ -3053,6 +3053,162 @@ mesmo `state` que o sino de notificações já usa.
 
 ---
 
+## Respostas Rápidas (v11)
+
+> Feature nova, sem relação com Baileys/disparo/pipeline — textos prontos
+> que o operador insere no campo de mensagem de `ConversasPage.jsx` em vez
+> de digitar do zero. Schema (`RespostasRapidas`) rodado manualmente por
+> fora deste repo, sem migration `.sql` nova — ver `CLAUDE.md`.
+
+### Schema novo
+
+`RespostasRapidas (id, titulo, corpo, ordem, ativo, criado_em)` — sem
+tabela filha referenciando esta (diferente de Diretor/Rede/Loja/
+NumerosRemetentes, aqui a exclusão nunca bloqueia por `409`).
+
+Todas as 4 rotas abaixo são protegidas só pelos middlewares do mount
+(`authMiddleware` + `operadorCobrancaMiddleware`, aplicados uma vez para
+`/api/controle-ligacoes` inteiro em `app.js`) — nenhuma checagem própria.
+
+### `GET /api/controle-ligacoes/respostas-rapidas`
+
+Lista as respostas rápidas **ativas**, ordenadas por `ordem` e depois
+`id`. Formato plano, sem envelope (mesmo padrão de `GET .../numeros-remetentes`/`GET .../conversas`).
+
+#### Resposta de sucesso — `200 OK`
+```json
+[
+  { "id": 3, "titulo": "Saudação inicial", "corpo": "Oi! Tudo bem?", "ordem": 1, "ativo": true, "criadoEm": "..." }
+]
+```
+
+#### Erros
+`500`: `{ "error": "Erro interno ao listar respostas rápidas." }`
+
+---
+
+### `POST /api/controle-ligacoes/respostas-rapidas`
+
+Cria uma resposta rápida. Nasce sempre `ativo: true` (não aceita `ativo`
+no corpo da criação).
+
+#### Corpo da requisição
+| Campo | Tipo | Obrigatório | Validação |
+|---|---|---|---|
+| `titulo` | string | sim | não vazio (trim) |
+| `corpo` | string | sim | não vazio (trim) |
+| `ordem` | number | não | inteiro; ausente grava `0` |
+
+#### Validações — `400 Bad Request`
+1. `titulo` ausente/vazio: `{ "error": "Campo \"titulo\" é obrigatório." }`
+2. `corpo` ausente/vazio: `{ "error": "Campo \"corpo\" é obrigatório." }`
+3. `ordem` presente e não-inteiro: `{ "error": "Campo \"ordem\", quando enviado, deve ser um número inteiro." }`
+
+#### Resposta de sucesso — `201 Created`
+Mesmo shape da listagem (item único, com `id` real via `OUTPUT inserted.id`).
+
+#### Erros
+`400` (acima), `500`: `{ "error": "Erro interno ao criar resposta rápida." }`
+
+---
+
+### `PUT /api/controle-ligacoes/respostas-rapidas/:id`
+
+Atualização parcial: `titulo`/`corpo`/`ordem`/`ativo`, todos opcionais e
+independentes — envie só o(s) que quer mudar, mas ao menos 1.
+`ativo: false` é como se "oculta" a resposta rápida (some do `GET`) sem
+excluir; `ativo: true` reativa.
+
+| Campo | Tipo | Semântica quando ausente | Semântica quando enviado |
+|---|---|---|---|
+| `titulo` | string | não muda | grava (não pode ser vazio → `400`) |
+| `corpo` | string | não muda | grava (não pode ser vazio → `400`) |
+| `ordem` | number | não muda | grava (precisa ser inteiro → `400`) |
+| `ativo` | boolean | não muda | grava (precisa ser `true`/`false` estrito → `400`) |
+
+#### Validações — `400 Bad Request`
+1. Nenhum dos 4 campos presente no corpo: `{ "error": "Informe ao menos um campo para atualizar." }`
+2. `titulo`/`corpo` presente e vazio: `{ "error": "Campo \"titulo\", quando enviado, não pode ser vazio." }` (mensagem análoga para `corpo`)
+3. `ordem` presente e não-inteiro: mesma mensagem do `POST`
+4. `ativo` presente e não-boolean: `{ "error": "Campo \"ativo\", quando enviado, deve ser \"true\" ou \"false\"." }`
+
+- `:id` não encontrado → `404`: `{ "error": "Resposta rápida não encontrada." }`
+- `200 OK` com o shape da listagem, já atualizado.
+- `500`: `{ "error": "Erro interno ao atualizar resposta rápida." }`
+
+---
+
+### `DELETE /api/controle-ligacoes/respostas-rapidas/:id`
+
+Exclusão **física**, sem checagem de vínculo (decisão de produto — ao
+contrário de Diretor/Rede/Loja/NumerosRemetentes, aqui não existe
+histórico dependente a proteger).
+
+- `:id` não encontrado → `404`: `{ "error": "Resposta rápida não encontrada." }`
+- Excluiu → `204 No Content`.
+- `500`: `{ "error": "Erro interno ao excluir resposta rápida." }`
+
+---
+
+### Frontend
+
+- **Camada de API**: as 4 funções (`fetchRespostasRapidas`,
+  `criarRespostaRapida`, `atualizarRespostaRapida`, `removerRespostaRapida`)
+  vivem em `frontend/src/modulos/controle-ligacoes/configuracoes/controleLigacoesConfigApi.js`
+  — junto do CRUD de Números Remetentes/Estados, não num arquivo próprio,
+  já que a feature é consumida tanto pela tela de gestão quanto por
+  `ConversasPage.jsx`.
+- **Tela de gestão** (`RespostasRapidasPage.jsx`, rota
+  `/controle-ligacoes/configuracoes/respostas-rapidas`, link no flyout
+  "Configurações" do `ControleLigacoesShell.jsx`, sem gate de `isAdmin` —
+  igual "Números Remetentes"): criar/editar/ocultar (`ativo:false`)/
+  reativar/excluir. **Limitação conhecida**: como o único `GET` existente
+  só devolve `ativo=true`, a tela só lista/gerencia respostas atualmente
+  ativas; uma resposta ocultada nessa mesma sessão continua visível
+  localmente (permitindo reativar sem recarregar), mas some de vez após
+  um refresh da página — não há rota para listar inativas hoje.
+- **Inserção em `ConversasPage.jsx`**: um botão (ícone de raio, SVG
+  desenhado à mão) ao lado do `<textarea aria-label="Mensagem para o
+  contato">` abre um dropdown com os títulos das respostas rápidas
+  (buscadas uma vez ao montar a tela). Clicar insere o `corpo` **na
+  posição do cursor** (`textarea.selectionStart`/`selectionEnd`), não
+  no fim do texto — o texto continua livremente editável depois, sem
+  mudar `handleEnviar`/o contrato de `POST .../mensagens`.
+
+---
+
+## Corretor Ortográfico (v11)
+
+> Mesmo campo de digitação de `ConversasPage.jsx` (resposta manual) —
+> sublinha, não bloqueia. Não muda nenhum contrato HTTP.
+
+Biblioteca `typo-js` (BSD-3-Clause) + dicionário `hunspell-dict-pt-br`
+(LGPL-2.1 — arquivos `pt-br.aff`/`pt-br.dic` crus do projeto BrOffice/VERO,
+sem JS de carregamento) — os dois usados sem modificação, licenças
+compatíveis com uso comercial fechado. Módulo utilitário:
+`frontend/src/modulos/controle-ligacoes/conversas/spellcheck.js`.
+
+- **Carregamento**: `getSpellchecker()` memoiza a Promise de montagem do
+  `Typo` numa variável de módulo — chamada no `useEffect` de montagem de
+  `ConversasPage.jsx`, mas só monta a instância de verdade (o `.dic` tem
+  ~4,4MB) na primeira vez da sessão do navegador; remontagens da tela
+  reaproveitam a mesma Promise.
+- **Verificação**: debounce de 500ms após o operador parar de digitar no
+  textarea de resposta. Tokeniza por espaço, ignora token que seja só
+  pontuação, só números, ou um placeholder inteiro entre chaves (ex.:
+  `{nomeColaboradora}`). Para cada palavra não reconhecida, mostra até 3
+  sugestões (`typo.suggest(...).slice(0,3)`) — lista deduplicada por
+  palavra, abaixo do textarea.
+- **Aplicar sugestão**: substitui só a **primeira ocorrência** daquela
+  palavra no texto (por limite de palavra, com suporte a acentuação
+  pt-BR) — ocorrências repetidas da mesma palavra alhures no texto não
+  mudam.
+- **Fora de escopo, deliberado**: sem sublinhado inline no próprio
+  textarea, sem troca por editor rico — o textarea continua um
+  `<textarea>` simples. Possível evolução futura, não implementada aqui.
+
+---
+
 ## Fora de escopo deste v2 (registrado, não implementar agora)
 
 - ~~Central de Mensagens (Baileys) + conexão real via QR Code (`numero` e

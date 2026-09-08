@@ -3,7 +3,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../../app/useAuth.js';
 import { fetchConversas, fetchMensagens, enviarMensagem, atualizarStatusConversa, abrirStreamConversas, fetchAudioMensagemUrl } from './conversasApi.js';
-import { fetchNumerosRemetentes } from '../configuracoes/controleLigacoesConfigApi.js';
+import { fetchNumerosRemetentes, fetchRespostasRapidas } from '../configuracoes/controleLigacoesConfigApi.js';
+import { getSpellchecker, verificarOrtografia, substituirPrimeiraOcorrencia } from './spellcheck.js';
 import ModalMotivoPerdido from '../components/ModalMotivoPerdido.jsx';
 
 
@@ -164,6 +165,14 @@ function IconAlertCircle({ size, className }) {
       <circle cx="12" cy="12" r="10" />
       <line x1="12" y1="8" x2="12" y2="12" />
       <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+  );
+}
+
+function IconZap({ size, className }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
     </svg>
   );
 }
@@ -351,6 +360,81 @@ export default function ConversasPage() {
   const [envioError, setEnvioError] = useState(null);
   const [statusError, setStatusError] = useState(null);
   const [modalMotivoAberto, setModalMotivoAberto] = useState(false);
+  const textareaRef = useRef(null);
+
+  // Respostas rápidas: lista buscada 1x ao montar a tela (mesmo padrão de fetch-once já usado
+  // acima para `numerosRemetentes`); o dropdown fecha ao clicar fora, mesmo padrão já usado pelo
+  // sino de notificações em `ControleLigacoesShell.jsx`.
+  const [respostasRapidas, setRespostasRapidas] = useState([]);
+  const [respostasRapidasAberto, setRespostasRapidasAberto] = useState(false);
+  const respostasRapidasRef = useRef(null);
+
+  useEffect(() => {
+    fetchRespostasRapidas(token)
+      .then((lista) => setRespostasRapidas(lista || []))
+      .catch((err) => console.error('Erro ao carregar respostas rápidas:', err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!respostasRapidasAberto) return undefined;
+    function handleClickOutside(e) {
+      if (respostasRapidasRef.current && !respostasRapidasRef.current.contains(e.target)) {
+        setRespostasRapidasAberto(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [respostasRapidasAberto]);
+
+  function inserirRespostaRapida(resposta) {
+    setRespostasRapidasAberto(false);
+    const textarea = textareaRef.current;
+    const inicio = textarea?.selectionStart ?? textoEnvio.length;
+    const fim = textarea?.selectionEnd ?? textoEnvio.length;
+    const novoTexto = textoEnvio.slice(0, inicio) + resposta.corpo + textoEnvio.slice(fim);
+    setTextoEnvio(novoTexto);
+    const novaPosicao = inicio + resposta.corpo.length;
+    requestAnimationFrame(() => {
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(novaPosicao, novaPosicao);
+    });
+  }
+
+  // Corretor ortográfico: a instância do `Typo` (dicionário pt-BR) é carregada 1x por sessão via
+  // `getSpellchecker()` (Promise memoizada em `spellcheck.js`), não a cada tecla/re-render deste
+  // componente. A verificação em si, sim, roda a cada mudança de `textoEnvio`, mas com debounce
+  // de 500ms após o operador parar de digitar (ver useEffect abaixo).
+  const [spellchecker, setSpellchecker] = useState(null);
+  const [palavrasErradas, setPalavrasErradas] = useState([]);
+
+  useEffect(() => {
+    let ativo = true;
+    getSpellchecker()
+      .then((typo) => {
+        if (ativo) setSpellchecker(typo);
+      })
+      .catch((err) => console.error('Erro ao carregar corretor ortográfico:', err));
+    return () => {
+      ativo = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    // Antes do dicionário carregar, `palavrasErradas` já começa (e permanece) `[]` — não há
+    // nenhuma sugestão pendente pra limpar sincronamente aqui.
+    if (!spellchecker) return undefined;
+    const timer = setTimeout(() => {
+      setPalavrasErradas(verificarOrtografia(textoEnvio, spellchecker));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [textoEnvio, spellchecker]);
+
+  function aplicarSugestaoOrtografica(palavraErrada, sugestao) {
+    setTextoEnvio((atual) => substituirPrimeiraOcorrencia(atual, palavraErrada, sugestao));
+  }
+
   const contatoSelecionadoRef = useRef(contatoSelecionado);
   useEffect(() => {
     contatoSelecionadoRef.current = contatoSelecionado;
@@ -407,6 +491,8 @@ export default function ConversasPage() {
     setEnvioError(null);
     setStatusError(null);
     setTextoEnvio('');
+    setPalavrasErradas([]);
+    setRespostasRapidasAberto(false);
     carregarMensagens(contato.id, contato.numeroRemetenteId);
   }
 
@@ -740,7 +826,45 @@ export default function ConversasPage() {
                   </div>
                 ) : null}
                 <div className="flex items-end gap-2">
+                  <div className="relative" ref={respostasRapidasRef}>
+                    <button
+                      type="button"
+                      aria-label="Inserir resposta rápida"
+                      aria-haspopup="true"
+                      aria-expanded={respostasRapidasAberto}
+                      onClick={() => setRespostasRapidasAberto((aberto) => !aberto)}
+                      className={`${btnGhost} flex h-11 w-11 shrink-0 items-center justify-center !px-0 !py-0`}
+                    >
+                      <IconZap size={18} />
+                    </button>
+
+                    {respostasRapidasAberto ? (
+                      <div className="absolute bottom-full left-0 z-20 mb-2 w-72 max-w-[80vw] rounded-lg border border-[var(--pd-border)] bg-[var(--pd-surface-alt)] p-1 shadow-lg">
+                        {respostasRapidas.length === 0 ? (
+                          <div className="px-3 py-3 text-center text-[12.5px] text-[var(--pd-text-secondary)]">
+                            Nenhuma resposta rápida cadastrada.
+                          </div>
+                        ) : (
+                          <ul className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
+                            {respostasRapidas.map((resposta) => (
+                              <li key={resposta.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => inserirRespostaRapida(resposta)}
+                                  className="block w-full truncate rounded-md px-3 py-2 text-left text-[13px] font-medium text-[var(--pd-text-primary)] transition-colors hover:bg-[var(--pd-card-bg)]"
+                                >
+                                  {resposta.titulo}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+
                   <textarea
+                    ref={textareaRef}
                     className={`${inputCls} min-h-[44px] flex-1 resize-none`}
                     placeholder="Digite uma mensagem..."
                     aria-label="Mensagem para o contato"
@@ -757,6 +881,33 @@ export default function ConversasPage() {
                     {enviando ? 'Enviando...' : 'Enviar'}
                   </button>
                 </div>
+
+                {palavrasErradas.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {palavrasErradas.map(({ palavra, sugestoes }) => (
+                      <div
+                        key={palavra}
+                        className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--warning)]/40 bg-[var(--warning-bg)] px-2 py-1 text-[11.5px]"
+                      >
+                        <span className="font-semibold text-[var(--warning)]">{palavra}</span>
+                        {sugestoes.length > 0 ? (
+                          sugestoes.map((sugestao) => (
+                            <button
+                              key={sugestao}
+                              type="button"
+                              onClick={() => aplicarSugestaoOrtografica(palavra, sugestao)}
+                              className="rounded border border-[var(--pd-border)] bg-[var(--pd-card-bg)] px-1.5 py-0.5 font-medium text-[var(--pd-text-primary)] hover:bg-[var(--pd-accent)]/15"
+                            >
+                              {sugestao}
+                            </button>
+                          ))
+                        ) : (
+                          <span className="text-[var(--pd-text-secondary)]">sem sugestões</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </form>
             </>
           )}

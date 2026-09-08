@@ -14,6 +14,22 @@ vi.mock('../../../app/useAuth.js', () => ({
   useAuth: vi.fn(),
 }));
 
+vi.mock('../configuracoes/controleLigacoesConfigApi.js', () => ({
+  fetchNumerosRemetentes: vi.fn(),
+  fetchRespostasRapidas: vi.fn(),
+}));
+
+// `spellcheck.js` carrega de verdade um dicionário Hunspell pt-BR de ~4,4MB (via import() dinâmico
+// + `?raw`) e monta uma instância `Typo` real (parsing pesado, síncrono) — inaceitável nos testes
+// (deixa o worker do Vitest travado esperando esse trabalho terminar). Mockado como um
+// spellchecker inerte: nunca aponta nada como errado, então os testes deste arquivo (que não
+// exercitam o corretor ortográfico em si) não são afetados.
+vi.mock('./spellcheck.js', () => ({
+  getSpellchecker: vi.fn(() => Promise.resolve({ check: () => true, suggest: () => [] })),
+  verificarOrtografia: vi.fn(() => []),
+  substituirPrimeiraOcorrencia: vi.fn((texto) => texto),
+}));
+
 vi.mock('react-router-dom', () => ({
   useOutletContext: vi.fn(),
   useLocation: vi.fn(),
@@ -21,6 +37,7 @@ vi.mock('react-router-dom', () => ({
 }));
 
 import * as api from './conversasApi.js';
+import * as configApi from '../configuracoes/controleLigacoesConfigApi.js';
 import { useAuth } from '../../../app/useAuth.js';
 import { useOutletContext, useLocation, useNavigate } from 'react-router-dom';
 
@@ -65,6 +82,8 @@ beforeEach(() => {
   api.fetchAudioMensagemUrl.mockResolvedValue('blob:fake-url');
   globalThis.URL.createObjectURL = vi.fn(() => 'blob:fake-url');
   globalThis.URL.revokeObjectURL = vi.fn();
+  configApi.fetchNumerosRemetentes.mockResolvedValue([]);
+  configApi.fetchRespostasRapidas.mockResolvedValue([]);
 });
 
 describe('ConversasPage — lista de conversas', () => {
@@ -150,8 +169,8 @@ describe('ConversasPage — painel de chat', () => {
 
     await renderPage();
 
-    const botaoBruno = screen.getByText('via Bruno').closest('button');
-    const botaoLivia = screen.getByText('via Livia').closest('button');
+    const botaoBruno = screen.getByText('Bruno').closest('button');
+    const botaoLivia = screen.getByText('Livia').closest('button');
 
     fireEvent.click(botaoBruno);
     await waitFor(() => expect(api.fetchMensagens).toHaveBeenCalledWith('token-teste', 42, 3));
@@ -454,14 +473,14 @@ describe('ConversasPage — tempo real SSE (desmontagem)', () => {
 });
 
 describe('ConversasPage — lista de conversas: número remetente inicial', () => {
-  it('mostra "via {apelido}" no item da lista quando numeroRemetenteInicial existe', async () => {
+  it('mostra o apelido do número remetente inicial (pill em destaque, sem prefixo "via") no item da lista', async () => {
     api.fetchConversas.mockResolvedValue([
       conversa({ numeroRemetenteInicial: { id: 3, apelido: 'Teste Junior' } }),
     ]);
 
     await renderPage();
 
-    expect(screen.getByText('via Teste Junior')).toBeInTheDocument();
+    expect(screen.getByText('Teste Junior')).toBeInTheDocument();
   });
 
   it('não mostra nada extra no item da lista quando numeroRemetenteInicial é null', async () => {
@@ -709,5 +728,144 @@ describe('ConversasPage — auto-scroll do painel de mensagens', () => {
     await screen.findByText('Nova mensagem!');
     // Posição de scroll do operador é preservada, não pula pro fim (1300).
     expect(painel.scrollTop).toBe(100);
+  });
+});
+
+describe('ConversasPage — respostas rápidas', () => {
+  it('busca respostas rápidas ao montar a tela', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    configApi.fetchRespostasRapidas.mockResolvedValue([]);
+
+    await renderPage();
+
+    expect(configApi.fetchRespostasRapidas).toHaveBeenCalledTimes(1);
+    expect(configApi.fetchRespostasRapidas).toHaveBeenCalledWith('token-teste');
+  });
+
+  it('não quebra a tela quando o fetch de respostas rápidas falha', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    configApi.fetchRespostasRapidas.mockRejectedValue(new Error('Erro ao buscar'));
+
+    await renderPage();
+
+    expect(screen.getByText('Maria Silva')).toBeInTheDocument();
+  });
+
+  it('dropdown fechado por padrão; abrir mostra "Nenhuma resposta rápida cadastrada." quando a lista vem vazia', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValue(mensagensResposta({
+      mensagens: [
+        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+      ],
+    }));
+    configApi.fetchRespostasRapidas.mockResolvedValue([]);
+
+    await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+    await screen.findByText('Oi, tudo bem?');
+
+    expect(screen.queryByText('Nenhuma resposta rápida cadastrada.')).not.toBeInTheDocument();
+
+    const botaoDropdown = screen.getByLabelText('Inserir resposta rápida');
+    expect(botaoDropdown).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(botaoDropdown);
+
+    expect(botaoDropdown).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByText('Nenhuma resposta rápida cadastrada.')).toBeInTheDocument();
+  });
+
+  it('abrir o dropdown lista as respostas rápidas já carregadas', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValue(mensagensResposta({
+      mensagens: [
+        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+      ],
+    }));
+    configApi.fetchRespostasRapidas.mockResolvedValue([
+      { id: 1, titulo: 'Saudação', corpo: 'Olá, tudo bem?', ordem: 0, ativo: true },
+      { id: 2, titulo: 'Despedida', corpo: 'Até mais!', ordem: 1, ativo: true },
+    ]);
+
+    await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+    await screen.findByText('Oi, tudo bem?');
+
+    fireEvent.click(screen.getByLabelText('Inserir resposta rápida'));
+
+    expect(await screen.findByText('Saudação')).toBeInTheDocument();
+    expect(screen.getByText('Despedida')).toBeInTheDocument();
+  });
+
+  it('clicar numa resposta rápida insere o corpo no textarea e fecha o dropdown', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValue(mensagensResposta({
+      mensagens: [
+        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+      ],
+    }));
+    configApi.fetchRespostasRapidas.mockResolvedValue([
+      { id: 1, titulo: 'Saudação', corpo: 'Olá, tudo bem?', ordem: 0, ativo: true },
+    ]);
+
+    await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+    await screen.findByText('Oi, tudo bem?');
+
+    fireEvent.click(screen.getByLabelText('Inserir resposta rápida'));
+    fireEvent.click(await screen.findByText('Saudação'));
+
+    const textarea = screen.getByLabelText('Mensagem para o contato');
+    expect(textarea).toHaveValue('Olá, tudo bem?');
+    expect(screen.queryByText('Saudação')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Inserir resposta rápida')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('inserir uma resposta rápida no meio de um texto já digitado respeita a posição do cursor', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValue(mensagensResposta({
+      mensagens: [
+        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+      ],
+    }));
+    configApi.fetchRespostasRapidas.mockResolvedValue([
+      { id: 1, titulo: 'Saudação', corpo: 'OLA', ordem: 0, ativo: true },
+    ]);
+
+    await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+    await screen.findByText('Oi, tudo bem?');
+
+    const textarea = screen.getByLabelText('Mensagem para o contato');
+    fireEvent.change(textarea, { target: { value: 'antesdepois' } });
+    textarea.setSelectionRange(5, 5); // cursor entre "antes" e "depois"
+
+    fireEvent.click(screen.getByLabelText('Inserir resposta rápida'));
+    fireEvent.click(await screen.findByText('Saudação'));
+
+    expect(textarea).toHaveValue('antesOLAdepois');
+  });
+
+  it('clicar fora do dropdown de respostas rápidas fecha ele sem alterar o texto', async () => {
+    api.fetchConversas.mockResolvedValue([conversa()]);
+    api.fetchMensagens.mockResolvedValue(mensagensResposta({
+      mensagens: [
+        { id: 1, remetente: 'cliente', corpo: 'Oi, tudo bem?', criado_em: '2026-08-25T12:00:00.000Z' },
+      ],
+    }));
+    configApi.fetchRespostasRapidas.mockResolvedValue([
+      { id: 1, titulo: 'Saudação', corpo: 'Olá, tudo bem?', ordem: 0, ativo: true },
+    ]);
+
+    await renderPage();
+    fireEvent.click(screen.getByText('Maria Silva'));
+    await screen.findByText('Oi, tudo bem?');
+
+    fireEvent.click(screen.getByLabelText('Inserir resposta rápida'));
+    expect(await screen.findByText('Saudação')).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+
+    await waitFor(() => expect(screen.queryByText('Saudação')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('Mensagem para o contato')).toHaveValue('');
   });
 });

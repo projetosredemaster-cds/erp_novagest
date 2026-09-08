@@ -7,6 +7,7 @@ const importacaoController = require('../controllers/importacao.controller');
 const disparosController = require('../controllers/disparos.controller');
 const conversasController = require('../controllers/conversas.controller');
 const dashboardController = require('../controllers/dashboard.controller');
+const respostasRapidasController = require('../controllers/respostasRapidas.controller');
 
 const router = express.Router();
 
@@ -55,5 +56,10 @@ router.put('/conversas/:contatoId/:numeroRemetenteId/status', conversasControlle
 router.get('/notificacoes', conversasController.notificacoes);
 router.get('/pipeline', conversasController.pipeline);
 router.get('/pipeline/:contatoId/:numeroRemetenteId/historico', conversasController.pipelineHistorico);
+
+router.get('/respostas-rapidas', respostasRapidasController.listar);
+router.post('/respostas-rapidas', respostasRapidasController.criar);
+router.put('/respostas-rapidas/:id', respostasRapidasController.atualizar);
+router.delete('/respostas-rapidas/:id', respostasRapidasController.excluir);
 
 module.exports = router;

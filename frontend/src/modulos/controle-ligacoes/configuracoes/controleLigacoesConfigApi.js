@@ -50,6 +50,39 @@ export function desconectarNumeroRemetente(token, id) {
   });
 }
 
+export function fetchRespostasRapidas(token) {
+  return apiRequest('/api/controle-ligacoes/respostas-rapidas', { token });
+}
+
+export function criarRespostaRapida(token, { titulo, corpo, ordem } = {}) {
+  const body = { titulo, corpo };
+  if (ordem !== undefined) body.ordem = ordem;
+
+  return apiRequest('/api/controle-ligacoes/respostas-rapidas', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    token,
+  });
+}
+
+export function atualizarRespostaRapida(token, id, { titulo, corpo, ordem, ativo } = {}) {
+  const body = {};
+  if (titulo !== undefined) body.titulo = titulo;
+  if (corpo !== undefined) body.corpo = corpo;
+  if (ordem !== undefined) body.ordem = ordem;
+  if (ativo !== undefined) body.ativo = ativo;
+
+  return apiRequest(`/api/controle-ligacoes/respostas-rapidas/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+    token,
+  });
+}
+
+export function removerRespostaRapida(token, id) {
+  return apiRequest(`/api/controle-ligacoes/respostas-rapidas/${id}`, { method: 'DELETE', token });
+}
+
 export async function abrirStreamConexao(token, id, { onEvent, signal } = {}) {
   const baseUrl = import.meta.env.VITE_API_URL;
   const response = await fetch(`${baseUrl}/api/controle-ligacoes/numeros-remetentes/${id}/conexao/stream`, {
