@@ -17,6 +17,7 @@ const {
   _calcularProximoTemplate,
   _montarMensagem,
   _estaDentroDoHorarioComercial,
+  _calcularSaudacao,
 } = worker;
 
 function itemPendente(overrides = {}) {
@@ -177,6 +178,41 @@ describe('envioDisparos.worker._estaDentroDoHorarioComercial (defaults 11h-22h U
 
   it('false num domingo dentro do horário (15h)', () => {
     expect(_estaDentroDoHorarioComercial(new Date('2026-09-06T15:00:00Z'))).toBe(false);
+  });
+});
+
+describe('envioDisparos.worker._calcularSaudacao (limites 8h-15h-21h UTC = 5h-12h-18h Brasília)', () => {
+  it('regressão do bug de produção: 19h03 UTC (16h03 Brasília) é "Boa tarde", não "Boa noite"', () => {
+    expect(_calcularSaudacao(new Date(Date.UTC(2026, 8, 8, 19, 3)))).toBe('Boa tarde');
+  });
+
+  it('8h UTC (5h Brasília) é o início de "Bom dia" (inclusivo)', () => {
+    expect(_calcularSaudacao(new Date(Date.UTC(2026, 8, 8, 8, 0)))).toBe('Bom dia');
+  });
+
+  it('14h59 UTC ainda é "Bom dia" (limite superior exclusivo em 15h)', () => {
+    expect(_calcularSaudacao(new Date(Date.UTC(2026, 8, 8, 14, 59)))).toBe('Bom dia');
+  });
+
+  it('15h UTC (12h Brasília) é o início de "Boa tarde" (inclusivo)', () => {
+    expect(_calcularSaudacao(new Date(Date.UTC(2026, 8, 8, 15, 0)))).toBe('Boa tarde');
+  });
+
+  it('20h59 UTC ainda é "Boa tarde" (limite superior exclusivo em 21h)', () => {
+    expect(_calcularSaudacao(new Date(Date.UTC(2026, 8, 8, 20, 59)))).toBe('Boa tarde');
+  });
+
+  it('21h UTC (18h Brasília) já é "Boa noite" (fronteira tarde→noite)', () => {
+    expect(_calcularSaudacao(new Date(Date.UTC(2026, 8, 8, 21, 0)))).toBe('Boa noite');
+  });
+
+  it('madrugada (2h/3h UTC) continua "Boa noite" (faixa cruza meia-noite)', () => {
+    expect(_calcularSaudacao(new Date(Date.UTC(2026, 8, 8, 2, 0)))).toBe('Boa noite');
+    expect(_calcularSaudacao(new Date(Date.UTC(2026, 8, 8, 3, 0)))).toBe('Boa noite');
+  });
+
+  it('7h59 UTC ainda é "Boa noite" (limite inferior de "Bom dia" é 8h exclusivo abaixo)', () => {
+    expect(_calcularSaudacao(new Date(Date.UTC(2026, 8, 8, 7, 59)))).toBe('Boa noite');
   });
 });
 

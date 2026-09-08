@@ -33,12 +33,16 @@ function aguardar(ms) {
 // (hoje UTC no servidor) — os limites de hora abaixo já vêm calibrados a partir do
 // horário real de Brasília (UTC-3). Se o processo passar a rodar em outro fuso,
 // recalcule os limites.
+// Bug corrigido: os limites abaixo eram 5/12/18 (hora de Brasília "crua"), aplicados
+// direto sobre getHours() em UTC — 16h03 Brasília (19h03 UTC) caía em "Boa noite" em
+// vez de "Boa tarde". Limites convertidos para UTC (Brasília +3h), mesma conversão já
+// aplicada a HORARIO_COMERCIAL_INICIO_HORA/FIM_HORA.
 function calcularSaudacao(agora = new Date()) {
   const hora = agora.getHours();
-  if (hora >= 5 && hora < 12) {
+  if (hora >= 8 && hora < 15) {
     return 'Bom dia';
   }
-  if (hora >= 12 && hora < 18) {
+  if (hora >= 15 && hora < 21) {
     return 'Boa tarde';
   }
   return 'Boa noite';

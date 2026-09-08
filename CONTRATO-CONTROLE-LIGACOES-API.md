@@ -1431,8 +1431,8 @@ controller gravar `numero=NULL`/`status_conexao='aguardando_conexao'`
   padrão de parâmetro `Date` injetável já usado por
   `estaDentroDoHorarioComercial`, e a mesma ressalva de fuso horário local do
   processo — hoje UTC, calibrado a partir do horário real de Brasília):
-  `hora >= 5 && hora < 12` → `'Bom dia'`; `hora >= 12 && hora < 18` → `'Boa
-  tarde'`; caso contrário (`18h`–`4h59`) → `'Boa noite'`. Diferente de
+  `hora >= 8 && hora < 15` → `'Bom dia'`; `hora >= 15 && hora < 21` → `'Boa
+  tarde'`; caso contrário (`21h`–`7h59` UTC) → `'Boa noite'`. Diferente de
   `{diaSemana}`/`{horaSemana}` (só para `tipoMensagem==='primeiro_contato'`),
   `{saudacao}` é substituído nos **dois tipos de disparo**
   (`'reativacao'` e `'primeiro_contato'`) — `montarMensagem` sempre recebe
@@ -1440,9 +1440,21 @@ controller gravar `numero=NULL`/`status_conexao='aguardando_conexao'`
   não a hora em que o item entrou na fila). Como o worker só processa ciclos
   dentro do horário comercial (`HORARIO_COMERCIAL_INICIO_HORA`–
   `HORARIO_COMERCIAL_FIM_HORA`, hoje `11`–`22` UTC = `8h`–`19h` Brasília), o
-  ramo `'Boa noite'` provavelmente nunca dispara em produção com a
-  configuração atual — implementado mesmo assim por completude, para uma
-  eventual mudança futura do horário comercial.
+  ramo `'Boa noite'` só dispara na última hora da janela (`21h`–`22h` UTC =
+  `18h`–`19h` Brasília).
+- **Bugfix posterior — saudação errada por fuso não convertido**: a
+  implementação original de `calcularSaudacao` usava os limites de hora de
+  Brasília (`5`/`12`/`18`) direto sobre `agora.getHours()`, que devolve hora
+  **UTC** no servidor — resultado confirmado em produção: às 16h03 em
+  Fortaleza/Brasília (19h03 UTC) o sistema enviou "Boa noite" em vez de "Boa
+  tarde", porque 19h caía incorretamente na faixa `>= 18`. Corrigido
+  convertendo os 3 limites para UTC (Brasília +3h, mesma conversão já
+  aplicada a `HORARIO_COMERCIAL_INICIO_HORA`/`FIM_HORA`): "Bom dia" virou
+  `8h`–`14h59` UTC, "Boa tarde" `15h`–`20h59` UTC, "Boa noite" `21h`–`7h59`
+  UTC (cruzando meia-noite). É uma correção de bug de conversão de fuso, não
+  um redesenho da regra de negócio — os textos das 3 saudações e o
+  comportamento de `{saudacao}` descritos no parágrafo acima continuam os
+  mesmos.
 
 ### Schema novo
 
