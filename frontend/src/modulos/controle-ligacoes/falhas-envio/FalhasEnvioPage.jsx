@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../../app/useAuth.js';
-import { fetchFalhasEnvio, reenviarDisparoContato } from './falhasEnvioApi.js';
+import { fetchFalhasEnvio, reenviarDisparoContato, ignorarDisparoContato } from './falhasEnvioApi.js';
 
 const btnGhost = "bg-transparent border border-[var(--pd-border)] text-[var(--pd-text-primary)] rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-semibold cursor-pointer hover:bg-[var(--pd-surface-alt)] disabled:cursor-not-allowed disabled:opacity-50";
 const btn = "bg-[var(--pd-accent)] text-[#0b1010] border-none rounded-lg px-3.5 py-2.5 sm:px-3 sm:py-1.5 text-[13px] font-bold cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
@@ -32,6 +32,8 @@ export default function FalhasEnvioPage() {
   const [loadError, setLoadError] = useState(null);
   const [reenviandoId, setReenviandoId] = useState(null);
   const [erroReenvioPorId, setErroReenvioPorId] = useState({});
+  const [ignorandoId, setIgnorandoId] = useState(null);
+  const [erroIgnorarPorId, setErroIgnorarPorId] = useState({});
 
   useEffect(() => {
     zerarFalhasNaoVistas?.();
@@ -91,6 +93,30 @@ export default function FalhasEnvioPage() {
       });
   }
 
+  function handleIgnorar(disparoContatoId) {
+    setIgnorandoId(disparoContatoId);
+    setErroIgnorarPorId((atual) => {
+      if (!(disparoContatoId in atual)) return atual;
+      const copia = { ...atual };
+      delete copia[disparoContatoId];
+      return copia;
+    });
+
+    ignorarDisparoContato(token, disparoContatoId)
+      .then(() => {
+        setFalhas((atual) => (atual || []).filter((f) => f.disparoContatoId !== disparoContatoId));
+      })
+      .catch((err) => {
+        setErroIgnorarPorId((atual) => ({
+          ...atual,
+          [disparoContatoId]: err.message || 'Erro ao ignorar.',
+        }));
+      })
+      .finally(() => {
+        setIgnorandoId(null);
+      });
+  }
+
   return (
     <div className="painel-disparo-light-theme min-h-screen bg-[var(--pd-bg)] p-4 sm:p-6 text-[var(--pd-text-primary)]">
       <div className="mx-auto max-w-[1100px]">
@@ -114,9 +140,15 @@ export default function FalhasEnvioPage() {
               Nenhuma falha de envio no momento.
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-[var(--pd-border)]">
+            <div className="max-h-[420px] overflow-x-auto overflow-y-auto rounded-lg border border-[var(--pd-border)]">
+              {/* max-h-[420px] ~ 8-9 linhas visíveis (linha ~46-48px com py-2/text-[13px] + cabeçalho).
+                  overflow-x-auto e overflow-y-auto convivem no MESMO container de propósito: o sticky
+                  do <thead> é relativo a esse container, que já é o único com scroll (nunca precisou de
+                  dois containers aninhados aqui, diferente do caso do tooltip em ControleLigacoesShell,
+                  porque ali o objetivo era manter overflow-x visível/sem scroll — aqui scroll horizontal
+                  é desejado, então não há conflito de spec do CSS a contornar). */}
               <table className="w-full min-w-[820px] border-collapse text-[13px]">
-                <thead className="bg-[var(--pd-surface-alt)]">
+                <thead className="sticky top-0 z-10 bg-[var(--pd-surface-alt)]">
                   <tr>
                     <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Nome</th>
                     <th className="px-3 py-2 text-left font-semibold text-[var(--pd-text-secondary)]">Telefone</th>
@@ -128,33 +160,52 @@ export default function FalhasEnvioPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--pd-border)]">
-                  {falhas.map((item) => (
-                    <tr key={item.disparoContatoId}>
-                      <td className="px-3 py-2 font-semibold text-[var(--pd-text-primary)]">{item.nome}</td>
-                      <td className="px-3 py-2 text-[var(--pd-text-primary)]">{item.telefone}</td>
-                      <td className="px-3 py-2 text-[var(--pd-text-primary)]">
-                        {item.estado ? `${item.estado.nome} (${item.estado.uf})` : '—'}
-                      </td>
-                      <td className="px-3 py-2 text-[var(--pd-text-primary)]">{item.numeroRemetente?.apelido || '—'}</td>
-                      <td className="px-3 py-2 text-[var(--pd-warning)] break-words max-w-[260px]">{item.erro || '—'}</td>
-                      <td className="px-3 py-2 text-[var(--pd-text-secondary)] whitespace-nowrap">{formatDataHora(item.criadoEm)}</td>
-                      <td className="px-3 py-2 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleReenviar(item.disparoContatoId)}
-                          disabled={reenviandoId === item.disparoContatoId}
-                          className={btnGhost}
-                        >
-                          {reenviandoId === item.disparoContatoId ? 'Reenviando...' : 'Reenviar'}
-                        </button>
-                        {erroReenvioPorId[item.disparoContatoId] ? (
-                          <div className="mt-1 max-w-[220px] text-right text-[11.5px] text-[var(--pd-danger)] break-words">
-                            {erroReenvioPorId[item.disparoContatoId]}
+                  {falhas.map((item) => {
+                    const emProgresso =
+                      reenviandoId === item.disparoContatoId || ignorandoId === item.disparoContatoId;
+                    return (
+                      <tr key={item.disparoContatoId}>
+                        <td className="px-3 py-2 font-semibold text-[var(--pd-text-primary)]">{item.nome}</td>
+                        <td className="px-3 py-2 text-[var(--pd-text-primary)]">{item.telefone}</td>
+                        <td className="px-3 py-2 text-[var(--pd-text-primary)]">
+                          {item.estado ? `${item.estado.nome} (${item.estado.uf})` : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-[var(--pd-text-primary)]">{item.numeroRemetente?.apelido || '—'}</td>
+                        <td className="px-3 py-2 text-[var(--pd-warning)] break-words max-w-[260px]">{item.erro || '—'}</td>
+                        <td className="px-3 py-2 text-[var(--pd-text-secondary)] whitespace-nowrap">{formatDataHora(item.criadoEm)}</td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleReenviar(item.disparoContatoId)}
+                              disabled={emProgresso}
+                              className={btnGhost}
+                            >
+                              {reenviandoId === item.disparoContatoId ? 'Reenviando...' : 'Reenviar'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleIgnorar(item.disparoContatoId)}
+                              disabled={emProgresso}
+                              className={btnGhost}
+                            >
+                              {ignorandoId === item.disparoContatoId ? 'Ignorando...' : 'Ignorar'}
+                            </button>
                           </div>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ))}
+                          {erroReenvioPorId[item.disparoContatoId] ? (
+                            <div className="mt-1 max-w-[220px] text-right text-[11.5px] text-[var(--pd-danger)] break-words">
+                              {erroReenvioPorId[item.disparoContatoId]}
+                            </div>
+                          ) : null}
+                          {erroIgnorarPorId[item.disparoContatoId] ? (
+                            <div className="mt-1 max-w-[220px] text-right text-[11.5px] text-[var(--pd-danger)] break-words">
+                              {erroIgnorarPorId[item.disparoContatoId]}
+                            </div>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

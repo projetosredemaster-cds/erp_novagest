@@ -573,3 +573,59 @@ describe('disparos.service.reenviarContatoFalha', () => {
     }
   });
 });
+
+describe('disparos.service.ignorarContatoFalha', () => {
+  it('retorna "nao_encontrado" quando o disparoContatoId não existe, sem tentar ignorar', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue(null);
+
+    const resultado = await disparosService.ignorarContatoFalha(999);
+
+    expect(resultado).toEqual({ status: 'nao_encontrado' });
+    expect(disparosModel.ignorarContatoFalha).not.toHaveBeenCalled();
+  });
+
+  it('retorna "nao_falha" quando o item existe mas não está com status "falha", sem tentar ignorar', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'enviado' });
+
+    const resultado = await disparosService.ignorarContatoFalha(42);
+
+    expect(resultado).toEqual({ status: 'nao_falha' });
+    expect(disparosModel.ignorarContatoFalha).not.toHaveBeenCalled();
+  });
+
+  it('retorna "conflito" quando o UPDATE condicional não afeta nenhuma linha (corrida perdida para outra requisição)', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'falha' });
+    disparosModel.ignorarContatoFalha.mockResolvedValue(false);
+
+    const resultado = await disparosService.ignorarContatoFalha(42);
+
+    expect(resultado).toEqual({ status: 'conflito' });
+    expect(disparosModel.ignorarContatoFalha).toHaveBeenCalledWith(42);
+  });
+
+  it('retorna "ok" quando o model confirma o UPDATE condicional (caminho de sucesso)', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'falha' });
+    disparosModel.ignorarContatoFalha.mockResolvedValue(true);
+
+    const resultado = await disparosService.ignorarContatoFalha(42);
+
+    expect(resultado).toEqual({ status: 'ok' });
+    expect(disparosModel.ignorarContatoFalha).toHaveBeenCalledWith(42);
+  });
+
+  // Diferente de reenviarContatoFalha, ignorar não tem processamento posterior
+  // nenhum — só o UPDATE condicional. Confirma que nenhum caminho aciona o
+  // worker de envio (nem findItemParaProcessarPorId/findResultadoReenvio,
+  // que só fazem sentido no fluxo de reenvio).
+  it('nunca chama o worker de envio nem funções exclusivas do fluxo de reenvio, em nenhum branch', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'falha' });
+    disparosModel.ignorarContatoFalha.mockResolvedValue(true);
+
+    await disparosService.ignorarContatoFalha(42);
+
+    expect(envioDisparosWorker.processarItemUnico).not.toHaveBeenCalled();
+    expect(disparosModel.findItemParaProcessarPorId).not.toHaveBeenCalled();
+    expect(disparosModel.findResultadoReenvio).not.toHaveBeenCalled();
+    expect(disparosModel.reativarContatoParaReenvio).not.toHaveBeenCalled();
+  });
+});

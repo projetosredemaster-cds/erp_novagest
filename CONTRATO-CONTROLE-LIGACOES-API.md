@@ -3209,19 +3209,29 @@ compatíveis com uso comercial fechado. Módulo utilitário:
 
 ---
 
-## Falhas de Disparo e Reenvio Manual (v12)
+## Falhas de Disparo e Reenvio Manual (v12, com adendo "Ignorar")
 
 > Adendo ao contrato v2 + "Envio de Disparos (v6)" acima. Objetivo: dar
 > visibilidade agregada aos itens de `DisparoContatos` que o worker marcou
 > `status='falha'` (ver ciclo do worker na seção v6), e permitir reenviar UM
 > item pontualmente, por clique explícito do operador — **não é retry
 > automático**, continua não existindo nenhum mecanismo que reprocesse uma
-> falha sozinho.
+> falha sozinho. Um adendo posterior acrescentou também "Ignorar" — marcar um
+> item de falha como tratado sem reenviar, mantendo o registro para sempre
+> (nunca `DELETE`).
+>
+> **Premissa de schema**: `DisparoContatos.ignorado_em DATETIME2 NULL` foi
+> criada manualmente no banco-alvo, como as demais colunas recentes deste
+> módulo (`status_entrega`, `nome_colaboradora`, etc.) — sem script
+> `MIGRATION-*.sql` novo no repo para ela. Confirme que já rodou no
+> ambiente-alvo antes de usar `PUT .../ignorar` ou `GET /disparos/falhas`.
 
 ### `GET /api/controle-ligacoes/disparos/falhas`
 
-Lista **todos** os `DisparoContatos` com `status='falha'` (sem paginação —
-volume baixo, decisão deliberada). Protegida só pelos middlewares já
+Lista **todos** os `DisparoContatos` com `status='falha'` **e
+`ignorado_em IS NULL`** (o segundo filtro é do adendo "Ignorar", abaixo — um
+item ignorado sai desta lista mas nunca é excluído da tabela) (sem
+paginação — volume baixo, decisão deliberada). Protegida só pelos middlewares já
 aplicados no mount do router inteiro (`authMiddleware` +
 `operadorCobrancaMiddleware` em `app.js`), sem checagem própria — mesmo
 padrão do resto do módulo. Registrada em `controleLigacoes.routes.js`
@@ -3333,6 +3343,54 @@ Ou, se o reenvio falhou de novo:
 - `404`: `{ "error": "Contato de disparo não encontrado." }`
 - `409`: `{ "error": "Este contato já está sendo reenviado por outra requisição." }`
 - `500`: `{ "error": "Erro interno ao reenviar contato de disparo." }`
+
+### `PUT /api/controle-ligacoes/disparos/contatos/:disparoContatoId/ignorar`
+
+Marca manualmente UM `DisparoContatos` que está `status='falha'` como
+ignorado — o operador decidiu não reenviar aquele item. **Não exclui a
+linha** (nunca `DELETE`, mesmo princípio de não perder histórico usado em
+todo o resto do módulo) — só grava `ignorado_em = SYSUTCDATETIME()`, o que
+faz o item sair de `GET /disparos/falhas` dali pra frente (ver filtro acima).
+Protegida pelos mesmos middlewares do mount, sem checagem própria.
+
+Diferente de `.../reenviar`, esta rota **não processa nada** — não chama o
+worker, não avança nenhuma rotação de template, não manda mensagem nenhuma.
+É só a gravação do timestamp.
+
+#### Parâmetros
+| Nome | Tipo | Obrigatório | Validação |
+|---|---|---|---|
+| `:disparoContatoId` | path, number | sim | inteiro positivo; `400` se não for |
+
+#### Fluxo
+1. Valida `:disparoContatoId` (inteiro positivo) → `400` senão.
+2. Busca a linha por id (`findDisparoContatoById`, mesma função já usada por
+   `.../reenviar`) → não existe: `404`. Existe mas `status !== 'falha'`:
+   `400`.
+3. `UPDATE DisparoContatos SET ignorado_em = SYSUTCDATETIME() WHERE id=@id
+   AND status='falha'` — atômico e condicional, mesmo padrão de
+   `reativarContatoParaReenvio`; se `rowsAffected === 0` (outra requisição já
+   tinha mudado essa linha entre o passo 2 e este UPDATE — ex.: reenviada com
+   sucesso, ou ignorada por outra aba, no intervalo), responde `409`.
+4. Responde `204`, sem corpo.
+
+#### Resposta de sucesso — `204 No Content`
+Corpo vazio.
+
+#### Erros
+- `400`: `{ "error": "Parâmetro \"disparoContatoId\" deve ser um número inteiro positivo." }`
+- `400`: `{ "error": "Este contato não está com status de falha." }`
+- `404`: `{ "error": "Contato de disparo não encontrado." }`
+- `409`: `{ "error": "Este contato já foi processado por outra requisição." }`
+- `500`: `{ "error": "Erro interno ao ignorar contato de disparo." }`
+
+#### Restrições (deliberadas, não são lacunas a corrigir)
+- **Nunca permitido para status diferente de `'falha'`** — validado no
+  backend mesmo que, na prática, a UI só ofereça o botão para itens que já
+  estão na lista de falhas (que só contém `status='falha'`).
+- **Sem "desfazer ignorar"** nesta rota nem em nenhuma outra — se algum dia
+  for necessário reverter, é via SQL direto (`UPDATE ... SET ignorado_em =
+  NULL`), fora do escopo de qualquer tela.
 
 ### Decisões de design
 

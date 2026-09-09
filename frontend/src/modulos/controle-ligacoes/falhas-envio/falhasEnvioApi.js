@@ -10,3 +10,10 @@ export function reenviarDisparoContato(token, disparoContatoId) {
     token,
   });
 }
+
+export function ignorarDisparoContato(token, disparoContatoId) {
+  return apiRequest(`/api/controle-ligacoes/disparos/contatos/${disparoContatoId}/ignorar`, {
+    method: 'PUT',
+    token,
+  });
+}

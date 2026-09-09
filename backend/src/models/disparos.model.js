@@ -313,7 +313,7 @@ async function listContatosFalha() {
     JOIN Contatos c ON c.id = dc.contato_id
     JOIN Estados e ON e.id = d.estado_id
     JOIN NumerosRemetentes n ON n.id = d.numero_remetente_id
-    WHERE dc.status = 'falha'
+    WHERE dc.status = 'falha' AND dc.ignorado_em IS NULL
     ORDER BY dc.id DESC
   `);
 
@@ -353,6 +353,22 @@ async function reativarContatoParaReenvio(disparoContatoId) {
     .query(`
       UPDATE DisparoContatos
       SET status = 'pendente', erro = NULL
+      WHERE id = @id AND status = 'falha'
+    `);
+  return result.rowsAffected[0] > 0;
+}
+
+// UPDATE condicional atômico: só marca 'ignorado_em' se a linha ainda estiver
+// em 'falha' no exato momento do UPDATE — mesma proteção contra corrida de
+// reativarContatoParaReenvio, usada agora para o botão "Ignorar".
+async function ignorarContatoFalha(disparoContatoId) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.Int, disparoContatoId)
+    .query(`
+      UPDATE DisparoContatos
+      SET ignorado_em = SYSUTCDATETIME()
       WHERE id = @id AND status = 'falha'
     `);
   return result.rowsAffected[0] > 0;
@@ -487,5 +503,6 @@ module.exports = {
   listContatosFalha,
   findDisparoContatoById,
   reativarContatoParaReenvio,
+  ignorarContatoFalha,
   findResultadoReenvio,
 };

@@ -997,3 +997,105 @@ describe('PUT /api/controle-ligacoes/disparos/contatos/:disparoContatoId/reenvia
     expect(res.body).toEqual({ error: 'Erro interno ao reenviar contato de disparo.' });
   });
 });
+
+describe('PUT /api/controle-ligacoes/disparos/contatos/:disparoContatoId/ignorar', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).put('/api/controle-ligacoes/disparos/contatos/42/ignorar');
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário não é operador_cobranca', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/42/ignorar')
+      .set('Authorization', `Bearer ${tokenFor({ role: 'admin' })}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('400 quando ":disparoContatoId" não é um inteiro positivo', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/abc/ignorar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Parâmetro "disparoContatoId" deve ser um número inteiro positivo.',
+    });
+  });
+
+  it('400 quando ":disparoContatoId" é zero ou negativo (não chega a chamar o service)', async () => {
+    for (const valorInvalido of ['0', '-1']) {
+      const res = await request(app)
+        .put(`/api/controle-ligacoes/disparos/contatos/${valorInvalido}/ignorar`)
+        .set('Authorization', `Bearer ${tokenFor()}`);
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: 'Parâmetro "disparoContatoId" deve ser um número inteiro positivo.',
+      });
+    }
+  });
+
+  it('404 quando o disparoContatoId não existe', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue(null);
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/999/ignorar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Contato de disparo não encontrado.' });
+    expect(disparosModel.ignorarContatoFalha).not.toHaveBeenCalled();
+  });
+
+  it('400 quando o disparoContatoId existe mas não está com status "falha"', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'enviado' });
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/42/ignorar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Este contato não está com status de falha.' });
+    expect(disparosModel.ignorarContatoFalha).not.toHaveBeenCalled();
+  });
+
+  it('409 quando perde a corrida do UPDATE condicional para outra requisição simultânea', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'falha' });
+    disparosModel.ignorarContatoFalha.mockResolvedValue(false);
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/42/ignorar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: 'Este contato já foi processado por outra requisição.',
+    });
+  });
+
+  it('204 sem corpo — ignorado com sucesso', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'falha' });
+    disparosModel.ignorarContatoFalha.mockResolvedValue(true);
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/42/ignorar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(204);
+    expect(res.body).toEqual({});
+    expect(res.text).toBe('');
+    expect(disparosModel.ignorarContatoFalha).toHaveBeenCalledWith(42);
+  });
+
+  it('500 quando o service lança erro', async () => {
+    disparosModel.findDisparoContatoById.mockRejectedValue(new Error('boom'));
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/42/ignorar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao ignorar contato de disparo.' });
+  });
+});

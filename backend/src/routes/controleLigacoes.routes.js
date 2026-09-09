@@ -50,6 +50,7 @@ router.post('/disparos', disparosController.criar);
 router.get('/disparos/falhas', disparosController.listarFalhas);
 router.get('/disparos/:id', disparosController.detalhe);
 router.put('/disparos/contatos/:disparoContatoId/reenviar', disparosController.reenviar);
+router.put('/disparos/contatos/:disparoContatoId/ignorar', disparosController.ignorar);
 
 router.get('/conversas', conversasController.listar);
 router.get('/conversas/stream', conversasController.stream);

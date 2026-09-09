@@ -270,6 +270,38 @@ async function reenviar(req, res) {
   }
 }
 
+async function ignorar(req, res) {
+  const disparoContatoIdNum = Number(req.params.disparoContatoId);
+  if (!isPositiveInteger(disparoContatoIdNum)) {
+    return res
+      .status(400)
+      .json({ error: 'Parâmetro "disparoContatoId" deve ser um número inteiro positivo.' });
+  }
+
+  try {
+    const resultado = await disparosService.ignorarContatoFalha(disparoContatoIdNum);
+
+    if (resultado.status === 'nao_encontrado') {
+      return res.status(404).json({ error: 'Contato de disparo não encontrado.' });
+    }
+
+    if (resultado.status === 'nao_falha') {
+      return res.status(400).json({ error: 'Este contato não está com status de falha.' });
+    }
+
+    if (resultado.status === 'conflito') {
+      return res
+        .status(409)
+        .json({ error: 'Este contato já foi processado por outra requisição.' });
+    }
+
+    return res.status(204).end();
+  } catch (err) {
+    console.error('[disparos.controller] Erro ao ignorar contato de disparo:', err);
+    return res.status(500).json({ error: 'Erro interno ao ignorar contato de disparo.' });
+  }
+}
+
 async function detalhe(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {
@@ -298,4 +330,5 @@ module.exports = {
   detalhe,
   listarFalhas,
   reenviar,
+  ignorar,
 };

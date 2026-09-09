@@ -111,6 +111,28 @@ async function reenviarContatoFalha(disparoContatoId) {
   return { status: 'ok', contato: resultado };
 }
 
+// Ignora manualmente um DisparoContatos em status='falha' — só marca o
+// timestamp ignorado_em (registro nunca é excluído). Diferente do reenvio,
+// não há processamento posterior nenhum, é só o UPDATE condicional.
+async function ignorarContatoFalha(disparoContatoId) {
+  const atual = await disparosModel.findDisparoContatoById(disparoContatoId);
+  if (!atual) {
+    return { status: 'nao_encontrado' };
+  }
+
+  if (atual.status !== 'falha') {
+    return { status: 'nao_falha' };
+  }
+
+  const ignorado = await disparosModel.ignorarContatoFalha(disparoContatoId);
+  if (!ignorado) {
+    // Outra requisição venceu a corrida entre o SELECT acima e este UPDATE.
+    return { status: 'conflito' };
+  }
+
+  return { status: 'ok' };
+}
+
 module.exports = {
   listarPainelDisparo,
   listarContatosDisponiveis,
@@ -119,4 +141,5 @@ module.exports = {
   detalharDisparo,
   listarFalhas,
   reenviarContatoFalha,
+  ignorarContatoFalha,
 };
