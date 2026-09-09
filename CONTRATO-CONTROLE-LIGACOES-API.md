@@ -3209,6 +3209,198 @@ compatíveis com uso comercial fechado. Módulo utilitário:
 
 ---
 
+## Falhas de Disparo e Reenvio Manual (v12)
+
+> Adendo ao contrato v2 + "Envio de Disparos (v6)" acima. Objetivo: dar
+> visibilidade agregada aos itens de `DisparoContatos` que o worker marcou
+> `status='falha'` (ver ciclo do worker na seção v6), e permitir reenviar UM
+> item pontualmente, por clique explícito do operador — **não é retry
+> automático**, continua não existindo nenhum mecanismo que reprocesse uma
+> falha sozinho.
+
+### `GET /api/controle-ligacoes/disparos/falhas`
+
+Lista **todos** os `DisparoContatos` com `status='falha'` (sem paginação —
+volume baixo, decisão deliberada). Protegida só pelos middlewares já
+aplicados no mount do router inteiro (`authMiddleware` +
+`operadorCobrancaMiddleware` em `app.js`), sem checagem própria — mesmo
+padrão do resto do módulo. Registrada em `controleLigacoes.routes.js`
+**antes** de `GET /disparos/:id` (na ordem física do arquivo: logo depois de
+`POST /disparos`) — se ficasse depois, o Express casaria `/disparos/falhas`
+com o padrão `/disparos/:id` e essa rota nunca seria alcançada.
+
+Ordenada por `dc.id DESC` (mais recente primeiro) — **não** por
+`enviado_em`, que fica sempre `NULL` numa linha `status='falha'` (só
+`marcarContatoEnviado`, chamada em caso de sucesso, grava esse campo; não é
+bug, é o schema atual de `DisparoContatos`, ver "Envio de Disparos (v6)"
+acima).
+
+#### Resposta de sucesso — `200 OK`
+```json
+[
+  {
+    "disparoContatoId": 42,
+    "disparoId": 15,
+    "nome": "Maria Silva",
+    "telefone": "5598900000000",
+    "estado": { "id": 6, "nome": "Maranhão", "uf": "MA" },
+    "numeroRemetente": { "id": 3, "apelido": "CDC Cohatrac" },
+    "erro": "Número não possui WhatsApp ativo ou não pôde ser verificado.",
+    "tentadoEm": null,
+    "criadoEm": "2026-09-08T14:03:11.000Z"
+  }
+]
+```
+
+- `disparoContatoId` — `DisparoContatos.id`, necessário para chamar o `PUT`
+  de reenvio abaixo.
+- `erro` — `DisparoContatos.erro` (texto gravado por `marcarContatoFalha`).
+- **`tentadoEm` é sempre `null`.** Lacuna deliberada: não existe, hoje, uma
+  coluna de timestamp em `DisparoContatos` para "quando a falha aconteceu"
+  (`marcarContatoFalha` nunca gravou isso, nem antes nem depois deste
+  adendo). Não foi criada coluna nova para isso nesta leva — fora de escopo
+  (exigiria migration de schema, e a task que originou este adendo pediu
+  explicitamente para não inventar coluna e documentar a lacuna em vez
+  disso). O consumidor deste campo deve tratá-lo como sempre ausente hoje.
+- `criadoEm` — `Disparos.criado_em` (ISO), o único timestamp disponível
+  hoje para dar alguma noção temporal na UI, já que `tentadoEm` é sempre
+  `null`. É a data de criação do **disparo** (quando o operador clicou em
+  "Disparar" no Painel de Disparo), não da tentativa de envio em si — podem
+  divergir bastante se o item ficou muito tempo `status='pendente'` antes do
+  worker processá-lo.
+
+#### Erros
+- `500`: `{ "error": "Erro interno ao listar falhas de disparo." }`
+
+### `PUT /api/controle-ligacoes/disparos/contatos/:disparoContatoId/reenviar`
+
+Reenvia manualmente UM `DisparoContatos` que está `status='falha'`,
+processando-o imediatamente dentro da própria requisição HTTP (a resposta só
+volta depois que a tentativa de reenvio já terminou, sucesso ou falha de
+novo). Protegida pelos mesmos middlewares do mount, sem checagem própria.
+
+**Ignora `estaDentroDoHorarioComercial()` de propósito — única exceção a essa
+regra em todo o módulo.** Ver "Decisões de design" logo abaixo para o
+porquê.
+
+#### Parâmetros
+| Nome | Tipo | Obrigatório | Validação |
+|---|---|---|---|
+| `:disparoContatoId` | path, number | sim | inteiro positivo; `400` se não for |
+
+#### Fluxo
+1. Valida `:disparoContatoId` (inteiro positivo) → `400` senão.
+2. Busca a linha por id → não existe: `404`. Existe mas `status !== 'falha'`:
+   `400`.
+3. `UPDATE DisparoContatos SET status='pendente', erro=NULL WHERE id=@id AND
+   status='falha'` — atômico e condicional; se `rowsAffected === 0` aqui
+   (outra requisição já tinha flipado essa linha entre o passo 2 e este
+   UPDATE), responde `409`.
+4. Processa o item imediatamente, reaproveitando a mesma função do worker
+   que processa a fila normal (`processarItem`, exportada de
+   `envioDisparos.worker.js` como `processarItemUnico` — nome de produção
+   separado do `_processarItem` que já existia só para teste) — sem
+   recriar/duplicar a lógica de verificação de sessão Baileys/colaboradora/
+   template/`onWhatsApp`/`sendMessage`.
+5. Relê a linha (`status`/`erro`/`mensagem_enviada`/`enviado_em`
+   atualizados) e responde `200` com o resultado real — que **pode ter
+   falhado de novo**, isso é esperado e válido, não é um caso de erro HTTP.
+
+#### Resposta de sucesso — `200 OK`
+```json
+{
+  "disparoContatoId": 42,
+  "status": "enviado",
+  "erro": null,
+  "mensagemEnviada": "Boa tarde, Maria! ...",
+  "enviadoEm": "2026-09-09T18:22:07.000Z"
+}
+```
+Ou, se o reenvio falhou de novo:
+```json
+{
+  "disparoContatoId": 42,
+  "status": "falha",
+  "erro": "Número não possui WhatsApp ativo ou não pôde ser verificado.",
+  "mensagemEnviada": null,
+  "enviadoEm": null
+}
+```
+
+#### Erros
+- `400`: `{ "error": "Parâmetro \"disparoContatoId\" deve ser um número inteiro positivo." }`
+- `400`: `{ "error": "Este contato não está com status de falha." }`
+- `404`: `{ "error": "Contato de disparo não encontrado." }`
+- `409`: `{ "error": "Este contato já está sendo reenviado por outra requisição." }`
+- `500`: `{ "error": "Erro interno ao reenviar contato de disparo." }`
+
+### Decisões de design
+
+- **Reenvio manual ignora horário comercial, deliberadamente — a única
+  exceção a essa regra em todo o módulo.** `estaDentroDoHorarioComercial()`
+  só é chamada dentro de `processarCicloEnvio()` (ciclo em massa, disparado
+  por timer ou pelo evento `disparo-criado`); `processarItem`/
+  `processarItemUnico` em si **nunca** checou horário comercial — a checagem
+  sempre viveu um nível acima, em quem decide *rodar o loop*, não em quem
+  processa um item. Como o reenvio manual chama `processarItemUnico`
+  diretamente, sem passar por `processarCicloEnvio`, a ausência dessa
+  checagem já é suficiente — nenhuma flag nova de "ignorar horário
+  comercial" foi criada. A justificativa de produto: horário comercial
+  existe para conter o volume de disparo em massa automático (mitigação de
+  risco de ban + custo de Azure SQL Serverless, ver v6); um reenvio manual é
+  uma ação humana pontual e explícita (1 clique = 1 mensagem), mesma
+  categoria de "intencional e supervisionado" que já vale para o próprio
+  clique em "Disparar" no Painel de Disparo.
+- **Sem retry automático — reenvio continua 100% manual.** Nenhum timer,
+  nenhum listener do evento `disparo-falhou` (ver abaixo) dispara reenvio
+  sozinho. O único gatilho é a chamada HTTP deste `PUT`.
+- **Por que não precisa de `cicloEmAndamento` (a trava de "nunca em
+  paralelo" do worker) no reenvio manual**: por construção, um ciclo normal
+  do worker (timer ou evento `disparo-criado`) só processa itens com
+  `status='pendente'` que já estavam na fila; o reenvio manual só age sobre
+  itens com `status='falha'`. Os dois caminhos nunca competem pela mesma
+  linha ao mesmo tempo — quando o reenvio manual flipa uma linha para
+  `'pendente'` (passo 3 do fluxo acima), ela já é processada imediatamente
+  dentro da mesma requisição, sem ficar "pendente" tempo suficiente para um
+  ciclo concorrente do worker pegá-la também. A única corrida real e
+  possível é entre duas chamadas simultâneas deste mesmo `PUT` para o MESMO
+  `disparoContatoId` (ex.: duplo clique, duas abas) — coberta pelo `UPDATE
+  ... WHERE status='falha'` condicional e atômico (passo 3), checado via
+  `rowsAffected`, não por mutex em memória.
+- **Evento `disparo-falhou`, multiplexado no MESMO stream `GET
+  /conversas/stream`** (não uma stream nova): os pontos que chamavam
+  `disparosModel.marcarContatoFalha(...)` dentro de `processarItem` passaram
+  a chamar um wrapper (`marcarFalhaEEmitir`) que grava a falha (exatamente
+  como antes) e também emite `disparosEventsService.emit('disparo-falhou',
+  { disparoContatoId, contatoNome })`. `conversas.controller.js: stream()`
+  (a mesma rota SSE já consumida pelo sino de notificações do frontend, ver
+  "Tempo real via SSE" na Central de Mensagens) importa
+  `disparosEventsService` (`../services/disparosEvents.service`, mesmo
+  singleton `EventEmitter` já usado por `envioDisparos.worker.js`/
+  `disparos.service.js`, domínio separado de `mensagensEventsService`) e
+  registra um terceiro listener, `disparosEventsService.on('disparo-falhou',
+  onDisparoFalhou)`, ao lado dos dois já existentes
+  (`mensagensEventsService.on('mensagem-recebida', ...)` /
+  `.on('mensagem-status-atualizada', ...)`) — mesmo princípio de
+  multiplexar mais de um tipo de evento num único canal SSE já documentado
+  para `status-atualizado` ao lado de `nova-mensagem`. O payload é repassado
+  como `event: disparo-falhou\ndata: {"disparoContatoId":...,"contatoNome":...}\n\n`;
+  o listener é removido no mesmo `req.on('close', ...)` que já remove os
+  outros dois (`disparosEventsService.off('disparo-falhou',
+  onDisparoFalhou)`). Um cliente que já consome `GET /conversas/stream` (o
+  sino de notificações) só precisa assinar `event: disparo-falhou` além dos
+  eventos que já trata — nenhuma rota nova, nenhuma conexão nova. O contrato
+  HTTP de `POST /disparos`/o fluxo normal do worker não mudam em nada por
+  causa desse emit — é só um push adicional pra quem já está conectado no
+  stream.
+- **`processarItem` em si não mudou de comportamento** — a única alteração
+  dentro dela foi trocar as chamadas a `disparosModel.marcarContatoFalha`
+  pelo wrapper `marcarFalhaEEmitir` (mesma gravação, mais o emit). Nenhuma
+  lógica de verificação de sessão/colaboradora/template/`onWhatsApp`/
+  `sendMessage` foi tocada.
+
+---
+
 ## Fora de escopo deste v2 (registrado, não implementar agora)
 
 - ~~Central de Mensagens (Baileys) + conexão real via QR Code (`numero` e

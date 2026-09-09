@@ -14,6 +14,8 @@ const {
   processarCicloEnvio,
   iniciarWorkerEnvioDisparos,
   pararWorkerEnvioDisparos,
+  processarItemUnico,
+  _processarItem,
   _calcularProximoTemplate,
   _montarMensagem,
   _estaDentroDoHorarioComercial,
@@ -694,6 +696,203 @@ describe('envioDisparos.worker: disparo por evento ("disparo-criado")', () => {
     disparosEventsService.emit('disparo-criado', { disparoId: 1 });
     await vi.advanceTimersByTimeAsync(0);
 
+    expect(disparosModel.listContatosPendentesParaEnvio).not.toHaveBeenCalled();
+  });
+});
+
+describe('envioDisparos.worker: marcarFalhaEEmitir — emite "disparo-falhou" para cada família de falha', () => {
+  it('emite "disparo-falhou" quando a sessão não está conectada (família: sessão)', async () => {
+    const emitSpy = vi.spyOn(disparosEventsService, 'emit');
+    const item = itemPendente({ disparoContatoId: 7, contatoNome: 'Carlos' });
+    disparosModel.marcarContatoFalha.mockResolvedValue(undefined);
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue(null); // não conectado
+
+    const resultado = await _processarItem(item);
+
+    expect(resultado).toEqual({ tentouEnviar: false });
+    expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(7, 'Número não está conectado.');
+    expect(emitSpy).toHaveBeenCalledWith('disparo-falhou', {
+      disparoContatoId: 7,
+      contatoNome: 'Carlos',
+    });
+  });
+
+  it('emite "disparo-falhou" quando o número não tem nome_colaboradora configurado (família: colaboradora)', async () => {
+    const emitSpy = vi.spyOn(disparosEventsService, 'emit');
+    const item = itemPendente({ disparoContatoId: 8, contatoNome: 'Fernanda' });
+    disparosModel.marcarContatoFalha.mockResolvedValue(undefined);
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue('conectado');
+    numerosRemetentesModel.findNomeColaboradoraById.mockResolvedValue(null);
+
+    const resultado = await _processarItem(item);
+
+    expect(resultado).toEqual({ tentouEnviar: false });
+    expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(
+      8,
+      'Número sem nome de colaboradora configurado.'
+    );
+    expect(emitSpy).toHaveBeenCalledWith('disparo-falhou', {
+      disparoContatoId: 8,
+      contatoNome: 'Fernanda',
+    });
+  });
+
+  it('emite "disparo-falhou" quando não há template ativo cadastrado (família: template)', async () => {
+    const emitSpy = vi.spyOn(disparosEventsService, 'emit');
+    const item = itemPendente({ disparoContatoId: 9, contatoNome: 'Bruno' });
+    disparosModel.marcarContatoFalha.mockResolvedValue(undefined);
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue('conectado');
+    numerosRemetentesModel.findNomeColaboradoraById.mockResolvedValue('Ana');
+    mensagensTemplatesModel.listTemplatesAtivosOrdenados.mockResolvedValue([]);
+    mensagensTemplatesModel.getUltimoTemplateUsadoId.mockResolvedValue(null);
+
+    const resultado = await _processarItem(item);
+
+    expect(resultado).toEqual({ tentouEnviar: false });
+    expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(
+      9,
+      'Nenhum template de mensagem ativo cadastrado.'
+    );
+    expect(emitSpy).toHaveBeenCalledWith('disparo-falhou', {
+      disparoContatoId: 9,
+      contatoNome: 'Bruno',
+    });
+  });
+
+  it('emite "disparo-falhou" quando sock.onWhatsApp não confirma o número (família: verificação onWhatsApp)', async () => {
+    const emitSpy = vi.spyOn(disparosEventsService, 'emit');
+    const item = itemPendente({ disparoContatoId: 11, contatoNome: 'Rita', contatoTelefone: '5511988887777' });
+    disparosModel.marcarContatoFalha.mockResolvedValue(undefined);
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue('conectado');
+    numerosRemetentesModel.findNomeColaboradoraById.mockResolvedValue('Ana');
+    mensagensTemplatesModel.listTemplatesAtivosOrdenados.mockResolvedValue([
+      { id: 1, corpo: 'Oi {nomeColaboradora}', ordem: 1 },
+    ]);
+    mensagensTemplatesModel.getUltimoTemplateUsadoId.mockResolvedValue(null);
+
+    const sendMessage = vi.fn();
+    const onWhatsApp = vi.fn().mockResolvedValue([]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    const resultado = await _processarItem(item);
+
+    expect(resultado).toEqual({ tentouEnviar: true });
+    expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(
+      11,
+      'Número não possui WhatsApp ativo ou não pôde ser verificado.'
+    );
+    expect(emitSpy).toHaveBeenCalledWith('disparo-falhou', {
+      disparoContatoId: 11,
+      contatoNome: 'Rita',
+    });
+  });
+
+  it('NÃO emite "disparo-falhou" quando o envio é bem-sucedido', async () => {
+    const emitSpy = vi.spyOn(disparosEventsService, 'emit');
+    const item = itemPendente({ disparoContatoId: 12, contatoTelefone: '5511988887777' });
+    disparosModel.marcarContatoEnviado.mockResolvedValue(undefined);
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue('conectado');
+    numerosRemetentesModel.findNomeColaboradoraById.mockResolvedValue('Ana');
+    mensagensTemplatesModel.listTemplatesAtivosOrdenados.mockResolvedValue([
+      { id: 1, corpo: 'Oi {nomeColaboradora}', ordem: 1 },
+    ]);
+    mensagensTemplatesModel.getUltimoTemplateUsadoId.mockResolvedValue(null);
+
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const onWhatsApp = vi.fn().mockResolvedValue([{ jid: '5511988887777@s.whatsapp.net', exists: true }]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    await _processarItem(item);
+
+    expect(disparosModel.marcarContatoFalha).not.toHaveBeenCalled();
+    expect(emitSpy).not.toHaveBeenCalledWith('disparo-falhou', expect.anything());
+  });
+});
+
+describe('envioDisparos.worker.processarItemUnico — export usado pelo reenvio manual (PUT /disparos/contatos/:id/reenviar)', () => {
+  it('processarItemUnico é exatamente a mesma função que _processarItem (mesma referência)', () => {
+    expect(processarItemUnico).toBe(_processarItem);
+  });
+
+  it('sessão conectada + tudo certo → processarItemUnico produz o mesmo sucesso observável que _processarItem já cobre', async () => {
+    const item = itemPendente({ disparoContatoId: 20, contatoTelefone: '5511988887777' });
+    disparosModel.marcarContatoEnviado.mockResolvedValue(undefined);
+    mensagensModel.inserirMensagemEnviada.mockResolvedValue({ id: 1 });
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue('conectado');
+    numerosRemetentesModel.findNomeColaboradoraById.mockResolvedValue('Ana');
+    mensagensTemplatesModel.listTemplatesAtivosOrdenados.mockResolvedValue([
+      { id: 1, corpo: 'Oi {nomeColaboradora}', ordem: 1 },
+    ]);
+    mensagensTemplatesModel.getUltimoTemplateUsadoId.mockResolvedValue(null);
+
+    const sendMessage = vi.fn().mockResolvedValue({ key: { id: 'ALGUM_ID' } });
+    const onWhatsApp = vi.fn().mockResolvedValue([{ jid: '5511988887777@s.whatsapp.net', exists: true }]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    const resultado = await processarItemUnico(item);
+
+    expect(resultado).toEqual({ tentouEnviar: true });
+    expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledWith({
+      disparoContatoId: 20,
+      templateUsadoId: 1,
+      mensagemEnviada: 'Oi Ana',
+      tipoMensagem: 'reativacao',
+    });
+    expect(disparosModel.marcarContatoFalha).not.toHaveBeenCalled();
+  });
+
+  it('sessão desconectada → processarItemUnico produz a mesma falha observável que _processarItem já cobre (e emite "disparo-falhou")', async () => {
+    const emitSpy = vi.spyOn(disparosEventsService, 'emit');
+    const item = itemPendente({ disparoContatoId: 21 });
+    disparosModel.marcarContatoFalha.mockResolvedValue(undefined);
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue(null);
+
+    const resultado = await processarItemUnico(item);
+
+    expect(resultado).toEqual({ tentouEnviar: false });
+    expect(disparosModel.marcarContatoFalha).toHaveBeenCalledWith(21, 'Número não está conectado.');
+    expect(disparosModel.marcarContatoEnviado).not.toHaveBeenCalled();
+    expect(emitSpy).toHaveBeenCalledWith('disparo-falhou', {
+      disparoContatoId: 21,
+      contatoNome: item.contatoNome,
+    });
+  });
+
+  it('processarItemUnico NÃO checa horário comercial: continua processando (sucesso) mesmo com o relógio fora da janela comercial/fim de semana', async () => {
+    // Sábado às 3h da manhã — bem fora de qualquer horário comercial configurado.
+    vi.setSystemTime(new Date('2026-09-05T03:00:00Z'));
+    expect(_estaDentroDoHorarioComercial()).toBe(false); // pré-condição: de fato fora da janela
+
+    const item = itemPendente({ disparoContatoId: 22, contatoTelefone: '5511988887777' });
+    disparosModel.marcarContatoEnviado.mockResolvedValue(undefined);
+    mensagensModel.inserirMensagemEnviada.mockResolvedValue({ id: 1 });
+
+    baileysSessionService.getStatusEmMemoria.mockReturnValue('conectado');
+    numerosRemetentesModel.findNomeColaboradoraById.mockResolvedValue('Ana');
+    mensagensTemplatesModel.listTemplatesAtivosOrdenados.mockResolvedValue([
+      { id: 1, corpo: 'Oi {nomeColaboradora}', ordem: 1 },
+    ]);
+    mensagensTemplatesModel.getUltimoTemplateUsadoId.mockResolvedValue(null);
+
+    const sendMessage = vi.fn().mockResolvedValue({ key: { id: 'ALGUM_ID' } });
+    const onWhatsApp = vi.fn().mockResolvedValue([{ jid: '5511988887777@s.whatsapp.net', exists: true }]);
+    baileysSessionService.obterSocketConectado.mockReturnValue({ sendMessage, onWhatsApp });
+
+    const resultado = await processarItemUnico(item);
+
+    expect(resultado).toEqual({ tentouEnviar: true });
+    expect(disparosModel.marcarContatoEnviado).toHaveBeenCalledTimes(1);
+    // Não checa horário comercial nenhuma vez que dependesse do model/sessão —
+    // a própria função nunca invoca _estaDentroDoHorarioComercial internamente,
+    // e o teste acima já prova isso indiretamente: mesmo fora da janela, o
+    // envio segue até o fim com sucesso, sem nenhum bloqueio.
     expect(disparosModel.listContatosPendentesParaEnvio).not.toHaveBeenCalled();
   });
 });

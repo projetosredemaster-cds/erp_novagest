@@ -107,6 +107,16 @@ function IconBell({ size = 20, className }) {
   );
 }
 
+function IconAlertTriangle({ size = 20, className }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
 function IconUpload({ size = 20, className }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -187,6 +197,12 @@ export default function ControleLigacoesShell() {
   const [notificacoesAberto, setNotificacoesAberto] = useState(false);
   const notificacoesRef = useRef(null);
 
+  const [falhasNaoVistas, setFalhasNaoVistas] = useState(0);
+
+  const zerarFalhasNaoVistas = useCallback(() => {
+    setFalhasNaoVistas(0);
+  }, []);
+
   const refetchNotificacoes = useCallback(() => (
     fetchNotificacoes(token)
       .then((resposta) => {
@@ -232,6 +248,10 @@ export default function ControleLigacoesShell() {
       abrirStreamConversas(token, {
         signal: controller.signal,
         onEvent: (event, data) => {
+          if (event === 'disparo-falhou') {
+            setFalhasNaoVistas((atual) => atual + 1);
+            return;
+          }
           if (event !== 'nova-mensagem' || !data || data.primeiraResposta !== true) return;
           refetchNotificacoes();
           tocarSomNotificacao();
@@ -277,7 +297,14 @@ export default function ControleLigacoesShell() {
     navigate('/controle-ligacoes/conversas');
   }
 
+  function irParaFalhasEnvio() {
+    setMobileOpen(false);
+    zerarFalhasNaoVistas();
+    navigate('/controle-ligacoes/falhas-envio');
+  }
+
   const badgeNotificacoes = notificacoesNaoVistas > 9 ? '9+' : String(notificacoesNaoVistas);
+  const badgeFalhas = falhasNaoVistas > 9 ? '9+' : String(falhasNaoVistas);
 
   return (
     <div className="painel-disparo-light-theme cl-figtree min-h-screen bg-[var(--pd-bg)] text-[var(--pd-text-primary)]">
@@ -384,6 +411,17 @@ export default function ControleLigacoesShell() {
               </span>
             ) : null}
           </div>
+          <div className="group relative">
+            <NavLink to="/controle-ligacoes/falhas-envio" onClick={() => setMobileOpen(false)} className={navItemClass(sidebarColapsada)}>
+              <IconAlertTriangle size={20} className="shrink-0" />
+              <span className={sidebarColapsada ? 'lg:hidden' : ''}>Falhas de Envio</span>
+            </NavLink>
+            {sidebarColapsada ? (
+              <span className="pointer-events-none absolute left-full top-1/2 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 lg:block z-50">
+                Falhas de Envio
+              </span>
+            ) : null}
+          </div>
         </nav>
 
         <div className="mt-auto flex flex-col gap-1">
@@ -445,71 +483,92 @@ export default function ControleLigacoesShell() {
       </aside>
 
       {}
-      <div className="fixed right-4 top-4 z-50 sm:right-6 sm:top-5" ref={notificacoesRef}>
+      <div className="fixed right-4 top-4 z-50 flex items-center gap-2 sm:right-6 sm:top-5">
+        {}
         <button
           type="button"
-          onClick={toggleNotificacoes}
+          onClick={irParaFalhasEnvio}
           aria-label={
-            notificacoesNaoVistas > 0
-              ? `Notificações: ${notificacoesNaoVistas} conversa(s) não vista(s)`
-              : 'Notificações'
+            falhasNaoVistas > 0
+              ? `Falhas de envio: ${falhasNaoVistas} não vista(s)`
+              : 'Falhas de envio'
           }
-          aria-expanded={notificacoesAberto}
-          aria-haspopup="true"
           className="relative flex h-11 w-11 items-center justify-center rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] text-lg text-[var(--pd-text-secondary)] shadow-lg transition-colors hover:bg-[var(--pd-surface-alt)] hover:text-[var(--pd-text-primary)]"
         >
-          <IconBell size={20} />
-          {notificacoesNaoVistas > 0 ? (
-            <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[var(--danger)] px-1 text-[10px] font-bold leading-none text-white">
-              {badgeNotificacoes}
+          <IconAlertTriangle size={20} />
+          {falhasNaoVistas > 0 ? (
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[var(--warning)] px-1 text-[10px] font-bold leading-none text-white">
+              {badgeFalhas}
             </span>
           ) : null}
         </button>
 
-        {notificacoesAberto ? (
-          <div className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--pd-border)] bg-[var(--pd-surface-alt)] p-1 shadow-lg">
-            {notificacoesItens === null ? (
-              <div className="px-3 py-4 text-center text-[12.5px] text-[var(--pd-text-secondary)]">
-                Carregando...
+        <div className="relative" ref={notificacoesRef}>
+          <button
+            type="button"
+            onClick={toggleNotificacoes}
+            aria-label={
+              notificacoesNaoVistas > 0
+                ? `Notificações: ${notificacoesNaoVistas} conversa(s) não vista(s)`
+                : 'Notificações'
+            }
+            aria-expanded={notificacoesAberto}
+            aria-haspopup="true"
+            className="relative flex h-11 w-11 items-center justify-center rounded-lg border border-[var(--pd-border)] bg-[var(--pd-card-bg)] text-lg text-[var(--pd-text-secondary)] shadow-lg transition-colors hover:bg-[var(--pd-surface-alt)] hover:text-[var(--pd-text-primary)]"
+          >
+            <IconBell size={20} />
+            {notificacoesNaoVistas > 0 ? (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[var(--danger)] px-1 text-[10px] font-bold leading-none text-white">
+                {badgeNotificacoes}
+              </span>
+            ) : null}
+          </button>
+
+          {notificacoesAberto ? (
+            <div className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--pd-border)] bg-[var(--pd-surface-alt)] p-1 shadow-lg">
+              {notificacoesItens === null ? (
+                <div className="px-3 py-4 text-center text-[12.5px] text-[var(--pd-text-secondary)]">
+                  Carregando...
+                </div>
+              ) : notificacoesItens.length === 0 ? (
+                <div className="px-3 py-4 text-center text-[12.5px] text-[var(--pd-text-secondary)]">
+                  Nenhuma notificação.
+                </div>
+              ) : (
+                <ul className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
+                  {notificacoesItens.map((item) => (
+                    <li key={item.contatoId}>
+                      <button
+                        type="button"
+                        onClick={() => selecionarNotificacao(item)}
+                        className="flex w-full flex-col items-start gap-0.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--pd-card-bg)]"
+                      >
+                        <div className="flex w-full items-center justify-between gap-2">
+                          <span className="truncate text-[13px] font-semibold text-[var(--pd-text-primary)]">{item.nomeContato}</span>
+                          <span className="shrink-0 text-[10.5px] text-[var(--pd-text-secondary)]">{formatRelativoNotificacao(item.criado_em)}</span>
+                        </div>
+                        <span className="w-full truncate text-[12px] text-[var(--pd-text-secondary)]">{item.preview}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="border-t border-[var(--pd-border)] p-1">
+                <button
+                  type="button"
+                  onClick={verTodasAsConversas}
+                  className="block w-full rounded-md px-3 py-2 text-center text-[12px] font-semibold text-[var(--pd-accent)] transition-colors hover:bg-[var(--pd-card-bg)]"
+                >
+                  Ver todas as conversas
+                </button>
               </div>
-            ) : notificacoesItens.length === 0 ? (
-              <div className="px-3 py-4 text-center text-[12.5px] text-[var(--pd-text-secondary)]">
-                Nenhuma notificação.
-              </div>
-            ) : (
-              <ul className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
-                {notificacoesItens.map((item) => (
-                  <li key={item.contatoId}>
-                    <button
-                      type="button"
-                      onClick={() => selecionarNotificacao(item)}
-                      className="flex w-full flex-col items-start gap-0.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--pd-card-bg)]"
-                    >
-                      <div className="flex w-full items-center justify-between gap-2">
-                        <span className="truncate text-[13px] font-semibold text-[var(--pd-text-primary)]">{item.nomeContato}</span>
-                        <span className="shrink-0 text-[10.5px] text-[var(--pd-text-secondary)]">{formatRelativoNotificacao(item.criado_em)}</span>
-                      </div>
-                      <span className="w-full truncate text-[12px] text-[var(--pd-text-secondary)]">{item.preview}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="border-t border-[var(--pd-border)] p-1">
-              <button
-                type="button"
-                onClick={verTodasAsConversas}
-                className="block w-full rounded-md px-3 py-2 text-center text-[12px] font-semibold text-[var(--pd-accent)] transition-colors hover:bg-[var(--pd-card-bg)]"
-              >
-                Ver todas as conversas
-              </button>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
 
       <main className={`min-h-screen ${sidebarColapsada ? 'lg:ml-16' : 'lg:ml-56'}`}>
-        <Outlet context={{ refetchNotificacoes }} />
+        <Outlet context={{ refetchNotificacoes, zerarFalhasNaoVistas }} />
       </main>
     </div>
   );

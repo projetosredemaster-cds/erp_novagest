@@ -228,6 +228,48 @@ async function criar(req, res) {
   }
 }
 
+async function listarFalhas(req, res) {
+  try {
+    const falhas = await disparosService.listarFalhas();
+    return res.json(falhas);
+  } catch (err) {
+    console.error('[disparos.controller] Erro ao listar falhas de disparo:', err);
+    return res.status(500).json({ error: 'Erro interno ao listar falhas de disparo.' });
+  }
+}
+
+async function reenviar(req, res) {
+  const disparoContatoIdNum = Number(req.params.disparoContatoId);
+  if (!isPositiveInteger(disparoContatoIdNum)) {
+    return res
+      .status(400)
+      .json({ error: 'Parâmetro "disparoContatoId" deve ser um número inteiro positivo.' });
+  }
+
+  try {
+    const resultado = await disparosService.reenviarContatoFalha(disparoContatoIdNum);
+
+    if (resultado.status === 'nao_encontrado') {
+      return res.status(404).json({ error: 'Contato de disparo não encontrado.' });
+    }
+
+    if (resultado.status === 'nao_falha') {
+      return res.status(400).json({ error: 'Este contato não está com status de falha.' });
+    }
+
+    if (resultado.status === 'conflito') {
+      return res
+        .status(409)
+        .json({ error: 'Este contato já está sendo reenviado por outra requisição.' });
+    }
+
+    return res.status(200).json(resultado.contato);
+  } catch (err) {
+    console.error('[disparos.controller] Erro ao reenviar contato de disparo:', err);
+    return res.status(500).json({ error: 'Erro interno ao reenviar contato de disparo.' });
+  }
+}
+
 async function detalhe(req, res) {
   const idNum = Number(req.params.id);
   if (!isPositiveInteger(idNum)) {
@@ -254,4 +296,6 @@ module.exports = {
   verificar,
   criar,
   detalhe,
+  listarFalhas,
+  reenviar,
 };

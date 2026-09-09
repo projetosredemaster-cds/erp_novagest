@@ -2,6 +2,7 @@
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const disparosModel = require('../models/disparos.model');
+const disparosService = require('../services/disparos.service');
 const app = require('../app');
 
 function tokenFor({ role = 'operador_cobranca', id = 1 } = {}) {
@@ -771,5 +772,228 @@ describe('GET /api/controle-ligacoes/disparos/:id', () => {
 
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'Erro interno ao buscar detalhe do disparo.' });
+  });
+});
+
+describe('GET /api/controle-ligacoes/disparos/falhas', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).get('/api/controle-ligacoes/disparos/falhas');
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário não é operador_cobranca', async () => {
+    const res = await request(app)
+      .get('/api/controle-ligacoes/disparos/falhas')
+      .set('Authorization', `Bearer ${tokenFor({ role: 'admin' })}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('200 — lista as falhas no shape documentado, com tentadoEm sempre null', async () => {
+    disparosModel.listContatosFalha.mockResolvedValue([
+      {
+        disparoContatoId: 42,
+        disparoId: 15,
+        nome: 'Maria Silva',
+        telefone: '5598900000000',
+        estado: { id: 6, nome: 'Maranhão', uf: 'MA' },
+        numeroRemetente: { id: 3, apelido: 'CDC Cohatrac' },
+        erro: 'Número não possui WhatsApp ativo ou não pôde ser verificado.',
+        tentadoEm: null,
+        criadoEm: '2026-09-08T14:03:11.000Z',
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/disparos/falhas')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      {
+        disparoContatoId: 42,
+        disparoId: 15,
+        nome: 'Maria Silva',
+        telefone: '5598900000000',
+        estado: { id: 6, nome: 'Maranhão', uf: 'MA' },
+        numeroRemetente: { id: 3, apelido: 'CDC Cohatrac' },
+        erro: 'Número não possui WhatsApp ativo ou não pôde ser verificado.',
+        tentadoEm: null,
+        criadoEm: '2026-09-08T14:03:11.000Z',
+      },
+    ]);
+  });
+
+  it('200 — array vazio quando não há falhas', async () => {
+    disparosModel.listContatosFalha.mockResolvedValue([]);
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/disparos/falhas')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('500 quando o service lança erro', async () => {
+    disparosModel.listContatosFalha.mockRejectedValue(new Error('boom'));
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/disparos/falhas')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao listar falhas de disparo.' });
+  });
+});
+
+describe('PUT /api/controle-ligacoes/disparos/contatos/:disparoContatoId/reenviar', () => {
+  it('401 sem token', async () => {
+    const res = await request(app).put('/api/controle-ligacoes/disparos/contatos/42/reenviar');
+    expect(res.status).toBe(401);
+  });
+
+  it('403 quando o usuário não é operador_cobranca', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/42/reenviar')
+      .set('Authorization', `Bearer ${tokenFor({ role: 'admin' })}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('400 quando ":disparoContatoId" não é um inteiro positivo', async () => {
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/abc/reenviar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'Parâmetro "disparoContatoId" deve ser um número inteiro positivo.',
+    });
+  });
+
+  it('400 quando ":disparoContatoId" é zero ou negativo (não chega a chamar o service)', async () => {
+    for (const valorInvalido of ['0', '-1']) {
+      const res = await request(app)
+        .put(`/api/controle-ligacoes/disparos/contatos/${valorInvalido}/reenviar`)
+        .set('Authorization', `Bearer ${tokenFor()}`);
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: 'Parâmetro "disparoContatoId" deve ser um número inteiro positivo.',
+      });
+    }
+  });
+
+  it('404 quando o disparoContatoId não existe', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue(null);
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/999/reenviar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Contato de disparo não encontrado.' });
+    expect(disparosModel.reativarContatoParaReenvio).not.toHaveBeenCalled();
+  });
+
+  it('400 quando o disparoContatoId existe mas não está com status "falha"', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'enviado' });
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/42/reenviar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Este contato não está com status de falha.' });
+    expect(disparosModel.reativarContatoParaReenvio).not.toHaveBeenCalled();
+  });
+
+  it('409 quando perde a corrida do UPDATE condicional para outra requisição simultânea', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'falha' });
+    disparosModel.reativarContatoParaReenvio.mockResolvedValue(false);
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/42/reenviar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: 'Este contato já está sendo reenviado por outra requisição.',
+    });
+    expect(disparosModel.findItemParaProcessarPorId).not.toHaveBeenCalled();
+  });
+
+  // As duas próximas mockam disparosService.reenviarContatoFalha diretamente
+  // (em vez de encadear mocks de disparosModel) porque, diferente das outras
+  // rotas deste arquivo, o service desta rota não é um passthrough fino —
+  // no caminho "ok" ele chama de verdade envioDisparosWorker.processarItemUnico
+  // (ver disparos.service.test.js para a cobertura de unidade desse caminho,
+  // com o worker mockado). Mockar só o model aqui acionaria o worker REAL
+  // (que checaria baileysSessionService de verdade, não mockado neste arquivo)
+  // só para testar o mapeamento de status HTTP do controller, que é o que
+  // este teste realmente quer validar.
+  it('200 — reenvio bem-sucedido devolve o resultado real (status "enviado")', async () => {
+    vi.spyOn(disparosService, 'reenviarContatoFalha').mockResolvedValue({
+      status: 'ok',
+      contato: {
+        disparoContatoId: 42,
+        status: 'enviado',
+        erro: null,
+        mensagemEnviada: 'Boa tarde, Maria!',
+        enviadoEm: '2026-09-09T18:22:07.000Z',
+      },
+    });
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/42/reenviar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      disparoContatoId: 42,
+      status: 'enviado',
+      erro: null,
+      mensagemEnviada: 'Boa tarde, Maria!',
+      enviadoEm: '2026-09-09T18:22:07.000Z',
+    });
+    expect(disparosService.reenviarContatoFalha).toHaveBeenCalledWith(42);
+  });
+
+  it('200 — reenvio que falha de novo ainda devolve 200 com o resultado real (não é erro HTTP)', async () => {
+    vi.spyOn(disparosService, 'reenviarContatoFalha').mockResolvedValue({
+      status: 'ok',
+      contato: {
+        disparoContatoId: 42,
+        status: 'falha',
+        erro: 'Número não possui WhatsApp ativo ou não pôde ser verificado.',
+        mensagemEnviada: null,
+        enviadoEm: null,
+      },
+    });
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/42/reenviar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      disparoContatoId: 42,
+      status: 'falha',
+      erro: 'Número não possui WhatsApp ativo ou não pôde ser verificado.',
+      mensagemEnviada: null,
+      enviadoEm: null,
+    });
+  });
+
+  it('500 quando o service lança erro', async () => {
+    disparosModel.findDisparoContatoById.mockRejectedValue(new Error('boom'));
+
+    const res = await request(app)
+      .put('/api/controle-ligacoes/disparos/contatos/42/reenviar')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Erro interno ao reenviar contato de disparo.' });
   });
 });

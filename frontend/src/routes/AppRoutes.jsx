@@ -12,6 +12,7 @@ import NumerosRemetentesPage from '../modulos/controle-ligacoes/configuracoes/Nu
 import RespostasRapidasPage from '../modulos/controle-ligacoes/configuracoes/RespostasRapidasPage.jsx';
 import ImportacaoPage from '../modulos/controle-ligacoes/importacao/ImportacaoPage.jsx';
 import PainelDisparoPage from '../modulos/controle-ligacoes/painel-disparo/PainelDisparoPage.jsx';
+import FalhasEnvioPage from '../modulos/controle-ligacoes/falhas-envio/FalhasEnvioPage.jsx';
 import ConversasPage from '../modulos/controle-ligacoes/conversas/ConversasPage.jsx';
 import PipelinePage from '../modulos/controle-ligacoes/pipeline/PipelinePage.jsx';
 import UsuariosPage from '../modulos/admin/UsuariosPage.jsx';
@@ -64,6 +65,7 @@ export default function AppRoutes() {
           <Route path="conversas" element={<ConversasPage />} />
           <Route path="pipeline" element={<PipelinePage />} />
           <Route path="painel-disparo" element={<PainelDisparoPage />} />
+          <Route path="falhas-envio" element={<FalhasEnvioPage />} />
           <Route element={<RequireAdmin />}>
             <Route path="usuarios" element={<UsuariosPage />} />
           </Route>

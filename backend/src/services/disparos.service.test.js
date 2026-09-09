@@ -1,5 +1,6 @@
 const disparosModel = require('../models/disparos.model');
 const disparosEventsService = require('./disparosEvents.service');
+const envioDisparosWorker = require('../workers/envioDisparos.worker');
 const disparosService = require('./disparos.service');
 
 beforeEach(() => {
@@ -16,6 +17,18 @@ beforeEach(() => {
   }
 
   vi.spyOn(disparosEventsService, 'emit').mockImplementation(() => {});
+
+  // envioDisparosWorker.processarItemUnico é mockado por padrão para lançar,
+  // igual ao guarda de disparosModel acima — nenhum teste deste arquivo deve
+  // acionar o worker de verdade (nem, por consequência, baileysSessionService
+  // real) sem um mock explícito. Os testes de reenviarContatoFalha que
+  // exercitam o caminho de sucesso sobrescrevem isso.
+  vi.spyOn(envioDisparosWorker, 'processarItemUnico').mockImplementation(() => {
+    throw new Error(
+      '[guarda de teste] envioDisparosWorker.processarItemUnico foi chamado sem mock explícito — ' +
+      'isso teria acionado o worker real (baileysSessionService/models reais).'
+    );
+  });
 });
 
 describe('disparos.service.listarPainelDisparo', () => {
@@ -373,5 +386,190 @@ describe('disparos.service.detalharDisparo', () => {
     const resultado = await disparosService.detalharDisparo(999);
 
     expect(resultado).toBeNull();
+  });
+});
+
+describe('disparos.service.listarFalhas', () => {
+  it('delega direto para o model e propaga o shape sem transformação', async () => {
+    const falhas = [
+      {
+        disparoContatoId: 42,
+        disparoId: 15,
+        nome: 'Maria Silva',
+        telefone: '5598900000000',
+        estado: { id: 6, nome: 'Maranhão', uf: 'MA' },
+        numeroRemetente: { id: 3, apelido: 'CDC Cohatrac' },
+        erro: 'Número não possui WhatsApp ativo ou não pôde ser verificado.',
+        tentadoEm: null,
+        criadoEm: '2026-09-08T14:03:11.000Z',
+      },
+    ];
+    disparosModel.listContatosFalha.mockResolvedValue(falhas);
+
+    const resultado = await disparosService.listarFalhas();
+
+    expect(disparosModel.listContatosFalha).toHaveBeenCalledWith();
+    expect(resultado).toEqual(falhas);
+  });
+
+  it('propaga array vazio quando não há falhas', async () => {
+    disparosModel.listContatosFalha.mockResolvedValue([]);
+
+    const resultado = await disparosService.listarFalhas();
+
+    expect(resultado).toEqual([]);
+  });
+});
+
+describe('disparos.service.reenviarContatoFalha', () => {
+  it('retorna "nao_encontrado" quando o disparoContatoId não existe, sem tentar reativar/processar', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue(null);
+
+    const resultado = await disparosService.reenviarContatoFalha(999);
+
+    expect(resultado).toEqual({ status: 'nao_encontrado' });
+    expect(disparosModel.reativarContatoParaReenvio).not.toHaveBeenCalled();
+    expect(disparosModel.findItemParaProcessarPorId).not.toHaveBeenCalled();
+    expect(envioDisparosWorker.processarItemUnico).not.toHaveBeenCalled();
+  });
+
+  it('retorna "nao_falha" quando o item existe mas não está com status "falha", sem tentar reativar/processar', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'enviado' });
+
+    const resultado = await disparosService.reenviarContatoFalha(42);
+
+    expect(resultado).toEqual({ status: 'nao_falha' });
+    expect(disparosModel.reativarContatoParaReenvio).not.toHaveBeenCalled();
+    expect(envioDisparosWorker.processarItemUnico).not.toHaveBeenCalled();
+  });
+
+  it('retorna "conflito" quando o UPDATE condicional não afeta nenhuma linha (corrida perdida para outra requisição)', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'falha' });
+    disparosModel.reativarContatoParaReenvio.mockResolvedValue(false);
+
+    const resultado = await disparosService.reenviarContatoFalha(42);
+
+    expect(resultado).toEqual({ status: 'conflito' });
+    expect(disparosModel.reativarContatoParaReenvio).toHaveBeenCalledWith(42);
+    expect(disparosModel.findItemParaProcessarPorId).not.toHaveBeenCalled();
+    expect(envioDisparosWorker.processarItemUnico).not.toHaveBeenCalled();
+  });
+
+  it('retorna "nao_encontrado" (caminho de completude) se a releitura pós-UPDATE não encontrar mais o item', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'falha' });
+    disparosModel.reativarContatoParaReenvio.mockResolvedValue(true);
+    disparosModel.findItemParaProcessarPorId.mockResolvedValue(null);
+
+    const resultado = await disparosService.reenviarContatoFalha(42);
+
+    expect(resultado).toEqual({ status: 'nao_encontrado' });
+    expect(envioDisparosWorker.processarItemUnico).not.toHaveBeenCalled();
+  });
+
+  it('caminho de sucesso: reativa, processa via envioDisparosWorker.processarItemUnico e devolve o resultado relido', async () => {
+    const item = {
+      disparoContatoId: 42,
+      disparoId: 15,
+      numeroRemetenteId: 3,
+      contatoId: 100,
+      contatoNome: 'Maria Silva',
+      contatoTelefone: '5598900000000',
+      tipoMensagem: 'reativacao',
+      diaSemana: null,
+      horaAgendamento: null,
+    };
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'falha' });
+    disparosModel.reativarContatoParaReenvio.mockResolvedValue(true);
+    disparosModel.findItemParaProcessarPorId.mockResolvedValue(item);
+    envioDisparosWorker.processarItemUnico.mockResolvedValue({ tentouEnviar: true });
+    disparosModel.findResultadoReenvio.mockResolvedValue({
+      disparoContatoId: 42,
+      status: 'enviado',
+      erro: null,
+      mensagemEnviada: 'Boa tarde, Maria!',
+      enviadoEm: '2026-09-09T18:22:07.000Z',
+    });
+
+    const resultado = await disparosService.reenviarContatoFalha(42);
+
+    expect(disparosModel.reativarContatoParaReenvio).toHaveBeenCalledWith(42);
+    expect(disparosModel.findItemParaProcessarPorId).toHaveBeenCalledWith(42);
+    expect(envioDisparosWorker.processarItemUnico).toHaveBeenCalledWith(item);
+    expect(disparosModel.findResultadoReenvio).toHaveBeenCalledWith(42);
+    expect(resultado).toEqual({
+      status: 'ok',
+      contato: {
+        disparoContatoId: 42,
+        status: 'enviado',
+        erro: null,
+        mensagemEnviada: 'Boa tarde, Maria!',
+        enviadoEm: '2026-09-09T18:22:07.000Z',
+      },
+    });
+  });
+
+  it('caminho de sucesso: o resultado devolvido pode ser um reenvio que falhou de novo (status "falha"), e ainda assim é status "ok" no envelope do service', async () => {
+    disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'falha' });
+    disparosModel.reativarContatoParaReenvio.mockResolvedValue(true);
+    disparosModel.findItemParaProcessarPorId.mockResolvedValue({ disparoContatoId: 42 });
+    envioDisparosWorker.processarItemUnico.mockResolvedValue({ tentouEnviar: false });
+    disparosModel.findResultadoReenvio.mockResolvedValue({
+      disparoContatoId: 42,
+      status: 'falha',
+      erro: 'Número não está conectado.',
+      mensagemEnviada: null,
+      enviadoEm: null,
+    });
+
+    const resultado = await disparosService.reenviarContatoFalha(42);
+
+    expect(resultado).toEqual({
+      status: 'ok',
+      contato: {
+        disparoContatoId: 42,
+        status: 'falha',
+        erro: 'Número não está conectado.',
+        mensagemEnviada: null,
+        enviadoEm: null,
+      },
+    });
+  });
+
+  // Teste-chave do pedido original: prova que o reenvio manual NUNCA checa
+  // horário comercial, mesmo fora da janela (estaDentroDoHorarioComercial só
+  // existe dentro de processarCicloEnvio, que este caminho nunca chama — ver
+  // decisão de design documentada em disparos.service.js e no contrato v12).
+  // Se algum dia alguém adicionar essa checagem em reenviarContatoFalha por
+  // engano, este teste tem que quebrar.
+  it.each([
+    // Domingo às 3h da manhã (fim de semana E fora do horário comercial)
+    ['domingo de madrugada', new Date('2026-09-06T03:00:00Z')],
+    // Terça-feira às 3h da manhã (dia útil, mas fora do horário comercial)
+    ['dia útil de madrugada', new Date('2026-09-01T03:00:00Z')],
+  ])('ignora horário comercial — processarItemUnico é chamado mesmo às 3h da manhã (%s)', async (_descricao, agora) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(agora);
+    try {
+      const item = { disparoContatoId: 42, numeroRemetenteId: 3 };
+      disparosModel.findDisparoContatoById.mockResolvedValue({ id: 42, status: 'falha' });
+      disparosModel.reativarContatoParaReenvio.mockResolvedValue(true);
+      disparosModel.findItemParaProcessarPorId.mockResolvedValue(item);
+      envioDisparosWorker.processarItemUnico.mockResolvedValue({ tentouEnviar: true });
+      disparosModel.findResultadoReenvio.mockResolvedValue({
+        disparoContatoId: 42,
+        status: 'enviado',
+        erro: null,
+        mensagemEnviada: 'Boa tarde, Maria!',
+        enviadoEm: agora.toISOString(),
+      });
+
+      const resultado = await disparosService.reenviarContatoFalha(42);
+
+      expect(envioDisparosWorker.processarItemUnico).toHaveBeenCalledTimes(1);
+      expect(envioDisparosWorker.processarItemUnico).toHaveBeenCalledWith(item);
+      expect(resultado.status).toBe('ok');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

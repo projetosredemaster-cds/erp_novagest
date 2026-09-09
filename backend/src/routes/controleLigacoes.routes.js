@@ -45,7 +45,11 @@ router.get('/painel-disparo', disparosController.painelDisparo);
 router.get('/estados/:estadoId/contatos-disponiveis', disparosController.contatosDisponiveis);
 router.post('/disparos/verificar', disparosController.verificar);
 router.post('/disparos', disparosController.criar);
+// Precisa vir ANTES de GET /disparos/:id — senão o Express interpreta
+// "falhas" como o parâmetro :id daquela rota e esta nunca é alcançada.
+router.get('/disparos/falhas', disparosController.listarFalhas);
 router.get('/disparos/:id', disparosController.detalhe);
+router.put('/disparos/contatos/:disparoContatoId/reenviar', disparosController.reenviar);
 
 router.get('/conversas', conversasController.listar);
 router.get('/conversas/stream', conversasController.stream);

@@ -79,6 +79,18 @@ function calcularProximoTemplate(templatesAtivos, ultimoTemplateUsadoId) {
   return templatesAtivos[proximoIndice];
 }
 
+// Wrapper em volta de disparosModel.marcarContatoFalha: grava a falha (igual
+// antes) e emite 'disparo-falhou' em disparosEventsService — hoje sem
+// nenhum listener assinando esse evento (a rota GET /disparos/falhas é REST
+// simples, lê o banco sob demanda, não consome este emit). É só
+// instrumentação disponível para uma evolução futura (ex.: notificar o
+// frontend em tempo real via SSE, mesmo padrão de 'disparo-criado') sem
+// precisar mudar processarItem de novo.
+async function marcarFalhaEEmitir(disparoContatoId, erro, contatoNome) {
+  await disparosModel.marcarContatoFalha(disparoContatoId, erro);
+  disparosEventsService.emit('disparo-falhou', { disparoContatoId, contatoNome });
+}
+
 async function processarItem(item) {
   const {
     disparoContatoId,
@@ -98,7 +110,7 @@ async function processarItem(item) {
   if (statusSessao !== 'conectado') {
     const erro = 'Número não está conectado.';
     console.warn(`${logPrefix}: falha — ${erro}`);
-    await disparosModel.marcarContatoFalha(disparoContatoId, erro);
+    await marcarFalhaEEmitir(disparoContatoId, erro, contatoNome);
     return { tentouEnviar: false };
   }
 
@@ -106,7 +118,7 @@ async function processarItem(item) {
   if (!nomeColaboradora) {
     const erro = 'Número sem nome de colaboradora configurado.';
     console.warn(`${logPrefix}: falha — ${erro}`);
-    await disparosModel.marcarContatoFalha(disparoContatoId, erro);
+    await marcarFalhaEEmitir(disparoContatoId, erro, contatoNome);
     return { tentouEnviar: false };
   }
 
@@ -119,7 +131,7 @@ async function processarItem(item) {
   if (!proximoTemplate) {
     const erro = 'Nenhum template de mensagem ativo cadastrado.';
     console.warn(`${logPrefix}: falha — ${erro}`);
-    await disparosModel.marcarContatoFalha(disparoContatoId, erro);
+    await marcarFalhaEEmitir(disparoContatoId, erro, contatoNome);
     return { tentouEnviar: false };
   }
 
@@ -133,7 +145,7 @@ async function processarItem(item) {
   if (!sock) {
     const erro = 'Número não está conectado.';
     console.warn(`${logPrefix}: falha — ${erro} (sessão caiu antes do envio)`);
-    await disparosModel.marcarContatoFalha(disparoContatoId, erro);
+    await marcarFalhaEEmitir(disparoContatoId, erro, contatoNome);
     return { tentouEnviar: false };
   }
 
@@ -143,7 +155,7 @@ async function processarItem(item) {
   } catch (err) {
     const erro = err?.message || 'Falha ao verificar número no WhatsApp.';
     console.error(`${logPrefix}: falha ao verificar número no WhatsApp — ${erro}`, err);
-    await disparosModel.marcarContatoFalha(disparoContatoId, erro);
+    await marcarFalhaEEmitir(disparoContatoId, erro, contatoNome);
     return { tentouEnviar: true };
   }
 
@@ -153,7 +165,7 @@ async function processarItem(item) {
   if (!entradaEncontrada) {
     const erro = 'Número não possui WhatsApp ativo ou não pôde ser verificado.';
     console.warn(`${logPrefix}: falha — número sem WhatsApp ativo (onWhatsApp não retornou correspondência).`);
-    await disparosModel.marcarContatoFalha(disparoContatoId, erro);
+    await marcarFalhaEEmitir(disparoContatoId, erro, contatoNome);
     return { tentouEnviar: true };
   }
 
@@ -165,7 +177,7 @@ async function processarItem(item) {
   } catch (err) {
     const erro = err?.message || 'Falha ao enviar mensagem via WhatsApp.';
     console.error(`${logPrefix}: falha ao enviar — ${erro}`, err);
-    await disparosModel.marcarContatoFalha(disparoContatoId, erro);
+    await marcarFalhaEEmitir(disparoContatoId, erro, contatoNome);
     return { tentouEnviar: true };
   }
   await disparosModel.marcarContatoEnviado({
@@ -278,6 +290,11 @@ module.exports = {
   iniciarWorkerEnvioDisparos,
   pararWorkerEnvioDisparos,
   processarCicloEnvio,
+  // Ponto de reuso pra produção: reenvio manual (PUT /disparos/contatos/:id/reenviar,
+  // ver disparos.service.js) chama isso diretamente. Nunca passa por
+  // processarCicloEnvio, então NUNCA checa estaDentroDoHorarioComercial() —
+  // decisão de design deliberada, ver CLAUDE.md/contrato v12.
+  processarItemUnico: processarItem,
   _processarItem: processarItem,
   _calcularProximoTemplate: calcularProximoTemplate,
   _montarMensagem: montarMensagem,

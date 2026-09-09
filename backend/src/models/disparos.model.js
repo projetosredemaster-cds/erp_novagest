@@ -207,13 +207,10 @@ async function criarDisparo({
   }
 }
 
-async function listContatosPendentesParaEnvio(loteTamanho) {
-  const pool = await getPool();
-  const result = await pool
-    .request()
-    .input('loteTamanho', sql.Int, loteTamanho)
-    .query(`
-      SELECT TOP (@loteTamanho)
+// Colunas/mapeamento compartilhados entre listContatosPendentesParaEnvio (ciclo
+// normal do worker) e findItemParaProcessarPorId (reenvio manual pontual) — as
+// duas produzem exatamente o mesmo shape de "item", o que processarItem espera.
+const SELECT_ITEM_DISPARO = `
         dc.id AS disparo_contato_id,
         dc.disparo_id,
         d.numero_remetente_id,
@@ -223,14 +220,10 @@ async function listContatosPendentesParaEnvio(loteTamanho) {
         c.id AS contato_id,
         c.nome AS contato_nome,
         c.telefone AS contato_telefone
-      FROM DisparoContatos dc
-      JOIN Disparos d ON d.id = dc.disparo_id
-      JOIN Contatos c ON c.id = dc.contato_id
-      WHERE dc.status = 'pendente'
-      ORDER BY dc.id ASC
-    `);
+`;
 
-  return result.recordset.map((row) => ({
+function mapItemDisparoRow(row) {
+  return {
     disparoContatoId: row.disparo_contato_id,
     disparoId: row.disparo_id,
     numeroRemetenteId: row.numero_remetente_id,
@@ -240,7 +233,48 @@ async function listContatosPendentesParaEnvio(loteTamanho) {
     contatoId: row.contato_id,
     contatoNome: row.contato_nome,
     contatoTelefone: row.contato_telefone,
-  }));
+  };
+}
+
+async function listContatosPendentesParaEnvio(loteTamanho) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('loteTamanho', sql.Int, loteTamanho)
+    .query(`
+      SELECT TOP (@loteTamanho)
+        ${SELECT_ITEM_DISPARO}
+      FROM DisparoContatos dc
+      JOIN Disparos d ON d.id = dc.disparo_id
+      JOIN Contatos c ON c.id = dc.contato_id
+      WHERE dc.status = 'pendente'
+      ORDER BY dc.id ASC
+    `);
+
+  return result.recordset.map(mapItemDisparoRow);
+}
+
+// Usado pelo reenvio manual (PUT /disparos/contatos/:disparoContatoId/reenviar):
+// busca o mesmo shape de item de listContatosPendentesParaEnvio, mas para UM
+// disparoContatoId específico, independente do status atual da linha (o
+// chamador já garantiu, via reativarContatoParaReenvio, que ela virou 'pendente'
+// antes de chegar aqui).
+async function findItemParaProcessarPorId(disparoContatoId) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.Int, disparoContatoId)
+    .query(`
+      SELECT
+        ${SELECT_ITEM_DISPARO}
+      FROM DisparoContatos dc
+      JOIN Disparos d ON d.id = dc.disparo_id
+      JOIN Contatos c ON c.id = dc.contato_id
+      WHERE dc.id = @id
+    `);
+
+  const row = result.recordset[0];
+  return row ? mapItemDisparoRow(row) : null;
 }
 
 async function marcarContatoFalha(disparoContatoId, erro) {
@@ -254,6 +288,97 @@ async function marcarContatoFalha(disparoContatoId, erro) {
       SET status = 'falha', erro = @erro
       WHERE id = @id
     `);
+}
+
+// Lista TODO DisparoContatos com status='falha', para a rota
+// GET /disparos/falhas — ver contrato v12. Ordenado por dc.id DESC (não por
+// enviado_em, que fica sempre NULL numa falha).
+async function listContatosFalha() {
+  const pool = await getPool();
+  const result = await pool.request().query(`
+    SELECT
+      dc.id AS disparo_contato_id,
+      dc.disparo_id,
+      dc.erro,
+      c.nome AS contato_nome,
+      c.telefone AS contato_telefone,
+      e.id AS estado_id,
+      e.nome AS estado_nome,
+      e.uf AS estado_uf,
+      n.id AS numero_id,
+      n.apelido AS numero_apelido,
+      d.criado_em AS disparo_criado_em
+    FROM DisparoContatos dc
+    JOIN Disparos d ON d.id = dc.disparo_id
+    JOIN Contatos c ON c.id = dc.contato_id
+    JOIN Estados e ON e.id = d.estado_id
+    JOIN NumerosRemetentes n ON n.id = d.numero_remetente_id
+    WHERE dc.status = 'falha'
+    ORDER BY dc.id DESC
+  `);
+
+  return result.recordset.map((row) => ({
+    disparoContatoId: row.disparo_contato_id,
+    disparoId: row.disparo_id,
+    nome: row.contato_nome,
+    telefone: row.contato_telefone,
+    estado: { id: row.estado_id, nome: row.estado_nome, uf: row.estado_uf },
+    numeroRemetente: { id: row.numero_id, apelido: row.numero_apelido },
+    erro: row.erro,
+    tentadoEm: null,
+    criadoEm: row.disparo_criado_em,
+  }));
+}
+
+// Busca só id/status de um DisparoContatos específico — usado pela validação
+// do reenvio manual (existe? já está em 'falha'?) antes do UPDATE condicional.
+async function findDisparoContatoById(disparoContatoId) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.Int, disparoContatoId)
+    .query('SELECT id, status FROM DisparoContatos WHERE id = @id');
+  return result.recordset[0] || null;
+}
+
+// UPDATE condicional atômico: só flipa 'falha' -> 'pendente' se a linha ainda
+// estiver em 'falha' no exato momento do UPDATE — evita duplo-processamento em
+// caso de duas requisições de reenvio simultâneas para o mesmo
+// disparoContatoId (só uma delas consegue de fato mudar o status).
+async function reativarContatoParaReenvio(disparoContatoId) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.Int, disparoContatoId)
+    .query(`
+      UPDATE DisparoContatos
+      SET status = 'pendente', erro = NULL
+      WHERE id = @id AND status = 'falha'
+    `);
+  return result.rowsAffected[0] > 0;
+}
+
+// Releitura pós-processamento do reenvio manual, para a resposta de
+// PUT /disparos/contatos/:disparoContatoId/reenviar.
+async function findResultadoReenvio(disparoContatoId) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.Int, disparoContatoId)
+    .query(`
+      SELECT id, status, erro, mensagem_enviada, enviado_em
+      FROM DisparoContatos
+      WHERE id = @id
+    `);
+  const row = result.recordset[0];
+  if (!row) return null;
+  return {
+    disparoContatoId: row.id,
+    status: row.status,
+    erro: row.erro,
+    mensagemEnviada: row.mensagem_enviada,
+    enviadoEm: row.enviado_em,
+  };
 }
 
 async function marcarContatoEnviado({ disparoContatoId, templateUsadoId, mensagemEnviada, tipoMensagem }) {
@@ -355,7 +480,12 @@ module.exports = {
   verificarDisparo,
   criarDisparo,
   listContatosPendentesParaEnvio,
+  findItemParaProcessarPorId,
   marcarContatoFalha,
   marcarContatoEnviado,
   findDisparoDetalhe,
+  listContatosFalha,
+  findDisparoContatoById,
+  reativarContatoParaReenvio,
+  findResultadoReenvio,
 };

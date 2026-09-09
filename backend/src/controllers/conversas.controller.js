@@ -1,5 +1,6 @@
 const conversasService = require('../services/conversas.service');
 const mensagensEventsService = require('../services/mensagensEvents.service');
+const disparosEventsService = require('../services/disparosEvents.service');
 
 function isPositiveInteger(value) {
   return Number.isInteger(value) && value > 0;
@@ -267,12 +268,24 @@ function stream(req, res) {
     res.write(`data: ${JSON.stringify({ contatoId, numeroRemetenteId, baileysMessageId, status })}\n\n`);
   };
 
+  // Terceiro tipo de evento multiplexado no mesmo canal SSE, produzido por
+  // disparosEventsService (EventEmitter separado, escopado a Disparos — ver
+  // envioDisparos.worker.js: marcarFalhaEEmitir) em vez de
+  // mensagensEventsService — mesmo princípio de multiplexação já usado para
+  // 'status-atualizado' ao lado de 'nova-mensagem' no mesmo stream.
+  const onDisparoFalhou = ({ disparoContatoId, contatoNome } = {}) => {
+    res.write('event: disparo-falhou\n');
+    res.write(`data: ${JSON.stringify({ disparoContatoId, contatoNome })}\n\n`);
+  };
+
   mensagensEventsService.on('mensagem-recebida', onNovaMensagem);
   mensagensEventsService.on('mensagem-status-atualizada', onStatusAtualizado);
+  disparosEventsService.on('disparo-falhou', onDisparoFalhou);
 
   req.on('close', () => {
     mensagensEventsService.off('mensagem-recebida', onNovaMensagem);
     mensagensEventsService.off('mensagem-status-atualizada', onStatusAtualizado);
+    disparosEventsService.off('disparo-falhou', onDisparoFalhou);
     res.end();
   });
 }

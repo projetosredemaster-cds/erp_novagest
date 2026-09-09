@@ -2,6 +2,7 @@ const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const conversasService = require('../services/conversas.service');
 const mensagensEventsService = require('../services/mensagensEvents.service');
+const disparosEventsService = require('../services/disparosEvents.service');
 const app = require('../app');
 
 function tokenFor({ role = 'operador_cobranca', id = 1 } = {}) {
@@ -425,6 +426,7 @@ describe('GET /api/controle-ligacoes/conversas/stream', () => {
   afterEach(() => {
     mensagensEventsService.removeAllListeners('mensagem-recebida');
     mensagensEventsService.removeAllListeners('mensagem-status-atualizada');
+    disparosEventsService.removeAllListeners('disparo-falhou');
   });
 
   function conectarStream({ aoConectar, deveEncerrar } = {}) {
@@ -599,6 +601,65 @@ describe('GET /api/controle-ligacoes/conversas/stream', () => {
 
     expect(resultado.body).toBe(
       'event: status-atualizado\ndata: {"contatoId":1,"numeroRemetenteId":2,"baileysMessageId":"X","status":"lido"}\n\n'
+    );
+  });
+
+  it(
+    'registra o listener em "disparo-falhou" (disparosEventsService), repassa como ' +
+      '"event: disparo-falhou" e remove o listener ao fechar',
+    async () => {
+      expect(disparosEventsService.listenerCount('disparo-falhou')).toBe(0);
+      const onSpy = vi.spyOn(disparosEventsService, 'on');
+      const offSpy = vi.spyOn(disparosEventsService, 'off');
+
+      const resultado = await conectarStream({
+        aoConectar: () => {
+          expect(disparosEventsService.listenerCount('disparo-falhou')).toBeGreaterThanOrEqual(1);
+          expect(onSpy).toHaveBeenCalledWith('disparo-falhou', expect.any(Function));
+          disparosEventsService.emit('disparo-falhou', {
+            disparoContatoId: 42,
+            contatoNome: 'Maria Silva',
+          });
+        },
+        deveEncerrar: (body) => body.includes('\n\n'),
+      });
+
+      expect(resultado.body).toBe(
+        'event: disparo-falhou\ndata: {"disparoContatoId":42,"contatoNome":"Maria Silva"}\n\n'
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(offSpy).toHaveBeenCalledWith('disparo-falhou', expect.any(Function));
+      // Não usa onSpy.mock.calls[0]/offSpy.mock.calls[0] por índice fixo (diferente do
+      // teste equivalente de "mensagem-recebida" acima, que é o primeiro do describe):
+      // como este é um dos últimos testes do describe, uma conexão SSE de um teste
+      // anterior pode fechar tardiamente durante esta janela e gerar uma chamada extra
+      // a .off('disparo-falhou', ...) — buscamos o listener que ESTA conexão registrou
+      // (última chamada a .on) e confirmamos que ele está entre as chamadas de .off.
+      const nossoListener = onSpy.mock.calls
+        .filter(([evento]) => evento === 'disparo-falhou')
+        .at(-1)[1];
+      const listenersRemovidos = offSpy.mock.calls
+        .filter(([evento]) => evento === 'disparo-falhou')
+        .map(([, fn]) => fn);
+      expect(listenersRemovidos).toContain(nossoListener);
+      expect(disparosEventsService.listenerCount('disparo-falhou')).toBe(0);
+    }
+  );
+
+  it('não emite nada em "mensagem-recebida"/"status-atualizado" quando só "disparo-falhou" acontece', async () => {
+    const resultado = await conectarStream({
+      aoConectar: () => {
+        disparosEventsService.emit('disparo-falhou', {
+          disparoContatoId: 7,
+          contatoNome: 'João',
+        });
+      },
+      deveEncerrar: (body) => body.includes('\n\n'),
+    });
+
+    expect(resultado.body).toBe(
+      'event: disparo-falhou\ndata: {"disparoContatoId":7,"contatoNome":"João"}\n\n'
     );
   });
 });
