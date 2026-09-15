@@ -135,6 +135,70 @@ describe('GET /api/controle-ligacoes/estados/:estadoId/contatos-disponiveis', ()
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'Erro interno ao listar contatos disponíveis.' });
   });
+
+  it('200 — passthrough dos campos novos jaContatadoAlgumaVez/ultimoContatoEm (indicador persistente, sem corte de data)', async () => {
+    disparosModel.listContatosDisponiveis.mockResolvedValue([
+      // nunca contatado
+      {
+        id: 12,
+        nome: 'Pedro Lima',
+        telefone: '5598900000002',
+        disparadoUltimos3Dias: false,
+        jaContatadoAlgumaVez: false,
+        ultimoContatoEm: null,
+      },
+      // contatado há mais de 3 dias
+      {
+        id: 10,
+        nome: 'Maria Silva',
+        telefone: '5598900000000',
+        disparadoUltimos3Dias: false,
+        jaContatadoAlgumaVez: true,
+        ultimoContatoEm: '2026-08-30T14:12:05.000Z',
+      },
+      // contatado há menos de 3 dias (necessariamente também jaContatadoAlgumaVez=true)
+      {
+        id: 11,
+        nome: 'João Souza',
+        telefone: '5598900000001',
+        disparadoUltimos3Dias: true,
+        jaContatadoAlgumaVez: true,
+        ultimoContatoEm: '2026-09-14T10:00:00.000Z',
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/controle-ligacoes/estados/6/contatos-disponiveis')
+      .set('Authorization', `Bearer ${tokenFor()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      {
+        id: 12,
+        nome: 'Pedro Lima',
+        telefone: '5598900000002',
+        disparadoUltimos3Dias: false,
+        jaContatadoAlgumaVez: false,
+        ultimoContatoEm: null,
+      },
+      {
+        id: 10,
+        nome: 'Maria Silva',
+        telefone: '5598900000000',
+        disparadoUltimos3Dias: false,
+        jaContatadoAlgumaVez: true,
+        ultimoContatoEm: '2026-08-30T14:12:05.000Z',
+      },
+      {
+        id: 11,
+        nome: 'João Souza',
+        telefone: '5598900000001',
+        disparadoUltimos3Dias: true,
+        jaContatadoAlgumaVez: true,
+        ultimoContatoEm: '2026-09-14T10:00:00.000Z',
+      },
+    ]);
+  });
 });
 
 describe('POST /api/controle-ligacoes/disparos', () => {

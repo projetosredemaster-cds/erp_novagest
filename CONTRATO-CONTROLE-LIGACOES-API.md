@@ -824,10 +824,35 @@ erro — a query simplesmente não encontra `Contatos` com aquele
 #### Resposta de sucesso — `200 OK`
 ```json
 [
-  { "id": 10, "nome": "Maria Silva", "telefone": "5598900000000", "disparadoUltimos3Dias": true },
-  { "id": 11, "nome": "João Souza", "telefone": "5598900000001", "disparadoUltimos3Dias": false }
+  {
+    "id": 10,
+    "nome": "Maria Silva",
+    "telefone": "5598900000000",
+    "disparadoUltimos3Dias": true,
+    "jaContatadoAlgumaVez": true,
+    "ultimoContatoEm": "2026-08-30T14:12:05.000Z"
+  },
+  {
+    "id": 11,
+    "nome": "João Souza",
+    "telefone": "5598900000001",
+    "disparadoUltimos3Dias": false,
+    "jaContatadoAlgumaVez": false,
+    "ultimoContatoEm": null
+  }
 ]
 ```
+`jaContatadoAlgumaVez`/`ultimoContatoEm` são um indicador **persistente**,
+adicionado ao lado de `disparadoUltimos3Dias` (que continua existindo
+exatamente como antes, sem nenhuma mudança) — diferente dele, os dois campos
+novos não têm corte de data nenhum: consideram todo `Disparo` já criado para
+aquele contato, de qualquer época. `jaContatadoAlgumaVez` é `true` se o
+contato aparece em `DisparoContatos` de qualquer `Disparo` histórico;
+`ultimoContatoEm` é a data (`Disparos.criado_em`, ISO 8601 UTC) do disparo
+mais recente entre todos, ou `null` se o contato nunca foi disparado. Os
+dois são só informativos — `POST /disparos`/`POST /disparos/verificar`
+continuam usando exclusivamente `disparadoUltimos3Dias` (via
+`validarNumeroEContatos`), sem nenhuma relação com os campos novos.
 
 #### Erros
 `400`/`500` (`{ "error": "Erro interno ao listar contatos disponíveis." }`)

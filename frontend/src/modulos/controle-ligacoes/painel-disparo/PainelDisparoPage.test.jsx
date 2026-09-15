@@ -35,8 +35,15 @@ function resumoMaranhao({ totalContatos = 2, numerosAtivos } = {}) {
   };
 }
 
-function contato({ id, nome, telefone, disparadoUltimos3Dias = false }) {
-  return { id, nome, telefone, disparadoUltimos3Dias };
+function contato({
+  id,
+  nome,
+  telefone,
+  disparadoUltimos3Dias = false,
+  jaContatadoAlgumaVez = false,
+  ultimoContatoEm = null,
+}) {
+  return { id, nome, telefone, disparadoUltimos3Dias, jaContatadoAlgumaVez, ultimoContatoEm };
 }
 
 function mockCargaBasica({ painel, contatos } = {}) {
@@ -117,6 +124,76 @@ describe('PainelDisparoPage — card de estado', () => {
     expect(screen.getByText('Maria Silva')).toBeInTheDocument();
     expect(screen.getByText('João Souza')).toBeInTheDocument();
     expect(screen.getByText('Contatado há menos de 3 dias')).toBeInTheDocument();
+  });
+
+  it('contato nunca contatado (jaContatadoAlgumaVez=false): nenhum badge de "já contatado" aparece', async () => {
+    mockCargaBasica({
+      contatos: [
+        contato({
+          id: 10,
+          nome: 'Maria Silva',
+          telefone: '5598900000000',
+          disparadoUltimos3Dias: false,
+          jaContatadoAlgumaVez: false,
+          ultimoContatoEm: null,
+        }),
+      ],
+    });
+
+    await renderPage();
+
+    expect(screen.getByText('Maria Silva')).toBeInTheDocument();
+    expect(screen.queryByText('Contatado há menos de 3 dias')).not.toBeInTheDocument();
+    expect(screen.queryByText('Já contatado antes')).not.toBeInTheDocument();
+  });
+
+  it('contato já contatado há mais de 3 dias: mostra só o badge cinza "Já contatado antes", com a data formatada no title', async () => {
+    const ultimoContatoEm = '2026-08-30T14:12:05.000Z';
+    mockCargaBasica({
+      contatos: [
+        contato({
+          id: 10,
+          nome: 'Maria Silva',
+          telefone: '5598900000000',
+          disparadoUltimos3Dias: false,
+          jaContatadoAlgumaVez: true,
+          ultimoContatoEm,
+        }),
+      ],
+    });
+
+    await renderPage();
+
+    const dataFormatada = new Date(ultimoContatoEm).toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+
+    expect(screen.queryByText('Contatado há menos de 3 dias')).not.toBeInTheDocument();
+    const badge = screen.getByText('Já contatado antes');
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveAttribute('title', `Último contato em ${dataFormatada}`);
+  });
+
+  it('contato contatado há menos de 3 dias (jaContatadoAlgumaVez também true): mostra só o badge laranja, nunca os dois juntos', async () => {
+    mockCargaBasica({
+      contatos: [
+        contato({
+          id: 10,
+          nome: 'Maria Silva',
+          telefone: '5598900000000',
+          disparadoUltimos3Dias: true,
+          jaContatadoAlgumaVez: true,
+          ultimoContatoEm: '2026-09-14T10:00:00.000Z',
+        }),
+      ],
+    });
+
+    await renderPage();
+
+    expect(screen.getByText('Contatado há menos de 3 dias')).toBeInTheDocument();
+    expect(screen.queryByText('Já contatado antes')).not.toBeInTheDocument();
   });
 
   it('vazio: nenhum contato disponível mostra mensagem, não card quebrado', async () => {

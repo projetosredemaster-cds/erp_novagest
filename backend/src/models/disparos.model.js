@@ -60,6 +60,25 @@ async function listPainelDisparo() {
 }
 
 
+// Indicador persistente (sem corte de data, histórico completo) — diferente
+// de SQL_DISPARADO_ULTIMOS_3_DIAS, que só olha os últimos 3 dias e continua
+// intocado. Usado só por listContatosDisponiveis (GET
+// /estados/:estadoId/contatos-disponiveis); validarNumeroEContatos (que
+// alimenta POST /disparos e POST /disparos/verificar) não usa isto.
+const SQL_JA_CONTATADO_ALGUMA_VEZ = `CASE WHEN EXISTS (
+        SELECT 1
+        FROM DisparoContatos dc
+        JOIN Disparos d ON d.id = dc.disparo_id
+        WHERE dc.contato_id = c.id
+      ) THEN 1 ELSE 0 END`;
+
+const SQL_ULTIMO_CONTATO_EM = `(
+        SELECT MAX(d.criado_em)
+        FROM DisparoContatos dc
+        JOIN Disparos d ON d.id = dc.disparo_id
+        WHERE dc.contato_id = c.id
+      )`;
+
 async function listContatosDisponiveis(estadoId, { busca, ordem } = {}) {
   const pool = await getPool();
   const request = pool.request();
@@ -78,7 +97,9 @@ async function listContatosDisponiveis(estadoId, { busca, ordem } = {}) {
       c.id,
       c.nome,
       c.telefone,
-      ${SQL_DISPARADO_ULTIMOS_3_DIAS} AS disparado_ultimos_3_dias
+      ${SQL_DISPARADO_ULTIMOS_3_DIAS} AS disparado_ultimos_3_dias,
+      ${SQL_JA_CONTATADO_ALGUMA_VEZ} AS ja_contatado_alguma_vez,
+      ${SQL_ULTIMO_CONTATO_EM} AS ultimo_contato_em
     FROM Contatos c
     WHERE c.estado_id = @estadoId
     ${whereBusca}
@@ -90,6 +111,8 @@ async function listContatosDisponiveis(estadoId, { busca, ordem } = {}) {
     nome: row.nome,
     telefone: row.telefone,
     disparadoUltimos3Dias: Boolean(row.disparado_ultimos_3_dias),
+    jaContatadoAlgumaVez: Boolean(row.ja_contatado_alguma_vez),
+    ultimoContatoEm: row.ultimo_contato_em ? row.ultimo_contato_em.toISOString() : null,
   }));
 }
 

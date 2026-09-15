@@ -48,6 +48,26 @@ function AvisoContatadoBadge() {
   );
 }
 
+function formatDataCurta(iso) {
+  if (!iso) return null;
+  const data = new Date(iso);
+  if (Number.isNaN(data.getTime())) return null;
+  return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function JaContatadoBadge({ ultimoContatoEm }) {
+  const dataFormatada = formatDataCurta(ultimoContatoEm);
+  const title = dataFormatada ? `Último contato em ${dataFormatada}` : undefined;
+  return (
+    <span
+      title={title}
+      className="w-fit shrink-0 rounded-full border border-[var(--pd-border)] bg-[var(--pd-surface-alt)] px-2 py-0.5 text-[10.5px] font-semibold text-[var(--pd-text-secondary)]"
+    >
+      Já contatado antes
+    </span>
+  );
+}
+
 function AvisosModal({ avisos, confirmando, erro, onCancelar, onConfirmar }) {
   return (
     <div
@@ -499,7 +519,11 @@ function EstadoDisparoCard({ token, resumo, onFlash, numerosDetalhes }) {
                   <div className="truncate text-[13.5px] font-semibold text-[var(--pd-text-primary)]">{c.nome}</div>
                   <div className="text-[12px] text-[var(--pd-text-secondary)]">{c.telefone}</div>
                 </label>
-                {c.disparadoUltimos3Dias ? <AvisoContatadoBadge /> : null}
+                {c.disparadoUltimos3Dias ? (
+                  <AvisoContatadoBadge />
+                ) : c.jaContatadoAlgumaVez ? (
+                  <JaContatadoBadge ultimoContatoEm={c.ultimoContatoEm} />
+                ) : null}
               </li>
             ))}
           </ul>

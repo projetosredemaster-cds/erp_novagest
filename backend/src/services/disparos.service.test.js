@@ -83,6 +83,32 @@ describe('disparos.service.listarContatosDisponiveis', () => {
       ordem: 'nome_asc',
     });
   });
+
+  it('devolve o resultado do model sem descartar os campos jaContatadoAlgumaVez/ultimoContatoEm (passthrough)', async () => {
+    disparosModel.listContatosDisponiveis.mockResolvedValue([
+      {
+        id: 10,
+        nome: 'Maria Silva',
+        telefone: '5598900000000',
+        disparadoUltimos3Dias: false,
+        jaContatadoAlgumaVez: true,
+        ultimoContatoEm: '2026-08-30T14:12:05.000Z',
+      },
+    ]);
+
+    const resultado = await disparosService.listarContatosDisponiveis(6, {});
+
+    expect(resultado).toEqual([
+      {
+        id: 10,
+        nome: 'Maria Silva',
+        telefone: '5598900000000',
+        disparadoUltimos3Dias: false,
+        jaContatadoAlgumaVez: true,
+        ultimoContatoEm: '2026-08-30T14:12:05.000Z',
+      },
+    ]);
+  });
 });
 
 describe('disparos.service.verificarDisparo', () => {
