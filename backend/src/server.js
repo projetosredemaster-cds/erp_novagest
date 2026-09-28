@@ -10,8 +10,13 @@ app.listen(PORT, () => {
   console.log(`[server] API do erp_Novagest rodando na porta ${PORT}`);
 });
 
-reconciliarSessoesNoBoot().catch((err) => {
-  console.error('[server] falha inesperada na reconciliação de sessões Baileys no boot:', err);
-});
+// Default ativo quando ausente — só desliga com o valor literal 'false'.
+if (process.env.CONTROLE_LIGACOES_ATIVO !== 'false') {
+  reconciliarSessoesNoBoot().catch((err) => {
+    console.error('[server] falha inesperada na reconciliação de sessões Baileys no boot:', err);
+  });
 
-iniciarWorkerEnvioDisparos();
+  iniciarWorkerEnvioDisparos();
+} else {
+  console.log('[server] CONTROLE_LIGACOES_ATIVO=false — reconciliação de sessões Baileys e worker de envio de disparos NÃO foram iniciados.');
+}
